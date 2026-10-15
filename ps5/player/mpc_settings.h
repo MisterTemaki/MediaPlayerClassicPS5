@@ -78,6 +78,11 @@ struct Settings
 	// Audio
 	int audio_boost = 0; // percent, Options > Audio Switcher "Boost"
 	int audio_delay_ms = 0;
+	int audio_output = 0; // 0 stereo (5.1/7.1 mixed down), 1 surround: the console's 8-channel output
+	// Output (video)
+	bool hw_decoding = true; // H.264 / HEVC on the console's video decoder (mpc_vdec.h)
+	int hdr_tonemap = 1;     // HDR10 / HLG on an SDR picture: 0 off (as it comes), 1 BT.2390, 2 Hable, 3 Reinhard
+	int hdr_peak = 250;      // the picture's white after tone mapping, in nits (100..400)
 	// Subtitles (Default Style)
 	int sub_font_size = 18; // points at the video's height of 1080 / 1.5 (MPC-HC's default text style: Arial 18)
 	bool sub_bold = true;

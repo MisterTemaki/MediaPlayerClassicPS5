@@ -28,6 +28,8 @@ namespace
 struct State
 {
 	int handle = -1;
+	int handle8 = -1;            // the 8-channel port (S16, L R C LFE Ls Rs Lb Rb), opened on first use
+	std::atomic<int> channels{2}; // what the ring holds: 2 or 8
 	std::thread thread;
 	std::atomic<bool> quit{false};
 	alignas(64) std::atomic<uint32_t> head{0}; // written by the producer (frames, wraps)
@@ -37,14 +39,14 @@ struct State
 	std::atomic<bool> paused{false};
 	std::atomic<uint32_t> clear_req{0}, clear_ack{0};
 	std::atomic<int> gain{65536}; // 16.16
-	int16_t ring[kCapacity * 2];
+	int16_t ring[kCapacity * 8]; // 8 slots per frame; stereo uses the first two
 };
 State* g = nullptr;
 
 void Run()
 {
 	void* alt = crashlog::ArmThread(); // a crash here is reported too
-	alignas(64) int16_t grain[kGrain * 2];
+	alignas(64) int16_t grain[kGrain * 8];
 	while (!g->quit.load(std::memory_order_relaxed))
 	{
 		const uint32_t req = g->clear_req.load(std::memory_order_acquire);
@@ -56,6 +58,7 @@ void Run()
 		const uint32_t tail = g->tail.load(std::memory_order_relaxed);
 		const uint32_t head = g->head.load(std::memory_order_acquire);
 		const uint32_t avail = head - tail;
+		const int ch = g->channels.load(std::memory_order_acquire) == 8 && g->handle8 > 0 ? 8 : 2;
 		if (g->paused.load(std::memory_order_relaxed))
 			memset(grain, 0, sizeof(grain));
 		else if (avail >= uint32_t(kGrain))
@@ -63,17 +66,10 @@ void Run()
 			const int gain = g->gain.load(std::memory_order_relaxed);
 			for (int i = 0; i < kGrain; i++)
 			{
-				const uint32_t pos = (tail + i) % kCapacity;
-				if (gain == 65536)
-				{
-					grain[i * 2] = g->ring[pos * 2];
-					grain[i * 2 + 1] = g->ring[pos * 2 + 1];
-				}
-				else
-				{
-					grain[i * 2] = int16_t((int32_t(g->ring[pos * 2]) * gain) >> 16);
-					grain[i * 2 + 1] = int16_t((int32_t(g->ring[pos * 2 + 1]) * gain) >> 16);
-				}
+				const int16_t* src = &g->ring[((tail + i) % kCapacity) * 8];
+				int16_t* dst = &grain[i * ch];
+				for (int c = 0; c < ch; c++)
+					dst[c] = gain == 65536 ? src[c] : int16_t((int32_t(src[c]) * gain) >> 16);
 			}
 			g->tail.store(tail + kGrain, std::memory_order_release);
 			g->played.fetch_add(kGrain, std::memory_order_relaxed);
@@ -83,7 +79,7 @@ void Run()
 			memset(grain, 0, sizeof(grain));
 			g->underruns.fetch_add(1, std::memory_order_relaxed);
 		}
-		if (sceAudioOutOutput(g->handle, grain) < 0)
+		if (sceAudioOutOutput(ch == 8 ? g->handle8 : g->handle, grain) < 0)
 			usleep(kGrain * 1000000 / kRate); // an error returns at once: don't drain the ring at CPU speed
 	}
 	crashlog::DisarmThread(alt);
@@ -120,6 +116,8 @@ void Shutdown()
 	if (g->thread.joinable())
 		g->thread.join();
 	sceAudioOutClose(g->handle);
+	if (g->handle8 > 0)
+		sceAudioOutClose(g->handle8);
 	OrbisLog("[audio] closed, %llu underruns", (unsigned long long)g->underruns.load());
 	delete g;
 	g = nullptr;
@@ -137,7 +135,7 @@ int Queued()
 	return kCapacity - Free();
 }
 
-int Push(const int16_t* stereo, int frames)
+int Push(const int16_t* samples, int frames, int channels)
 {
 	if (!g || frames <= 0)
 		return 0;
@@ -145,12 +143,47 @@ int Push(const int16_t* stereo, int frames)
 	const uint32_t head = g->head.load(std::memory_order_relaxed);
 	for (int i = 0; i < n; i++)
 	{
-		const uint32_t pos = (head + i) % kCapacity;
-		g->ring[pos * 2] = stereo[i * 2];
-		g->ring[pos * 2 + 1] = stereo[i * 2 + 1];
+		int16_t* d = &g->ring[((head + i) % kCapacity) * 8];
+		const int16_t* s = samples + size_t(i) * channels;
+		for (int c = 0; c < 8; c++)
+			d[c] = c < channels ? s[c] : 0;
 	}
 	g->head.store(head + n, std::memory_order_release);
 	return n;
+}
+
+bool SetChannels(int channels)
+{
+	if (!g)
+		return false;
+	const int want = channels > 2 ? 8 : 2;
+	if (want == 8 && g->handle8 <= 0)
+	{
+		static bool tried = false;
+		if (!tried)
+		{
+			tried = true;
+			const int h = sceAudioOutOpen(SCE_USER_SERVICE_USER_ID_SYSTEM, SCE_AUDIO_OUT_PORT_TYPE_MAIN, 0, kGrain, kRate,
+				SCE_AUDIO_OUT_PARAM_FORMAT_S16_8CH);
+			OrbisLog("[audio] sceAudioOutOpen(48 kHz, S16 8 channels, %d) -> %d", kGrain, h);
+			if (h > 0)
+				g->handle8 = h;
+		}
+		if (g->handle8 <= 0)
+			return false;
+	}
+	if (g->channels.load() != want)
+	{
+		Clear();
+		g->channels.store(want, std::memory_order_release);
+		OrbisLog("[audio] %s output", want == 8 ? "8-channel" : "stereo");
+	}
+	return true;
+}
+
+int Channels()
+{
+	return g ? g->channels.load() : 2;
 }
 
 uint64_t Underruns()

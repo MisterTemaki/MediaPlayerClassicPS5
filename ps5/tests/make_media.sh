@@ -66,6 +66,42 @@ $FF -f lavfi -i color=c=magenta:size=640x360:rate=25 -t 3 -c:v libx265 -preset u
 	-x265-params log-level=error "$D/hevc10.mkv"
 # av1.mkv: AV1 (dav1d decodes it), yellow, 3 s
 $FF -f lavfi -i color=c=yellow:size=640x360:rate=25 -t 3 -c:v libsvtav1 -preset 12 -pix_fmt yuv420p "$D/av1.mkv" 2>/dev/null
+# hdr_pq.mkv: HEVC Main 10, HDR10 (BT.2020, PQ, mastering 1000 nits): the left half grey at 100 nits, the right half
+# at 1000 nits; hdr_hlg.mkv: the same with HLG, grey at signal 0.5 (mpc_tonemap.h)
+python3 - "$D" <<'PY'
+import struct, sys
+d = sys.argv[1]
+def pq(n):
+    m1, m2, c1, c2, c3 = 0.1593017578125, 78.84375, 0.8359375, 18.8515625, 18.6875
+    y = (n / 10000.0) ** m1
+    return ((c1 + c2 * y) / (1 + c3 * y)) ** m2
+w, h = 640, 360
+def frames(path, left, right):
+    yl, yr = round(64 + 876 * left), round(64 + 876 * right)
+    row = struct.pack('<%dH' % w, *([yl] * (w // 2) + [yr] * (w // 2)))
+    chroma = struct.pack('<%dH' % (w // 2), *([512] * (w // 2)))
+    with open(path, 'wb') as f:
+        for _ in range(50):
+            f.write(row * h)
+            f.write(chroma * (h // 2) * 2)
+frames(d + '/pq.yuv', pq(100), pq(1000))
+frames(d + '/hlg.yuv', 0.5, 0.75)
+PY
+$FF -f rawvideo -pix_fmt yuv420p10le -s 640x360 -r 25 -i "$D/pq.yuv" -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le \
+	-x265-params "log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited:hdr10=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400" \
+	-color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc "$D/hdr_pq.mkv"
+$FF -f rawvideo -pix_fmt yuv420p10le -s 640x360 -r 25 -i "$D/hlg.yuv" -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le \
+	-x265-params "log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:range=limited" \
+	-color_primaries bt2020 -color_trc arib-std-b67 -colorspace bt2020nc "$D/hdr_hlg.mkv"
+rm -f "$D/pq.yuv" "$D/hlg.yuv"
+# surround51.mkv: 5.1 AC-3, a 1 kHz tone in the centre channel only, 4 s (black picture)
+$FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i sine=frequency=1000:sample_rate=48000 -t 4 \
+	-filter_complex "[1:a]pan=5.1|FC=c0[a]" -map 0:v -map "[a]" -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+	-c:a ac3 -b:a 384k -shortest "$D/surround51.mkv"
+# surround71.mkv: 7.1 PCM, a 500 Hz tone in the left side channel only, 4 s
+$FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i sine=frequency=500:sample_rate=48000 -t 4 \
+	-filter_complex "[1:a]pan=7.1|SL=c0[a]" -map 0:v -map "[a]" -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+	-c:a pcm_s16le -shortest "$D/surround71.mkv"
 # a playlist of two files
 printf '#EXTM3U\nred.mp4\nchapters.mkv\n' >"$D/list.m3u"
 echo "media in $D"

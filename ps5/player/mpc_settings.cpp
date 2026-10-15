@@ -148,6 +148,14 @@ void Settings::Load()
 			audio_boost = Clamp(n, 0, 300);
 		else if (k == "AudioDelay")
 			audio_delay_ms = Clamp(n, -10000, 10000);
+		else if (k == "AudioOutput")
+			audio_output = Clamp(n, 0, 1);
+		else if (k == "HardwareDecoding")
+			hw_decoding = b;
+		else if (k == "HdrToneMapping")
+			hdr_tonemap = Clamp(n, 0, 3);
+		else if (k == "HdrPeak")
+			hdr_peak = Clamp(n, 100, 400);
 		else if (k == "SubFontSize")
 			sub_font_size = Clamp(n, 8, 72);
 		else if (k == "SubBold")
@@ -208,7 +216,9 @@ void Settings::Save() const
 		show_caption_menu, fullscreen, hide_controls_fullscreen, int(video_frame), aspect_ratio);
 	fprintf(f, "Volume=%d\nMute=%d\nLoop=%d\nAfterPlayback=%d\nJumpDistS=%d\nJumpDistM=%d\nJumpDistL=%d\n", volume, mute,
 		repeat, int(after_playback), jump_small, jump_medium, jump_large);
-	fprintf(f, "AutoloadSubtitles=%d\nAudioBoost=%d\nAudioDelay=%d\n", auto_load_subtitles, audio_boost, audio_delay_ms);
+	fprintf(f, "AutoloadSubtitles=%d\nAudioBoost=%d\nAudioDelay=%d\nAudioOutput=%d\n", auto_load_subtitles, audio_boost,
+		audio_delay_ms, audio_output);
+	fprintf(f, "HardwareDecoding=%d\nHdrToneMapping=%d\nHdrPeak=%d\n", hw_decoding, hdr_tonemap, hdr_peak);
 	fprintf(f, "SubFontSize=%d\nSubBold=%d\nSubOutline=%d\nSubMargin=%d\nSubPosition=%d\nSubDelay=%d\n", sub_font_size,
 		sub_bold, sub_outline, sub_margin, sub_position, sub_delay_ms);
 	fprintf(f, "Dpi=%d\nCursorSpeed=%d\nLastDir=%s\n", dpi, cursor_speed, Escape(last_dir).c_str());

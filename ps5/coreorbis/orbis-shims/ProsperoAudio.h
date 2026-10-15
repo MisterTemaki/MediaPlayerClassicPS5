@@ -15,8 +15,14 @@ constexpr int kCapacity = 16384; // ring size in frames (~340 ms; the frontend k
 bool Init();
 void Shutdown();
 
-// Producer side (the emulation thread). Frames that don't fit are dropped. Returns frames written.
-int Push(const int16_t* stereo, int frames);
+// Producer side (the player's audio thread). Frames that don't fit are dropped. Returns frames written.
+// channels: 2 (L R), 6 (L R C LFE Ls Rs) or 8 (L R C LFE Ls Rs Lb Rb, the console's order); 6 and 8 go to the
+// console's 8-channel port (SetChannels first).
+int Push(const int16_t* samples, int frames, int channels = 2);
+// What the ring holds from now on: 2 (the stereo port) or 8 (the 8-channel port, opened the first time; the system
+// mixes it down for a stereo TV). Drops what is queued when it changes. False when the 8-channel port won't open.
+bool SetChannels(int channels);
+int Channels();
 int Free(); // frames that fit right now
 int Queued(); // frames waiting to be played
 // Underruns since the start (the audio thread played silence because the ring was empty).

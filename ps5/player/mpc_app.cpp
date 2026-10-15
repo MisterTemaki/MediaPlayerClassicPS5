@@ -13,6 +13,7 @@
 #include "mpc_gdi.h"
 #include "mpc_menu.h"
 #include "mpc_player.h"
+#include "mpc_vdec.h"
 #include "mpc_res.h"
 #include "mpc_settings.h"
 #include "mpc_ui.h"
@@ -720,6 +721,7 @@ std::vector<std::pair<std::string, std::string>> MainFrame::StatsRows() const
 		rows.push_back({"Frames", b});
 		snprintf(b, sizeof(b), "decode %.1f ms, scale %.1f ms", st.decode_ms, st.convert_ms);
 		rows.push_back({"Timing", b});
+		rows.push_back({"Decoder", st.hw_decoding ? "PS5 video decoder (hardware)" : "FFmpeg (software)"});
 	}
 	snprintf(b, sizeof(b), "%lld kb/s", (long long)(st.bitrate / 1000));
 	rows.push_back({"Bitrate", b});
@@ -1608,6 +1610,10 @@ void MainFrame::ApplyAudio()
 	player_.SetVolume(s_.volume);
 	player_.SetMute(s_.mute);
 	player_.SetAmplify(1.0 + s_.audio_boost / 100.0);
+	// Options > Output: the next file opened uses the console's decoder or not; the rest applies at once
+	hwdec::SetEnabled(s_.hw_decoding);
+	player_.SetToneMapping(s_.hdr_tonemap, s_.hdr_peak);
+	player_.SetSurround(s_.audio_output == 1);
 }
 
 void MainFrame::Seek(double t)
@@ -2744,11 +2750,11 @@ int MainFrame::Run(const std::string& first)
 				{
 					const PlayerStats ps = player_.Stats();
 					OrbisLog("[test] state %d pos %.2f dur %.2f video %d audio %d sub %d picture %d queued %d shown %.1f dropped %llu "
-							 "decode %.1f scale %.1f underruns %llu",
+							 "decode %.1f scale %.1f underruns %llu hw %d",
 						int(player_.State()), player_.Position(), player_.Duration(), player_.CurrentTrack(TrackType::Video),
 						player_.CurrentTrack(TrackType::Audio), player_.CurrentTrack(TrackType::Subtitle), int(player_.HasPicture()),
 						ps.queued_video, ps.shown_fps, (unsigned long long)ps.dropped, ps.decode_ms, ps.convert_ms,
-						(unsigned long long)ps.underruns);
+						(unsigned long long)ps.underruns, int(ps.hw_decoding));
 				}
 			}
 		std::vector<InputEvent> events;

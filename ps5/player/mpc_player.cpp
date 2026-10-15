@@ -6,6 +6,8 @@
 
 #include "mpc_res.h"
 #include "mpc_smb.h"
+#include "mpc_tonemap.h"
+#include "mpc_vdec.h"
 
 #include "OrbisPaths.h"
 #include "ProsperoAudio.h"
@@ -421,6 +423,12 @@ struct Player::Impl
 	std::atomic<int> vstream{-1}, astream{-1}, sstream{-1}; // sstream: -1 off, or a stream index / 1000+n
 	std::atomic<bool> a_stop{false}; // the audio thread is asked to end (a track change)
 	int ctx_w = 0, ctx_h = 0, ctx_sw = 0, ctx_sh = 0, ctx_fmt = -1; // the scaler's sizes
+	bool ctx_hdr = false;                                            // the scaler makes 16-bit R'G'B' for tone mapping
+	// HDR on the SDR picture (mpc_tonemap.h): Options > Output
+	std::atomic<int> tm_mode{tonemap::Bt2390};
+	std::atomic<int> tm_white{250};
+	std::vector<uint16_t> hdr_buf;
+	std::atomic<int> hdr_shown{0}; // 0 SDR, 1 PQ, 2 HLG: what the last picture was
 
 	bool Seekable_() const
 	{
@@ -428,6 +436,9 @@ struct Player::Impl
 		return (s == PlayState::Playing || s == PlayState::Paused || s == PlayState::Stopped) && seekable;
 	}
 	AVCodecContext* vdec = nullptr;
+	// the console's video decoder (mpc_vdec.h) for H.264 / HEVC; vdec (FFmpeg) when it can't or gives up
+	hwdec::Decoder* hw = nullptr;
+	std::atomic<bool> hw_active{false};
 	AVCodecContext* adec = nullptr;
 	std::map<int, AVCodecContext*> sdecs;
 	std::vector<int> sub_streams;
@@ -484,6 +495,10 @@ struct Player::Impl
 	int ag_rate = 0, ag_fmt = -1;
 	AVChannelLayout ag_layout = {};
 	double ag_tempo = 1.0;
+	bool ag_surround = false;
+	int ag_out_ch = 2; // what the graph gives: 2, 6 (5.1, sides) or 8 (7.1, FFmpeg's order)
+	std::atomic<bool> surround{false};
+	std::vector<int16_t> remap;
 	std::atomic<int> volume{100};
 	std::atomic<bool> mute{false};
 	std::atomic<double> amplify{1.0};
@@ -630,6 +645,13 @@ struct Player::Impl
 		const int a = av_find_best_stream(ic, AVMEDIA_TYPE_AUDIO, -1, v, nullptr, 0);
 		if (v >= 0)
 			vdec = OpenDecoder(v, true);
+		if (vdec)
+		{
+			std::string why;
+			hw = hwdec::Open(ic->streams[v]->codecpar, &why);
+			hw_active = hw != nullptr;
+			OrbisLog("[player] video decoder: %s", hw ? hwdec::Describe(hw).c_str() : ("FFmpeg (" + why + ")").c_str());
+		}
 		if (a >= 0)
 			adec = OpenDecoder(a, false);
 		{
@@ -977,6 +999,25 @@ struct Player::Impl
 	{
 		AVFrame* frame = av_frame_alloc();
 		int dec_serial = -1;
+		bool sw_wait_key = false; // the video came back to FFmpeg mid-stream: from the next keyframe
+		auto send = [&](const AVPacket* pkt) -> int {
+			if (hw)
+				return hwdec::Send(hw, pkt);
+			if (pkt && sw_wait_key)
+			{
+				if (!(pkt->flags & AV_PKT_FLAG_KEY))
+					return 0;
+				sw_wait_key = false;
+			}
+			return avcodec_send_packet(vdec, pkt);
+		};
+		auto receive = [&](AVFrame* f) -> int { return hw ? hwdec::Receive(hw, f) : avcodec_receive_frame(vdec, f); };
+		auto flush = [&] {
+			if (hw)
+				hwdec::Flush(hw);
+			else
+				avcodec_flush_buffers(vdec);
+		};
 		while (!quit)
 		{
 			QPacket qp;
@@ -992,23 +1033,42 @@ struct Player::Impl
 			}
 			if (qp.serial != dec_serial)
 			{
-				avcodec_flush_buffers(vdec);
+				flush();
 				if (vgraph)
 					avfilter_graph_free(&vgraph), vg_fmt = -1;
 				dec_serial = qp.serial;
 			}
 			const double t0 = NowS();
-			int sr = avcodec_send_packet(vdec, qp.pkt); // nullptr: drain
+			int sr = send(qp.pkt); // nullptr: drain
+			if (hw && hwdec::Failed(hw))
+			{
+				// the console's decoder gave up: FFmpeg from here, starting at a keyframe
+				OrbisLog("[player] video decoder: FFmpeg from now on");
+				AVFrame* left = av_frame_alloc();
+				while (hwdec::Receive(hw, left) == 0)
+				{
+					AVFrame* copy = av_frame_alloc();
+					av_frame_move_ref(copy, left);
+					QueueFrame(copy, dec_serial);
+				}
+				av_frame_free(&left);
+				hwdec::Close(hw);
+				hw = nullptr;
+				hw_active = false;
+				avcodec_flush_buffers(vdec);
+				sw_wait_key = true;
+				sr = send(qp.pkt);
+			}
 			av_packet_free(&qp.pkt);
 			if (sr < 0 && sr != AVERROR(EAGAIN) && sr != AVERROR_EOF)
 				continue;
 			for (;;)
 			{
-				const int rr = avcodec_receive_frame(vdec, frame);
+				const int rr = receive(frame);
 				if (rr == AVERROR_EOF)
 				{
 					vdone_serial = dec_serial;
-					avcodec_flush_buffers(vdec);
+					flush();
 					break;
 				}
 				if (rr < 0)
@@ -1041,9 +1101,16 @@ struct Player::Impl
 	// ---------------------------------------------------------------------------------------------
 	bool SetupAudioGraph(const AVFrame* f, double tempo)
 	{
-		if (agraph && ag_rate == f->sample_rate && ag_fmt == f->format && ag_tempo == tempo &&
+		const bool surr = surround.load();
+		if (agraph && ag_rate == f->sample_rate && ag_fmt == f->format && ag_tempo == tempo && ag_surround == surr &&
 			av_channel_layout_compare(&ag_layout, &f->ch_layout) == 0)
 			return true;
+		// Surround on and a multichannel track: 5.1 or 7.1 to the console's 8-channel output; else stereo
+		int out_ch = surr && f->ch_layout.nb_channels > 2 ? (f->ch_layout.nb_channels > 6 ? 8 : 6) : 2;
+		if (out_ch > 2 && !ps5audio::SetChannels(8))
+			out_ch = 2;
+		if (out_ch == 2)
+			ps5audio::SetChannels(2);
 		avfilter_graph_free(&agraph);
 		agraph = avfilter_graph_alloc();
 		char layout[128] = "stereo";
@@ -1078,7 +1145,10 @@ struct Player::Impl
 		ok = ok &&
 			 avfilter_graph_create_filter(&rs, avfilter_get_by_name("aresample"), "rs", "48000", nullptr, agraph) >= 0 &&
 			 avfilter_graph_create_filter(&fmt, avfilter_get_by_name("aformat"), "fmt",
-				 "sample_fmts=s16:sample_rates=48000:channel_layouts=stereo", nullptr, agraph) >= 0 &&
+					 out_ch == 8 ? "sample_fmts=s16:sample_rates=48000:channel_layouts=7.1"
+					 : out_ch == 6 ? "sample_fmts=s16:sample_rates=48000:channel_layouts=5.1(side)"
+								   : "sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
+					 nullptr, agraph) >= 0 &&
 			 avfilter_link(last, 0, rs, 0) >= 0 && avfilter_link(rs, 0, fmt, 0) >= 0 &&
 			 avfilter_link(fmt, 0, asink, 0) >= 0 && avfilter_graph_config(agraph, nullptr) >= 0;
 		if (!ok)
@@ -1091,6 +1161,11 @@ struct Player::Impl
 		av_channel_layout_uninit(&ag_layout);
 		av_channel_layout_copy(&ag_layout, &f->ch_layout);
 		ag_tempo = tempo;
+		ag_surround = surr;
+		if (out_ch != ag_out_ch)
+			OrbisLog("[player] sound: %d channels -> %s", f->ch_layout.nb_channels,
+				out_ch == 8 ? "7.1 (8-channel output)" : out_ch == 6 ? "5.1 (8-channel output)" : "stereo");
+		ag_out_ch = out_ch;
 		return true;
 	}
 
@@ -1102,15 +1177,28 @@ struct Player::Impl
 		return v * v * amplify; // CPlayerToolBar::GetVolume: 40 dB over the slider, log10 -> (v/100)^2
 	}
 
-	// pushes s16 stereo, waiting for room; false when the serial changed or the player stops
+	// pushes s16 (ag_out_ch channels), waiting for room; false when the serial changed or the player stops
 	bool PushAudio(const int16_t* s, int n, int my_serial, double end_pts)
 	{
+		int ch = ag_out_ch;
+		if (ch == 8)
+		{
+			// FFmpeg's 7.1 (FL FR FC LFE BL BR SL SR) -> the console's (L R C LFE Ls Rs Lb Rb)
+			remap.resize(size_t(n) * 8);
+			for (int i = 0; i < n; i++)
+			{
+				const int16_t* a = s + size_t(i) * 8;
+				int16_t* b = &remap[size_t(i) * 8];
+				b[0] = a[0], b[1] = a[1], b[2] = a[2], b[3] = a[3], b[4] = a[6], b[5] = a[7], b[6] = a[4], b[7] = a[5];
+			}
+			s = remap.data();
+		}
 		while (n > 0)
 		{
 			if (quit || a_stop || serial != my_serial)
 				return false;
-			const int w = ps5audio::Push(s, n);
-			s += w * 2;
+			const int w = ps5audio::Push(s, n, ch);
+			s += size_t(w) * ch;
 			n -= w;
 			if (n > 0)
 				av_usleep(5000);
@@ -1221,6 +1309,9 @@ struct Player::Impl
 			av_frame_free(&f.f);
 		frames.clear();
 		av_frame_free(&cur);
+		hwdec::Close(hw);
+		hw = nullptr;
+		hw_active = false;
 		avcodec_free_context(&vdec);
 		avcodec_free_context(&adec);
 		for (auto& s : sdecs)
@@ -1516,6 +1607,23 @@ void Player::SetMute(bool mute)
 {
 	m->mute = mute;
 	ps5audio::SetGain(m->Gain());
+}
+
+void Player::SetSurround(bool on)
+{
+	m->surround = on; // the audio graph is made again at the next frame
+}
+
+void Player::SetToneMapping(int mode, int white_nits)
+{
+	m->tm_mode = std::max(0, std::min(3, mode));
+	m->tm_white = std::max(100, std::min(400, white_nits));
+	m->rendered_id = 0; // drawn again
+}
+
+int Player::HdrKind() const
+{
+	return m->cur ? m->hdr_shown.load() : 0;
 }
 
 void Player::SetAmplify(double gain)
@@ -1814,7 +1922,11 @@ bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
 	SwsContext* c = s.sws;
 	// a new context when the size or the format changes (sws_getCachedContext can't set the threads)
 	int& ctx_w = s.ctx_w; int& ctx_h = s.ctx_h; int& ctx_sw = s.ctx_sw; int& ctx_sh = s.ctx_sh; int& ctx_fmt = s.ctx_fmt;
-	if (!c || ctx_w != w || ctx_h != h || ctx_sw != f->width || ctx_sh != f->height || ctx_fmt != f->format)
+	const tonemap::Transfer tr = tonemap::TransferOf(f);
+	const bool hdr = tr != tonemap::Transfer::Sdr && s.tm_mode != tonemap::Off;
+	s.hdr_shown = tr == tonemap::Transfer::Pq ? 1 : tr == tonemap::Transfer::Hlg ? 2 : 0;
+	if (!c || ctx_w != w || ctx_h != h || ctx_sw != f->width || ctx_sh != f->height || ctx_fmt != f->format ||
+		s.ctx_hdr != hdr)
 	{
 		sws_freeContext(c);
 		c = sws_alloc_context();
@@ -1823,7 +1935,7 @@ bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
 		av_opt_set_int(c, "src_format", f->format, 0);
 		av_opt_set_int(c, "dstw", w, 0);
 		av_opt_set_int(c, "dsth", h, 0);
-		av_opt_set_int(c, "dst_format", AV_PIX_FMT_RGBA, 0);
+		av_opt_set_int(c, "dst_format", hdr ? AV_PIX_FMT_RGBA64LE : AV_PIX_FMT_RGBA, 0);
 		av_opt_set_int(c, "sws_flags", SWS_BICUBIC | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT, 0);
 		av_opt_set_int(c, "threads", 6, 0);
 		if (sws_init_context(c, nullptr, nullptr) < 0)
@@ -1851,17 +1963,44 @@ bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
 		ctx_sw = f->width;
 		ctx_sh = f->height;
 		ctx_fmt = f->format;
+		s.ctx_hdr = hdr;
+		if (hdr)
+			OrbisLog("[player] %s picture: tone mapped to SDR (%s, white %d nits, film peak %.0f nits)",
+				tr == tonemap::Transfer::Pq ? "HDR10 (PQ)" : "HLG",
+				s.tm_mode == tonemap::Hable ? "Hable" : s.tm_mode == tonemap::Reinhard ? "Reinhard" : "BT.2390",
+				s.tm_white.load(), tonemap::SourcePeak(f));
 	}
 	AVFrame* out = av_frame_alloc();
-	out->format = AV_PIX_FMT_RGBA;
 	out->width = w;
 	out->height = h;
-	out->data[0] = reinterpret_cast<uint8_t*>(dst);
-	out->linesize[0] = pitch * 4;
-	// a buffer reference over our memory: without one sws_scale_frame allocates its own picture
-	out->buf[0] = av_buffer_create(out->data[0], size_t(pitch) * 4 * h, [](void*, uint8_t*) {}, nullptr, 0);
-	const int r = sws_scale_frame(c, out, f);
+	if (hdr)
+	{
+		// 16-bit R'G'B' first, then the tone mapping into the window
+		s.hdr_buf.resize(size_t(w) * h * 4);
+		out->format = AV_PIX_FMT_RGBA64LE;
+		out->data[0] = reinterpret_cast<uint8_t*>(s.hdr_buf.data());
+		out->linesize[0] = w * 8;
+		out->buf[0] = av_buffer_create(out->data[0], s.hdr_buf.size() * 2, [](void*, uint8_t*) {}, nullptr, 0);
+	}
+	else
+	{
+		out->format = AV_PIX_FMT_RGBA;
+		out->data[0] = reinterpret_cast<uint8_t*>(dst);
+		out->linesize[0] = pitch * 4;
+		// a buffer reference over our memory: without one sws_scale_frame allocates its own picture
+		out->buf[0] = av_buffer_create(out->data[0], size_t(pitch) * 4 * h, [](void*, uint8_t*) {}, nullptr, 0);
+	}
+	int r = sws_scale_frame(c, out, f);
 	av_frame_free(&out);
+	if (hdr && r >= 0)
+	{
+		tonemap::Params tp;
+		tp.mode = tonemap::Mode(s.tm_mode.load());
+		tp.transfer = tr;
+		tp.src_peak = tonemap::SourcePeak(f);
+		tp.white = s.tm_white;
+		tonemap::Convert(s.hdr_buf.data(), w, dst, pitch, w, h, tp);
+	}
 	s.convert_ms = s.convert_ms * 0.9 + (NowS() - t0) * 1000 * 0.1;
 	s.rendered_id = s.cur_id;
 	s.rendered_dst = dst;
@@ -2062,6 +2201,7 @@ PlayerStats Player::Stats() const
 	st.shown_fps = m->shown_fps;
 	st.dropped = m->dropped;
 	st.decode_ms = m->decode_ms;
+	st.hw_decoding = m->hw_active;
 	st.convert_ms = m->convert_ms;
 	st.bitrate = m->ic ? m->ic->bit_rate : 0;
 	{

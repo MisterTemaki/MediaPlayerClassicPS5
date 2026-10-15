@@ -6,6 +6,7 @@
 //   MPCPS5_HOST_DUMP_DIR=dir                                  where (default .)
 //   MPCPS5_HOST_MAX_FLIPS=n                                   abort after n flips (a hang guard)
 //   MPCPS5_HOST_REALTIME=1                                    flips wait 1/60 s
+//   MPCPS5_HOST_AUDIO_DUMP=prefix                             what is played, raw S16: <prefix>.2ch / <prefix>.8ch
 //
 // SPDX-License-Identifier: MIT
 
@@ -290,12 +291,25 @@ int32_t sceAudioOutInit(void)
 {
 	return 0;
 }
-int32_t sceAudioOutOpen(int32_t, int32_t, int32_t, uint32_t, uint32_t, uint32_t)
+int32_t sceAudioOutOpen(int32_t, int32_t, int32_t, uint32_t, uint32_t, uint32_t format)
 {
-	return 7;
+	return format == SCE_AUDIO_OUT_PARAM_FORMAT_S16_8CH ? 8 : 7; // 8: the 8-channel port
 }
-int32_t sceAudioOutOutput(int32_t, const void* p)
+int32_t sceAudioOutOutput(int32_t handle, const void* p)
 {
+	if (const char* dump = getenv("MPCPS5_HOST_AUDIO_DUMP"))
+	{
+		static FILE* f2 = nullptr;
+		static FILE* f8 = nullptr;
+		FILE*& f = handle == 8 ? f8 : f2;
+		if (!f)
+			f = fopen((std::string(dump) + (handle == 8 ? ".8ch" : ".2ch")).c_str(), "wb");
+		if (f)
+		{
+			fwrite(p, 2, handle == 8 ? 256 * 8 : 256 * 2, f);
+			fflush(f);
+		}
+	}
 	// play at the real rate so the audio thread paces like on the console: an absolute clock, as the
 	// hardware's (a plain sleep per grain drifts slow, which the frontend's rate control would then chase)
 	static timespec next = {};

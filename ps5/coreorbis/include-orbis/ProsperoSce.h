@@ -71,6 +71,7 @@ int sceVideoOutRegisterBuffers2(int handle, int set_index, int buffer_index_star
 // ---- libSceAudioOut ----------------------------------------------------------------------------------------
 #define SCE_AUDIO_OUT_PORT_TYPE_MAIN 0
 #define SCE_AUDIO_OUT_PARAM_FORMAT_S16_STEREO 1
+#define SCE_AUDIO_OUT_PARAM_FORMAT_S16_8CH 2 // L R C LFE Ls Rs Lb Rb
 #define SCE_USER_SERVICE_USER_ID_SYSTEM 0xff
 
 int32_t sceAudioOutInit(void);

@@ -83,6 +83,7 @@ struct PlayerStats
 	double shown_fps = 0; // pictures shown per second, measured
 	uint64_t dropped = 0;
 	double decode_ms = 0;
+	bool hw_decoding = false; // the console's video decoder (mpc_vdec.h), not FFmpeg
 	double convert_ms = 0;
 	int64_t bitrate = 0;
 	int queued_video = 0;
@@ -119,6 +120,12 @@ public:
 	void SetVolume(int percent); // 0..100, MPC-HC's slider (a log curve, as CPlayerToolBar::GetVolume)
 	void SetMute(bool mute);
 	void SetAmplify(double gain); // the audio switcher's boost (1.0 = none)
+	// HDR10 / HLG pictures on the SDR screen (mpc_tonemap.h): 0 off, 1 BT.2390, 2 Hable, 3 Reinhard; white in nits
+	void SetToneMapping(int mode, int white_nits);
+	// 0 SDR, 1 HDR10 (PQ), 2 HLG: the picture shown
+	int HdrKind() const;
+	// Surround: 5.1 / 7.1 tracks on the console's 8-channel output; off, everything is mixed down to stereo
+	void SetSurround(bool on);
 	void SetRate(double rate); // 0.125..8
 	double Rate() const;
 	void SetAudioDelay(double seconds);

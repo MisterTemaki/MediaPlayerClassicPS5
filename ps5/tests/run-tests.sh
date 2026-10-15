@@ -17,7 +17,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/chapters.mkv" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/surround71.mkv" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -292,6 +292,106 @@ rc=$(run "$T" "0:0;40:$CROSS;42:0" "60:quit" "30")
 expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
 expect "grep -q 'no access to /data' $T/out.txt" "logged: no access to /data"
 expect "$CHECK $T/dump/flip00030.ppm 960 540 255 255 255 2 >/dev/null" "a message box on the screen"
+fi
+
+# the pixel at (x, y) of a dump, as "r g b"
+pixel() { python3 -c "from PIL import Image; print(*Image.open('$1').convert('RGB').getpixel(($2, $3)))"; }
+# within lo..hi on all three channels
+grey_in() { python3 -c "
+from PIL import Image
+p = Image.open('$1').convert('RGB').getpixel(($2, $3))
+import sys; sys.exit(0 if all($4 <= c <= $5 for c in p) else 1)"; }
+# per-channel RMS of a raw S16 dump: rms file channels -> "c0 c1 ..."
+rms() { python3 -c "
+import array
+a = array.array('h'); a.frombytes(open('$1', 'rb').read())
+n = $2
+print(*[round((sum(x * x for x in a[c::n]) / max(1, len(a[c::n]))) ** 0.5) for c in range(n)])"; }
+ini() { mkdir -p "$1/root" && printf '[Settings]\n%s\n' "$2" >"$1/root/mpc-hc.ini"; }
+
+if want 13; then
+echo "== 13. the PS5's video decoder (a stand-in on the host): H.264 / HEVC on it, seeking, handing back to FFmpeg"
+T=$(newroot t13)
+cp "$MEDIA/hevc10.mkv" "$MEDIA/red.mp4" "$MEDIA/av1.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "50:state;60:open $T/root/media/red.mp4;120:state;130:seek 4;190:state;200:open $T/root/media/av1.mkv;250:state;260:quit" \
+	"45,115,185,245" "$T/root/media/hevc10.mkv")
+expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
+expect "grep -q 'hardware decoding available' $T/root/logs/boot.log" "the decoder's library and compute queue made at start"
+expect "grep -q 'video decoder: HEVC 640x360 (console decoder)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 1$'" "HEVC Main 10 on the console's decoder"
+expect "grep -q 'pictures 640x368 (shown 640x360) 10-bit' $T/root/logs/boot.log" "10-bit pictures, the padding left out"
+expect "$CHECK $T/dump/flip00045.ppm 960 400 255 0 255 12 >/dev/null" "its picture: magenta"
+expect "grep -q 'video decoder: H.264 640x360 (console decoder)' $T/root/logs/boot.log && state $T 2 | grep -q ' hw 1$'" "H.264 on it too"
+expect "$CHECK $T/dump/flip00115.ppm 960 400 red >/dev/null" "its picture: red"
+expect "near \$(field $T 3 2) 4.5 1.2 && grep -q 'going on from a keyframe' $T/root/logs/boot.log" "a seek: on from the next keyframe"
+expect "$CHECK $T/dump/flip00185.ppm 960 400 red >/dev/null" "the picture after the seek"
+expect "grep -q 'video decoder: FFmpeg (not H.264 or HEVC)' $T/root/logs/boot.log && state $T 4 | grep -q ' hw 0$'" "AV1 stays with FFmpeg"
+expect "$CHECK $T/dump/flip00245.ppm 960 400 255 255 0 60 >/dev/null" "its picture: yellow"
+nosan "$T"
+T=$(newroot t13b)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+# chapters.mkv: a keyframe every second; red 0-3 s, green 3-6 s, blue 6-9 s
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_HWDEC_FAIL=20 run "$T" "0:0" "480:state;490:quit" "470" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && [ \$(grep -c 'stream error 0x811d0301: reset' $T/root/logs/boot.log) = 5 ]" "stream errors: reset, on from the next keyframe, five times"
+expect "grep -q 'handing the video to FFmpeg: stream errors keep coming' $T/root/logs/boot.log && grep -q 'video decoder: FFmpeg from now on' $T/root/logs/boot.log" "then the video is handed to FFmpeg"
+expect "state $T 1 | grep -q ' hw 0$' && near \$(field $T 1 2) 8.5 0.8 && $CHECK $T/dump/flip00470.ppm 960 400 blue >/dev/null" "it plays on to the end: the blue part"
+nosan "$T"
+T=$(newroot t13c)
+cp "$MEDIA/red.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_HWDEC_REFUSE=1 run "$T" "0:0" "60:state;70:quit" "55" "$T/root/media/red.mp4")
+expect "grep -q \"video decoder: FFmpeg (the decoder couldn't be created)\" $T/root/logs/boot.log && $CHECK $T/dump/flip00055.ppm 960 400 red >/dev/null" "a decoder that can't be made: FFmpeg"
+T=$(newroot t13d)
+cp "$MEDIA/red.mp4" "$T/root/media/"
+ini "$T" "HardwareDecoding=0"
+rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "60:state;70:quit" "55" "$T/root/media/red.mp4")
+expect "grep -q 'video decoder: FFmpeg (turned off in the options)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 0$'" "Options > Output > Hardware decoding off: FFmpeg"
+fi
+
+if want 14; then
+echo "== 14. HDR10 and HLG on the SDR picture: tone mapping (BT.2390 by default), the options"
+T=$(newroot t14)
+cp "$MEDIA/hdr_pq.mkv" "$MEDIA/hdr_hlg.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "50:state;60:open $T/root/media/hdr_hlg.mkv;110:state;120:quit" "45,105" "$T/root/media/hdr_pq.mkv")
+expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
+expect "grep -q 'HDR10 (PQ) picture: tone mapped to SDR (BT.2390, white 250 nits, film peak 1000 nits)' $T/root/logs/boot.log" "PQ seen, its mastering peak read (1000 nits)"
+expect "grey_in $T/dump/flip00045.ppm 480 520 168 179" "100 nits: below the knee, 100/250 of white (gamma 2.4: ~174)"
+expect "grey_in $T/dump/flip00045.ppm 1440 520 248 255" "1000 nits (the film's peak): the screen's white"
+expect "grep -q 'HLG picture: tone mapped to SDR' $T/root/logs/boot.log" "HLG seen"
+expect "grey_in $T/dump/flip00105.ppm 480 520 125 138 && grey_in $T/dump/flip00105.ppm 1440 520 205 235" "HLG: its OOTF (1000 nits) then the curve"
+nosan "$T"
+T=$(newroot t14b)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "state $T 1 | grep -q ' hw 1$' && grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "the same from the console's decoder (10-bit pictures)"
+T=$(newroot t14c)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+ini "$T" "HdrToneMapping=0"
+rc=$(run "$T" "0:0" "50:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "! grep -q 'tone mapped' $T/root/logs/boot.log && grey_in $T/dump/flip00045.ppm 480 520 124 136 && grey_in $T/dump/flip00045.ppm 1440 520 186 198" "Off: the PQ signal as it comes (washed out)"
+T=$(newroot t14d)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+ini "$T" "HdrToneMapping=2
+HdrPeak=150"
+rc=$(run "$T" "0:0" "50:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "grep -q 'tone mapped to SDR (Hable, white 150 nits' $T/root/logs/boot.log && grey_in $T/dump/flip00045.ppm 1440 520 240 255" "Hable, white at 150 nits, from the settings"
+fi
+
+if want 15; then
+echo "== 15. surround: 5.1 / 7.1 on the PS5's 8-channel output (L R C LFE Ls Rs Lb Rb); stereo mixes them down"
+T=$(newroot t15)
+cp "$MEDIA/surround51.mkv" "$MEDIA/surround71.mkv" "$T/root/media/"
+ini "$T" "AudioOutput=1"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/a51 run "$T" "0:0" "100:quit" "" "$T/root/media/surround51.mkv")
+expect "[ $rc = 0 ] && grep -q 'sound: 6 channels -> 5.1 (8-channel output)' $T/root/logs/boot.log" "5.1 to the 8-channel port"
+expect "python3 -c \"import sys; r = list(map(int, '\$(rms $T/a51.8ch 8)'.split())); sys.exit(0 if r[2] > 1000 and max(r[:2] + r[3:]) < 50 else 1)\"" "the centre channel's tone in C only"
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/a71 run "$T" "0:0" "100:quit" "" "$T/root/media/surround71.mkv")
+expect "grep -q 'sound: 8 channels -> 7.1 (8-channel output)' $T/root/logs/boot.log" "7.1 to the 8-channel port"
+expect "python3 -c \"import sys; r = list(map(int, '\$(rms $T/a71.8ch 8)'.split())); sys.exit(0 if r[4] > 1000 and max(r[:4] + r[5:]) < 50 else 1)\"" "the left side channel's tone in Ls (FFmpeg's order mapped to the console's)"
+T=$(newroot t15b)
+cp "$MEDIA/surround51.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/st run "$T" "0:0" "100:quit" "" "$T/root/media/surround51.mkv")
+expect "[ ! -f $T/st.8ch ] && python3 -c \"import sys; r = list(map(int, '\$(rms $T/st.2ch 2)'.split())); sys.exit(0 if r[0] > 300 and abs(r[0] - r[1]) < 20 else 1)\"" "Stereo (the default): the centre mixed into both sides"
+nosan "$T"
 fi
 
 echo

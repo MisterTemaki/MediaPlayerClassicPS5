@@ -12,6 +12,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "mpc_vdec.h"
 #include "OrbisPaths.h"
 #include "ProsperoAudio.h"
 #include "ProsperoCrash.h"
@@ -76,6 +77,10 @@ int Run(int argc, char** argv)
 	MPCPS5_STAGE(Boot, "start");
 	OrbisLog("[boot] Media Player Classic PS5 %s, %s (built %s %s), pid %d", MPCPS5_PS5_VERSION,
 		mpc::EngineVersion().c_str(), __DATE__, __TIME__, int(getpid()));
+
+	// the console's video decoder: its library and compute queue only come before the jailbreak (mpc_vdec.h)
+	MPCPS5_STAGE(Boot, "video decoder");
+	mpc::hwdec::Prepare();
 
 	// out of the sandbox, like PS5SX2: before it the app sees no /data and no USB drives
 	MPCPS5_STAGE(Boot, "jailbreak");

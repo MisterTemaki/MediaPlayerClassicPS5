@@ -24,7 +24,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.0
+VERSION ?= 1.1
 TITLE_ID ?= PPSA99015
 APP_OUT := build/app/$(TITLE_ID)
 DEPS_PS5 ?= build/deps/prefix-ps5
@@ -38,7 +38,7 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	coreorbis/orbis-shims/ProsperoCrash.cpp coreorbis/orbis-shims/ProsperoCrt.cpp \
 	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
 	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
-	player/mpc_console.cpp
+	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp
 # the payloads: the helper, and the installer (= helper + install)
 HELPER_SRC := coreorbis/orbis-shims/orbis_paths.cpp coreorbis/orbis-shims/ProsperoNotify.cpp \
 	coreorbis/orbis-shims/ProsperoHelper.cpp coreorbis/orbis-shims/ProsperoCrash.cpp
@@ -175,18 +175,25 @@ build/app/app_crt.o build/app/app_cpp_runtime.o: build/app/%.o: $(NATIVE)/toolin
 FF_PS5_ARCHIVES = $(addprefix $(DEPS_PS5)/lib/,libavformat.a libavcodec.a libavfilter.a libswscale.a libswresample.a \
 	libavutil.a libdav1d.a libsmb2.a libmbedtls.a libmbedx509.a libmbedcrypto.a libz.a)
 EBOOT_OBJS = build/app/app_crt.o build/app/app_cpp_runtime.o $(PS5_EMU_OBJ) $(PS5_OUT)/helper_data.o
-build/app/mpc-pie.elf: $(EBOOT_OBJS) $(FF_PS5_ARCHIVES) $(NATIVE)/tooling/native/ps5-pie.ld $(NATIVE)/tooling/native/ehframe.ld \
+# the console's video decoder: the SDK has no stub for it, so one is made (stubs/videodec2_stub.c); it and
+# libSceSysmodule are linked before --as-needed, since the player only refers to them weakly (mpc_vdec.cpp)
+VDEC_STUB := build/app/stubs/libSceVideodec2.so
+$(VDEC_STUB): stubs/videodec2_stub.c
+	@mkdir -p $(dir $@)
+	$(PS5_CC) -std=c11 -O2 -fPIC -c -o $(dir $@)videodec2_stub.o $<
+	$(PS5_PAYLOAD_SDK)/bin/prospero-lld --shared -soname libSceVideodec2.sprx -o $@ $(dir $@)videodec2_stub.o
+build/app/mpc-pie.elf: $(EBOOT_OBJS) $(FF_PS5_ARCHIVES) $(VDEC_STUB) $(NATIVE)/tooling/native/ps5-pie.ld $(NATIVE)/tooling/native/ehframe.ld \
 		$(NATIVE)/tooling/native/app-symbols.map $(NATIVE)/tooling/native/localize.map
 	$(LLD) -m elf_x86_64 -pie -z max-page-size=0x4000 --hash-style=gnu \
 		-T $(NATIVE)/tooling/native/ps5-pie.ld -T $(NATIVE)/tooling/native/ehframe.ld --eh-frame-hdr \
 		--version-script $(NATIVE)/tooling/native/app-symbols.map --version-script $(NATIVE)/tooling/native/localize.map \
 		-e _start --no-dynamic-linker --wrap=getaddrinfo --wrap=pthread_create -o $@ $(EBOOT_OBJS) \
 		--start-group $(FF_PS5_ARCHIVES) --end-group \
-		--as-needed $(APP_STUBS) -L $(SDK_LIB) \
+		$(VDEC_STUB) $(SDK_LIB)/libSceSysmodule.so --as-needed $(filter-out %/libSceSysmodule.so,$(APP_STUBS)) -L $(SDK_LIB) \
 		$(SDK_LIB)/libc++.a $(SDK_LIB)/libc++abi.a $(SDK_LIB)/libunwind.a $(SDK_LIB)/libc.a -lpthread
 
 build/app/eboot.elf: build/app/mpc-pie.elf $(NATIVE_TOOL)
-	$(NATIVE_TOOL) link --in $< --out $@ --stub-dir $(SDK_LIB) --module-sdk 0x02000009 \
+	$(NATIVE_TOOL) link --in $< --out $@ --stub-dir $(SDK_LIB) --stub $(VDEC_STUB) --module-sdk 0x02000009 \
 		--companion-sdk 0x08050001 --file-name eboot.elf
 	python3 tools/prepare_console_elf.py --input $@ --output build/app/eboot-console-ready.elf
 
@@ -218,7 +225,7 @@ HOST_SAN ?= -fsanitize=address,undefined -fno-omit-frame-pointer
 HOST_OPT := -O1 -g -mavx2 -fno-strict-aliasing
 HOST_DEP_INCS := -isystem $(DEPS_HOST)/include
 
-HOST_EMU_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(EMU_SRC) host/sce_host.cpp)
+HOST_EMU_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(EMU_SRC) host/sce_host.cpp host/sce_host_vdec.cpp)
 HOST_HELPER_OBJ := $(HOST_OUT)/port/installer/helper_main.o $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(HELPER_SRC) host/sce_host.cpp)
 HOST_INSTALLER_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(INSTALLER_SRC) host/sce_host.cpp)
 

@@ -14,10 +14,16 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.0):** builds with the ps5-payload-dev SDK into a signed native app and passes 83 host tests
+> **Status (1.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 117 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
-> the dialogs, the on-screen keyboard, the installer and the helper). It has **not been run on a PS5 yet** --
-> please report what works and what doesn't (the log is in `/data/mpcps5/logs/boot.log`).
+> the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
+> HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
+> doesn't (the log is in `/data/mpcps5/logs/boot.log`).
+
+**1.1:** what VLC for PS5 ([ZiZc3/VLC](https://github.com/ZiZc3/VLC)) showed can be done on the console:
+**hardware decoding** of H.264 and HEVC (8 and 10-bit, up to 4K) on the PS5's video decoder, **HDR10 and HLG
+tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
+[Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround).
 
 ## Contents
 
@@ -27,6 +33,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 - [Opening media](#opening-media)
 - [Subtitles](#subtitles)
 - [Audio](#audio)
+- [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround)
 - [What plays, and the limits](#what-plays-and-the-limits)
 - [Settings and files](#settings-and-files)
 - [Building](#building)
@@ -34,8 +41,8 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.0.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.0.elf`).
+1. Send `MediaPlayerClassicPS5-v1.1.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.1.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -147,10 +154,40 @@ Previous/Next goes by chapter, then by playlist item, then to the neighbouring f
 ## Audio
 
 - Play > Audio Track: the tracks (language and format), as MPC-HC's menu; the stream marked default first.
-- Every track is played as stereo 48 kHz: 5.1 and 7.1 are mixed down (libswresample's matrix, centre and
-  surrounds at -3 dB). No bitstream (passthrough) of Dolby/DTS to an AV receiver.
+- Stereo by default: 5.1 and 7.1 are mixed down (libswresample's matrix, centre and surrounds at -3 dB). With
+  Options > Output > Audio Renderer on **surround**, they go to the console's 8-channel output instead (see
+  below). No bitstream (passthrough) of Dolby/DTS to an AV receiver: they are decoded to PCM.
 - Volume: MPC-HC's slider and curve; Options > Audio Switcher: boost (up to +300 %) and the time shift.
 - Playback rate (Play > Increase/Decrease Rate, 0.125x-8x) keeps the pitch (FFmpeg's atempo).
+
+## Hardware decoding, HDR and surround
+
+All three are in **Options > Output**, on by default except surround.
+
+![Options > Output](docs/screenshots/output.png)
+
+**Hardware decoding.** H.264 (8-bit 4:2:0) and HEVC (Main and Main 10, up to 3840x2176) go to the PS5's own
+video decoder (libSceVideodec2) instead of the CPU, so 4K HEVC 10-bit films play in real time. This follows VLC
+for PS5's `ps5vdec` module, which found on the console how to drive it: the library (sysmodule 207) and the
+decoder's compute queue are made when the app starts, before it leaves its sandbox (after that both are
+refused); the packets go in as Annex B with the parameter sets in front; after a seek decoding goes on from the
+next keyframe (HEVC's RASL pictures left out); Dolby Vision's own layers are dropped, so a Dolby Vision film
+plays as its HDR10 base layer. Everything else -- AV1, VP9, MPEG-2, VC-1, H.264 High 10 / 4:2:2, interlaced
+video (deinterlaced with bwdif) -- stays with FFmpeg, and so does a video the decoder refuses or keeps failing
+on (from the next keyframe, without stopping). View > Statistics says which decoder is working ("Decoder:
+PS5 video decoder (hardware)" or "FFmpeg (software)"); `boot.log` has the details (`[hwdec]`).
+
+**HDR.** The screen is SDR (the window, the menus and the video in it), so HDR10 (PQ) and HLG pictures are tone
+mapped: scaled to the window as 16-bit R'G'B', then turned to linear light (PQ's curve, or HLG's with its
+1000-nit OOTF), from BT.2020 to BT.709 colours, the highlights compressed from the film's peak (its MaxCLL or
+mastering metadata, 1000 nits when it has neither) to the picture's white, and encoded for the screen
+(gamma 2.4). Curves: **BT.2390** (the default), Hable and Reinhard, or Off (the signal as it comes: washed out).
+"White" sets how bright the picture is: the nits shown as the screen's white (250 by default, 100-400).
+This is done by the CPU on the scaled picture (1080p at most), in six threads.
+
+**Surround.** With Audio Renderer on surround, 5.1 and 7.1 tracks go to the console's 8-channel output
+(L R C LFE Ls Rs Lb Rb); the console mixes it down itself for a stereo TV. 5.1 fills the first six, 7.1's side
+channels go to Ls/Rs and its back channels to Lb/Rb. Stereo tracks stay on the stereo output.
 
 ## What plays, and the limits
 
@@ -160,12 +197,12 @@ DTS, TrueHD, FLAC, Opus, Vorbis, MP3, PCM, ...; interlaced video is deinterlaced
 
 Honest limits:
 
-- **Decoding is done by the CPU.** A homebrew app can't reach the PS5's hardware video decoder, so everything
-  is decoded in software on the 8 Zen 2 cores (FFmpeg's frame threads, AVX2) and scaled to 1080p by
-  libswscale. 1080p H.264/HEVC should play at full speed; **4K HEVC 10-bit at high bit rates may drop
-  frames** (View > Statistics shows the decode and scale times; R3 + Square shows them over the video).
-- **HDR** (HDR10, HLG, Dolby Vision) is shown without tone mapping: the picture looks washed out. Dolby
-  Vision profile 5 has wrong colours.
+- **The hardware decoder hasn't been tried on a console with this player yet** (it follows VLC for PS5, which
+  plays 4K HEVC with it). Without it -- other codecs, or Hardware decoding off -- decoding is done by the CPU
+  (FFmpeg's frame threads, AVX2): 1080p plays at full speed, 4K HEVC 10-bit at high bit rates may drop frames
+  (View > Statistics shows the decode and scale times; R3 + Square shows them over the video).
+- **HDR is tone mapped to SDR**, not sent to the TV as HDR (the screen is drawn in SDR). Dolby Vision profile
+  5 (no HDR10 base layer) has wrong colours.
 - The output is 1920x1080 at 60 Hz: 24 fps films have the usual 3:2 cadence.
 - No DVD or Blu-ray discs or menus (the console's drive isn't readable this way), no DRM (Netflix, Prime...),
   no Chromecast/DLNA server.
@@ -196,7 +233,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.0.elf + mpc-ps5-v1.0-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.1.elf + mpc-ps5-v1.1-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 
@@ -212,6 +249,8 @@ Source map:
 |---|---|
 | `player/mpc_app.cpp` | the main window (CMainFrame): layout, painting, commands, input |
 | `player/mpc_player.cpp` | the playback engine: FFmpeg demux/decode threads, A/V clock, subtitles |
+| `player/mpc_vdec.cpp` | the PS5's video decoder (libSceVideodec2), after VLC for PS5's ps5vdec; `stubs/videodec2_stub.c` is its link stub |
+| `player/mpc_tonemap.cpp` | HDR10 / HLG tone mapping (BT.2390, Hable, Reinhard) |
 | `player/mpc_ui.cpp` | the window system: Windows 10's controls, dialogs, message boxes, the on-screen keyboard, the pad as mouse and keyboard |
 | `player/mpc_menu.cpp` | themed menus and their tracking |
 | `player/mpc_dialogs.cpp` | MPC-HC's dialogs (from mpc-hc.rc's templates) and the Open dialog |
@@ -231,7 +270,11 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
 - **dav1d** 1.5.1 -- AV1; BSD-2-Clause; VideoLAN.
 - **libsmb2** -- SMB2/3; LGPL-2.1; Ronnie Sahlberg. VLC reads SMB shares with it too.
 - **VLC** -- the reference for the network side (SMB through libsmb2, streams through FFmpeg's protocols) and
-  for the ANSI subtitle fallback; no VLC code is included.
+  for the ANSI subtitle fallback.
+- **VLC for PS5** ([ZiZc3/VLC](https://github.com/ZiZc3/VLC)) -- `player/mpc_vdec.cpp` is its `ps5vdec` module
+  (the console's video decoder: its structures, memory, access-unit and picture handling, recovery rules)
+  brought over to FFmpeg's packets and frames, GPL-2.0-or-later; and the idea of the 8-channel output and its
+  channel order.
 - **Mbed TLS** 3.6.7 (Apache-2.0), **zlib**, **Mozilla's CA list** (MPL-2.0, via certifi).
 - **Selawik** (SIL OFL 1.1, Microsoft) -- the stand-in for Segoe UI; **Roboto** (Apache-2.0).
 - **NanoSVG** (zlib licence), **stb_truetype / stb_image** (public domain / MIT).

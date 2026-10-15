@@ -1352,8 +1352,17 @@ void ShowOptionsDialog(std::function<void()> applied)
 	p = d->NewPage("Output");
 	d->Group(p, "DirectShow Video", 5, 5, 285, 43);
 	d->Combo(p, 10, 16, 276, 13, {"Software renderer (FFmpeg / libswscale, bicubic)"}, 0)->enabled = false;
+	CheckBox* hwdec = d->Check(p, "Hardware decoding (H.264 / HEVC on the PS5's video decoder)", 10, 33, 276, 8,
+		s.hw_decoding);
+	d->Group(p, "HDR (HDR10 / HLG on the SDR picture)", 5, 50, 285, 36);
+	ComboBox* tm = d->Combo(p, 10, 63, 150, 13, {"Off (as it comes)", "Tone mapping: BT.2390", "Tone mapping: Hable", "Tone mapping: Reinhard"},
+		s.hdr_tonemap);
+	d->Text(p, "White:", 170, 66, 30, 8);
+	NumberBox* white = d->Number(p, 200, 63, 60, 13, s.hdr_peak, 100, 400, 10, " nits");
 	d->Group(p, "Audio Renderer", 5, 90, 285, 30);
-	d->Combo(p, 10, 102, 276, 13, {"PlayStation 5 audio out (48 kHz, stereo)"}, 0)->enabled = false;
+	ComboBox* aout = d->Combo(p, 10, 102, 276, 13,
+		{"PlayStation 5 audio out: stereo (5.1/7.1 mixed down)", "PlayStation 5 audio out: surround (5.1/7.1, 8 channels)"},
+		s.audio_output);
 	d->Group(p, "Video frame", 5, 125, 285, 60);
 	ComboBox* vf = d->Combo(p, 10, 137, 180, 13,
 		{"Half Size", "Normal Size", "Double Size", "Stretch To Window", "Touch Window From Inside", "Zoom 1", "Zoom 2",
@@ -1361,9 +1370,13 @@ void ShowOptionsDialog(std::function<void()> applied)
 		int(s.video_frame));
 	ComboBox* ar = d->Combo(p, 10, 156, 180, 13, {"Default (DAR)", "4:3", "5:4", "16:9", "235:100", "185:100", "Assume square pixels (SAR)"},
 		s.aspect_ratio);
-	d->apply_fns.push_back([&s, vf, ar] {
+	d->apply_fns.push_back([&s, vf, ar, hwdec, tm, white, aout] {
 		s.video_frame = VideoFrame(vf->sel);
 		s.aspect_ratio = ar->sel;
+		s.hw_decoding = hwdec->checked;
+		s.hdr_tonemap = tm->sel;
+		s.hdr_peak = white->value;
+		s.audio_output = aout->sel;
 	});
 
 	// ---- Fullscreen (IDD_PPAGEFULLSCREEN) ----
@@ -1419,7 +1432,8 @@ void ShowOptionsDialog(std::function<void()> applied)
 	boost->max = 300;
 	boost->pos = s.audio_boost;
 	boost->step = 10;
-	d->Text(p, "Down-mix: every track is played as stereo (5.1/7.1 mixed down by libswresample).", 5, 65, 286, 16);
+	d->Text(p, "Down-mix: 5.1/7.1 tracks are mixed down to stereo, or go to the PS5's 8-channel output when Output > Audio "
+			   "Renderer is set to surround.", 5, 65, 286, 16);
 	d->Text(p, "Audio time shift (ms):", 5, 86, 115, 8);
 	NumberBox* ashift = d->Number(p, 124, 83, 60, 13, s.audio_delay_ms, -10000, 10000, 10);
 	d->apply_fns.push_back([&s, boost, ashift] {
