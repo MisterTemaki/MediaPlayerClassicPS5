@@ -37,7 +37,10 @@ enum class InstallResult
 	Installed, // there was no app before
 	Updated,
 	Failed,
+	NewerInstalled, // the app folder holds a newer version (updated from the app): left as it is
 };
+// The installed app's version (its param.json's contentVersion), "" when there is none.
+std::string InstalledVersion();
 
 // /data/homebrew/<TITLE_ID> (MPCPS5_PS5_HOMEBREW overrides /data/homebrew for the host tests).
 std::string AppInstallDir();

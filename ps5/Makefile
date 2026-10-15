@@ -26,6 +26,8 @@ PS5_HOST ?= ps5
 PS5_PORT ?= 9021
 VERSION ?= 1.1
 TITLE_ID ?= PPSA99015
+# where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
+UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
 APP_OUT := build/app/$(TITLE_ID)
 DEPS_PS5 ?= build/deps/prefix-ps5
 DEPS_HOST ?= build/deps/prefix-host
@@ -38,14 +40,16 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	coreorbis/orbis-shims/ProsperoCrash.cpp coreorbis/orbis-shims/ProsperoCrt.cpp \
 	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
 	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
-	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp
+	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp \
+	coreorbis/orbis-shims/ProsperoUpdate.cpp
 # the payloads: the helper, and the installer (= helper + install)
 HELPER_SRC := coreorbis/orbis-shims/orbis_paths.cpp coreorbis/orbis-shims/ProsperoNotify.cpp \
 	coreorbis/orbis-shims/ProsperoHelper.cpp coreorbis/orbis-shims/ProsperoCrash.cpp
-INSTALLER_SRC := installer/installer_main.cpp $(HELPER_SRC) coreorbis/orbis-shims/ProsperoInstall.cpp
+INSTALLER_SRC := installer/installer_main.cpp $(HELPER_SRC) coreorbis/orbis-shims/ProsperoInstall.cpp \
+	coreorbis/orbis-shims/ProsperoUpdate.cpp
 
 INCS := -Icoreorbis/include-orbis -Icoreorbis/orbis-shims -Iplayer -isystem third_party/stb -isystem third_party/nanosvg
-DEFS := -DMPCPS5_PS5_VERSION='"$(VERSION)"' -DMPCPS5_TITLE_ID='"$(TITLE_ID)"' -DMPC_ASSET_DIR='"$(abspath assets)"' \
+DEFS := -DMPCPS5_PS5_VERSION='"$(VERSION)"' -DMPCPS5_TITLE_ID='"$(TITLE_ID)"' -DMPCPS5_UPDATE_REPO='"$(UPDATE_REPO)"' -DMPC_ASSET_DIR='"$(abspath assets)"' \
 	-DORBIS_ROOT_DEFAULT='"/data/mpcps5"'
 PORT_WARN := -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers
 FF_LIBS = -lavformat -lavcodec -lavfilter -lswscale -lswresample -lavutil -ldav1d -lsmb2 -lmbedtls -lmbedx509 -lmbedcrypto -lz
@@ -119,9 +123,12 @@ $(PS5_OUT)/MediaPlayerClassicPS5.elf: $(PS5_INSTALLER_OBJ) $(PS5_OUT)/install_da
 
 # the release files, named with the version: build/dist/MediaPlayerClassicPS5-v$(VERSION).elf and the sources zip
 DIST := build/dist
-dist: $(PS5_OUT)/MediaPlayerClassicPS5.elf
+# + the app folder as a stored zip with its manifest (MediaPlayerClassicPS5-v$(VERSION)-$(TITLE_ID).zip): attach it to
+# the GitHub release tagged v$(VERSION), so the app can update itself (Help, Check for updates)
+dist: $(PS5_OUT)/MediaPlayerClassicPS5.elf $(APP_FILES)
 	@mkdir -p $(DIST)
 	cp $< $(DIST)/MediaPlayerClassicPS5-v$(VERSION).elf
+	python3 tools/make_release_zip.py $(APP_OUT) $(TITLE_ID) $(DIST)/MediaPlayerClassicPS5-v$(VERSION)-$(TITLE_ID).zip
 	cd ../.. && rm -f $(abspath $(DIST))/mpc-ps5-v$(VERSION)-src.zip && \
 		zip -qr $(abspath $(DIST))/mpc-ps5-v$(VERSION)-src.zip $(notdir $(abspath ..)) \
 		-x '*/ps5/build/*' '*/proto/native/build/*' '*.o' '*/.git/*'

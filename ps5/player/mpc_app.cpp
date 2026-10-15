@@ -17,11 +17,14 @@
 #include "mpc_res.h"
 #include "mpc_settings.h"
 #include "mpc_ui.h"
+#include "mpc_update.h"
 
 #include "OrbisPaths.h"
 #include "ProsperoAudio.h"
 #include "ProsperoCrash.h"
 #include "ProsperoNotify.h"
+#include "ProsperoSce.h"
+#include "ProsperoUpdate.h"
 #include "ProsperoVideo.h"
 
 #include <algorithm>
@@ -32,6 +35,7 @@
 #include <ctime>
 #include <memory>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #ifndef MPCPS5_PS5_VERSION
@@ -206,6 +210,15 @@ private:
 	InputMapper input_;
 	bool have_data_;
 	bool quit_ = false;
+
+	// Help, Check for updates (mpc_update.h): what the updater was last seen doing, and who asked
+	update::Phase upd_seen_ = update::Phase::Idle;
+	bool upd_user_ = false, upd_auto_ = false, upd_installing_ = false;
+	double upd_osd_ = 0;
+	void CheckForUpdates();
+	void OfferUpdate(const update::Status& st);
+	void TickUpdate();
+	void RestartForUpdate();
 
 	// the playlist (CPlaylist)
 	std::vector<std::string> playlist_;
@@ -1501,7 +1514,7 @@ std::vector<MenuItem> MainFrame::FavoritesMenu() const
 std::vector<MenuItem> MainFrame::HelpMenu() const
 {
 	using M = MenuItem;
-	return {M::Cmd("&Home Page", ID_HELP_HOMEPAGE), M::Cmd("Check for &updates", ID_HELP_CHECKFORUPDATE).Enable(false),
+	return {M::Cmd("&Home Page", ID_HELP_HOMEPAGE), M::Cmd("Check for &updates", ID_HELP_CHECKFORUPDATE),
 		M::Cmd("&Command Line Switches", ID_HELP_SHOWCOMMANDLINESWITCHES).Enable(false),
 		M::Cmd("Download &Toolbar Images", ID_HELP_TOOLBARIMAGES).Enable(false), M::Cmd("&Donate", ID_HELP_DONATE).Enable(false),
 		M::Sep(), M::Cmd("&About...", ID_HELP_ABOUT)};
@@ -2127,6 +2140,9 @@ void MainFrame::Command(int id)
 		case ID_HELP_ABOUT:
 			ShowAboutDialog();
 			break;
+		case ID_HELP_CHECKFORUPDATE:
+			CheckForUpdates();
+			break;
 		case ID_PLAYLIST_REMOVE:
 			if (pl_sel_ >= 0 && pl_sel_ < int(playlist_.size()))
 			{
@@ -2256,8 +2272,122 @@ void MainFrame::LoadPlaylistFile(const std::string& path)
 	OpenPlaylistItem(0);
 }
 
+// ---- Help, Check for updates -----------------------------------------------------------------------------
+void MainFrame::CheckForUpdates()
+{
+	const update::Status st = update::GetStatus();
+	switch (st.phase)
+	{
+		case update::Phase::Available: OfferUpdate(st); break;
+		case update::Phase::Done: upd_seen_ = update::Phase::Idle; break; // TickUpdate asks again about the restart
+		case update::Phase::Checking:
+		case update::Phase::Downloading:
+		case update::Phase::Installing: Osd("The update is on its way...", 2); break;
+		default:
+			upd_user_ = true;
+			update::StartCheck(false);
+			Osd("Checking for updates...", 3);
+			break;
+	}
+}
+
+void MainFrame::OfferUpdate(const update::Status& st)
+{
+	char size[32];
+	snprintf(size, sizeof(size), "%.1f MB", st.size / 1048576.0);
+	if (!have_data_)
+	{
+		MessageBox("Media Player Classic PS5 " + st.latest + " is available (you have " MPCPS5_PS5_VERSION ").\n\n"
+				   "To install it, the app has to be unlocked: send MediaPlayerClassicPS5-v" MPCPS5_PS5_VERSION
+				   ".elf with your payload loader, then open the app again.",
+			"Check for updates", MB_OK, 1);
+		return;
+	}
+	MessageBox("Media Player Classic PS5 " + st.latest + " is available (you have " MPCPS5_PS5_VERSION ").\n\nDownload it (" +
+				   size + ") and install it now?",
+		"Check for updates", MB_YESNO, 4, [this](int r) {
+			if (r == IDYES && update::StartInstall())
+			{
+				upd_installing_ = true;
+				Osd("Downloading the update...", 2);
+			}
+		});
+}
+
+void MainFrame::RestartForUpdate()
+{
+	const std::string path = mpcupdate::EbootPath();
+	OrbisLog("[update] restarting %s", path.c_str());
+	SavePosition();
+	s_.Save();
+	OrbisLogClose();
+	const int rc = sceSystemServiceLoadExec(path.c_str(), nullptr);
+	if (rc == 0)
+		for (int i = 0; i < 100; i++)
+			usleep(100 * 1000);
+	OrbisLogOpen("boot-after-update");
+	OrbisLog("[update] sceSystemServiceLoadExec(%s) -> %x", path.c_str(), unsigned(rc));
+	MessageBox("Close Media Player Classic PS5 and open it again to use the new version.", "Check for updates", MB_OK, 1);
+}
+
+void MainFrame::TickUpdate()
+{
+	const update::Status st = update::GetStatus();
+	if (st.phase != upd_seen_)
+	{
+		upd_seen_ = st.phase;
+		switch (st.phase)
+		{
+			case update::Phase::UpToDate:
+				OrbisLog("[update] up to date (%s)", MPCPS5_PS5_VERSION);
+				if (upd_user_)
+					MessageBox("You are using the latest version of Media Player Classic PS5 (" MPCPS5_PS5_VERSION ").",
+						"Check for updates", MB_OK, 1);
+				upd_user_ = upd_auto_ = false;
+				break;
+			case update::Phase::Available:
+				OrbisLog("[update] %s is available (%llu bytes)%s", st.latest.c_str(), (unsigned long long)st.size,
+					upd_user_ || upd_auto_ ? ": offered" : "");
+				if (upd_user_ || upd_auto_)
+					OfferUpdate(st);
+				upd_user_ = upd_auto_ = false;
+				break;
+			case update::Phase::Failed:
+				if (upd_user_ || upd_installing_)
+					MessageBox("Media Player Classic PS5 could not be updated:\n" + st.error +
+								   (upd_installing_ ? "\n\nNothing was changed." : ""),
+						"Check for updates", MB_OK, 3);
+				OrbisLog("[update] failed: %s", st.error.c_str());
+				upd_user_ = upd_auto_ = upd_installing_ = false;
+				break;
+			case update::Phase::Done:
+				OrbisLog("[update] %s installed: offering the restart", st.latest.c_str());
+				upd_installing_ = false;
+				MessageBox("Media Player Classic PS5 " + st.latest + " is installed.\n\nRestart the app now to use it?",
+					"Check for updates", MB_YESNO, 4, [this](int r) {
+						if (r == IDYES)
+							RestartForUpdate();
+					});
+				break;
+			default: break;
+		}
+	}
+	const double now = NowSeconds();
+	if ((st.phase == update::Phase::Downloading || st.phase == update::Phase::Installing) && now - upd_osd_ > 0.5)
+	{
+		upd_osd_ = now;
+		char b[96];
+		if (st.phase == update::Phase::Downloading)
+			snprintf(b, sizeof(b), "Downloading the update: %d%%", st.total ? int(st.done * 100 / st.total) : 0);
+		else
+			snprintf(b, sizeof(b), "Installing the update: %d/%d", int(st.done), int(st.total));
+		Osd(b, 1.0);
+	}
+}
+
 void MainFrame::Tick()
 {
+	TickUpdate();
 	const PlayState st = player_.State();
 	if (st != last_state_)
 	{
@@ -2636,6 +2766,14 @@ int MainFrame::Run(const std::string& first)
 			fwrite(mpc_cacert_begin, 1, size_t(mpc_cacert_end - mpc_cacert_begin), f);
 			fclose(f);
 		}
+	}
+	// updates (Help, Check for updates); once a day the app looks by itself and offers a newer version
+	mpcupdate::Init();
+	if (have_data_ && mpcupdate::DailyCheckDue())
+	{
+		OrbisLog("[update] daily check");
+		upd_auto_ = true;
+		update::StartCheck(true);
 	}
 	WindowManager::Get().screen = CRect(0, 0, kW, kH);
 	ApplyAudio();

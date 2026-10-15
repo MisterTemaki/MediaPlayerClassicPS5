@@ -55,7 +55,7 @@ T=$(newroot t1)
 # Options opens the File menu (keyboard), Up wraps to Exit, Cross runs it
 rc=$(run "$T" "0:0;60:$OPTIONS;62:0;70:$UP;72:0;80:$CROSS;82:0" "" "40,75")
 expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
-expect "grep -q 'Media Player Classic PS5 1.0, FFmpeg' $T/root/logs/boot.log" "boot log names the player and FFmpeg"
+expect "grep -q 'Media Player Classic PS5 $(sed -n 's/^VERSION ?= //p' Makefile), FFmpeg' $T/root/logs/boot.log" "boot log names the player and FFmpeg"
 expect "$CHECK $T/dump/flip00040.ppm 900 10 255 255 255 2 >/dev/null" "the white title bar"
 expect "$CHECK $T/dump/flip00040.ppm 960 1062 0 0 0 2 >/dev/null" "the black status bar"
 expect "$CHECK $T/dump/flip00040.ppm 900 1025 240 240 240 2 >/dev/null" "the toolbar in COLOR_BTNFACE"
@@ -392,6 +392,65 @@ cp "$MEDIA/surround51.mkv" "$T/root/media/"
 rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/st run "$T" "0:0" "100:quit" "" "$T/root/media/surround51.mkv")
 expect "[ ! -f $T/st.8ch ] && python3 -c \"import sys; r = list(map(int, '\$(rms $T/st.2ch 2)'.split())); sys.exit(0 if r[0] > 300 and abs(r[0] - r[1]) < 20 else 1)\"" "Stereo (the default): the centre mixed into both sides"
 nosan "$T"
+fi
+
+if want 16; then
+echo "== 16. Help > Check for updates: the app checks GitHub's newest release, downloads it, checks every file, installs it"
+T=$(newroot t16)
+stop16() { pkill -f 'build/host/mpc-ps5-(installer|helper)' 2>/dev/null; pkill -f 'http.server 1[89][0-9][0-9][0-9]' 2>/dev/null; sleep 0.3; }
+stop16
+SRV=$T/srv; mkdir -p "$SRV" "$T/appmeta/PPSA99015"; echo old >"$T/appmeta/PPSA99015/icon0.png"
+SPORT=$((18000 + RANDOM % 1900))
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+# the app folder, as the payload installs it (then its helper is stopped)
+MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst.txt" 2>&1 &
+for i in $(seq 1 80); do grep -q 'listening on 127.0.0.1' $T/root/logs/installer.log 2>/dev/null && break; sleep 0.1; done
+stop16
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+release() { # tag contentVersion [bad]
+	rm -rf "$T/rel" && mkdir -p "$T/rel" && cp -r "$T/homebrew/PPSA99015" "$T/rel/PPSA99015" && rm -f "$T/rel/PPSA99015/manifest.sha256" "$T/rel/PPSA99015/sce_sys/old.bin"
+	echo "eboot $1" >"$T/rel/PPSA99015/eboot.bin"; echo "new art" >"$T/rel/PPSA99015/sce_sys/icon0.png"; echo extra >"$T/rel/PPSA99015/sce_sys/extra.bin"
+	sed -i "s/\"contentVersion\": \"[0-9.]*\"/\"contentVersion\": \"$2\"/" "$T/rel/PPSA99015/sce_sys/param.json"
+	python3 tools/make_release_zip.py "$T/rel/PPSA99015" PPSA99015 "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip" >/dev/null
+	local sha size
+	sha=$(sha256sum "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip" | cut -c1-64); size=$(stat -c %s "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip")
+	[ -n "${3:-}" ] && sha=0000${sha:4}
+	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,"digest":"sha256:%s","browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}]}' \
+		"$1" "$1" "$1" $SPORT "$1" $size $sha $SPORT "$1" >"$SRV/latest.json"
+}
+u16run() { MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
+cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
+# a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
+release v1.1 01.010.000
+rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
+expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
+expect "[ \$(grep -c '\[update\] up to date (1.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+# b: a newer release whose download isn't what GitHub says: refused, nothing changed
+echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
+printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
+release v9.9 99.000.000 bad
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
+expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/logs/boot.log" "Help > Check for updates: 9.9 is available, offered"
+expect "grep -q \"\[update\] failed: .*SHA-256 doesn't match\" $T/root/logs/boot.log && cmp -s $T/homebrew/PPSA99015/eboot.bin $T/eboot.before && [ -z \"\$(find $T/homebrew -name '*.new')\" ]" "Yes: the download isn't GitHub's file: refused, nothing changed"
+# c: the right file: the daily check (a day later) offers it, Yes installs it, Yes restarts into it
+release v9.9 99.000.000
+echo 0 >"$T/root/update-check.txt"
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "200:key enter;450:key enter;520:key enter;560:quit" "300")
+expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/logs/boot.log" "the daily check offers 9.9"
+expect "grep -q '\[update\] 9.9 installed: offering the restart' $T/root/logs/boot.log" "Yes: downloaded, every file checked, installed"
+expect "grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $T/homebrew/PPSA99015/sce_sys/param.json" "the new eboot.bin and param.json in place"
+expect "[ -f $T/homebrew/PPSA99015/sce_sys/extra.bin ] && [ ! -e $T/homebrew/PPSA99015/sce_sys/old.bin ] && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png && [ -z \"\$(find $T/homebrew -name '*.new')\" ]" "a new file added, a gone one removed, the home screen's art refreshed"
+expect "grep -q 'sceSystemServiceLoadExec($T/homebrew/PPSA99015/eboot.bin)' $T/out.txt" "Yes again: the app restarts into the new eboot.bin"
+expect "grep -q 'is available: Help, Check for updates' $T/out.txt" "a notification says a new version is out"
+nosan "$T"
+# d: the 1.1 payload sent again (an autoload): the newer version is left alone
+MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst2.txt" 2>&1 &
+for i in $(seq 1 80); do grep -q 'a newer version is installed' $T/inst2.txt 2>/dev/null && break; sleep 0.1; done
+expect "grep -q 'a newer version is installed' $T/inst2.txt && grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png" "an older payload sent again leaves the update (and its art) alone"
+expect "! grep -q 'runtime error\|AddressSanitizer' $T/inst.txt $T/inst2.txt" "the payload: no sanitizer reports"
+stop16
 fi
 
 echo
