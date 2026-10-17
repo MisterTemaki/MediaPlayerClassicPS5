@@ -19,7 +19,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/loud.mkv" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/fonts.mkv" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -640,6 +640,51 @@ rc=$(MPCPS5_HOST_SETTINGS_FAIL=settings run "$T" "0:0" "20:quit" "smb://alice:pw
 expect "cmp -s $T/root/mpc-hc.ini $T/ini.before && grep -q s3cret $T/root/credentials.ini" "mpc-hc.ini can't be replaced: left as it was, its passwords kept"
 nosan "$T"
 kill $SPID 2>/dev/null
+fi
+
+if want 20; then
+echo "== 20. ASS/SSA drawn by libass: \\pos, styles, rotation, the delay; an MKV's attached font; SRT as before"
+# the 640x360 picture fills x 148..1771, y 65..977 of the window (2.54 screen pixels per script pixel)
+T=$(newroot t20)
+cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
+cp "$MEDIA/styled.ass" "$T/root/media/movie.ass"
+rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
+D=$T/dump/flip00060.ppm
+expect "[ $rc = 0 ] && grep -q 'subtitles loaded: .*movie.ass (ASS, libass)' $T/root/logs/boot.log && [ \"\$(field $T 1 6)\" = 1000 ]" "movie.ass beside it: loaded into libass and chosen"
+expect "$REGION $D 150 65 700 220 0 255 0 40 800 >/dev/null && ! $REGION $D 0 300 1920 1080 0 255 0 40 20 >/dev/null" "(a) \\pos(20,20) \\an7: green text at the top left, none lower down"
+expect "$REGION $D 700 780 1220 977 255 255 0 40 2000 >/dev/null" "(b) the Big style: 48 px yellow text at the bottom centre"
+expect "$REGION $D 700 780 1220 977 0 0 255 40 1000 >/dev/null" "(b) ... with its thick blue outline"
+expect "! $REGION $D 0 0 1920 700 255 255 0 40 20 >/dev/null" "(b) ... and nowhere higher"
+expect "$REGION $D 900 330 1020 710 255 0 0 40 1000 >/dev/null" "(c) \\frz90: red text standing up in the middle"
+expect "! $REGION $D 560 470 890 570 255 0 0 40 30 >/dev/null && ! $REGION $D 1030 470 1360 570 255 0 0 40 30 >/dev/null" "(c) ... not lying across it"
+expect "grep -q 'Using default font family: (Arial, 700, 0) -> Selawik-Bold' $T/root/logs/boot.log" "a font nobody has (Arial): the app's own Selawik"
+nosan "$T"
+# the subtitle delay (Options) moves libass's lines too: +2 s, nothing at 1 s, the lines at 3.3 s
+T=$(newroot t20b)
+cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
+cp "$MEDIA/styled.ass" "$T/root/media/movie.ass"
+ini "$T" "SubDelay=2000"
+rc=$(run "$T" "0:0" "220:quit" "60,200" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && ! $REGION $T/dump/flip00060.ppm 150 65 700 220 0 255 0 40 20 >/dev/null && ! $REGION $T/dump/flip00060.ppm 700 780 1220 977 255 255 0 40 20 >/dev/null" "delay +2 s: nothing yet at 1 s"
+expect "$REGION $T/dump/flip00200.ppm 150 65 700 220 0 255 0 40 800 >/dev/null && $REGION $T/dump/flip00200.ppm 700 780 1220 977 255 255 0 40 2000 >/dev/null" "... the lines at 3.3 s"
+nosan "$T"
+# an MKV with an attached font its style asks for
+T=$(newroot t20c)
+cp "$MEDIA/fonts.mkv" "$T/root/media/"
+AF=$(cut -d'|' -f1 "$MEDIA/attached-font.txt"); AFAM=$(cut -d'|' -f2 "$MEDIA/attached-font.txt")
+rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/fonts.mkv")
+expect "[ $rc = 0 ] && grep -q \"attached font loaded: $AF\" $T/root/logs/boot.log" "the MKV's attached font ($AF) given to libass"
+expect "grep -q \"fontselect: ($AFAM, 400, 0) -> \" $T/root/logs/boot.log && ! grep -q \"Using default font family: ($AFAM\" $T/root/logs/boot.log" "the style's font ($AFAM) found: the attached one, not the default"
+expect "$REGION $T/dump/flip00060.ppm 600 65 1320 260 255 0 255 40 800 >/dev/null" "its line drawn: magenta at the top centre"
+nosan "$T"
+# SRT: the old path (the Subtitles options), libass not even started
+T=$(newroot t20d)
+cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
+printf '1\r\n00:00:00,000 --> 00:00:05,000\r\nPlain SRT line\r\n' >"$T/root/media/movie.srt"
+rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'subtitles loaded: .*movie.srt$' $T/root/logs/boot.log && ! grep -q 'libass' $T/root/logs/boot.log" "movie.srt: FFmpeg's text, libass not started"
+expect "$REGION $T/dump/flip00060.ppm 500 700 1420 977 255 255 255 30 1500 >/dev/null" "its line drawn as before: white at the bottom"
+nosan "$T"
 fi
 
 echo

@@ -11,7 +11,9 @@
 //   - an audio thread: decode, libavfilter (atempo for the playback rate, the downmix to stereo, 48 kHz S16),
 //     into the console's sound ring (ProsperoAudio.h); what it pushes keeps the clock;
 //   - subtitles decoded as their packets come (every subtitle track, so switching shows lines at once),
-//     plus external .srt/.ass/.ssa/.vtt/.sub files (ANSI files are read as Windows-1252, as MPC-HC does).
+//     plus external .srt/.ass/.ssa/.vtt/.sub files (ANSI files are read as Windows-1252, as MPC-HC does);
+//     ASS/SSA (embedded or external) goes to libass (mpc_ass.h), which draws it as authored, with the file's
+//     attached fonts; the other formats are text lines (or pictures) drawn with the Subtitles options.
 // The UI thread asks, once per screen refresh, for the picture that belongs to the clock (UpdateVideo) and has
 // it scaled into the screen (RenderVideo, libswscale, bicubic -- EVR-CP's default resizer).
 //
@@ -153,6 +155,12 @@ public:
 	// Saves the current picture (File > Save Image), at the video's own size, as PNG.
 	bool SavePicture(const std::string& path, std::string* error);
 	SubtitleShow Subtitles() const;
+	// ASS/SSA tracks are drawn by libass (mpc_ass.h), as authored: true when the current track is one. Its picture
+	// for the video shown at frame_w x frame_h (storage_w x storage_h: the video's own size), at the subtitle clock
+	// (the delay applied), only what is inside clip (in the frame's coordinates): *img (premultiplied) to blend at
+	// (*x, *y) in the frame, or nullptr when nothing shows; *changed: not the same as the last call's.
+	bool AssSubtitles(int frame_w, int frame_h, int storage_w, int storage_h, const CRect& clip, const Image** img,
+		int* x, int* y, bool* changed);
 
 	// File > Properties: the details lines (MediaInfo tab), and a short "format" line
 	std::vector<std::pair<std::string, std::string>> Details() const;

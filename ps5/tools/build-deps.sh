@@ -2,6 +2,8 @@
 # Media Player Classic PS5: the libraries the player links, built for the PS5 and for the host tests.
 #
 #   tools/build-deps.sh [ps5|host|all]      (default all) -> build/deps/prefix-{ps5,host}/{include,lib}
+#   tools/build-deps.sh [ps5-subs|host-subs|subs]   only the subtitle renderer's libraries (FreeType, FriBidi,
+#                                                    HarfBuzz, libass) into the same prefixes, FFmpeg left as it is
 #
 # Sources:
 #   FFmpeg n7.1.1        https://github.com/FFmpeg/FFmpeg (GPLv3 build: --enable-gpl --enable-version3)
@@ -9,6 +11,11 @@
 #   libsmb2              https://github.com/sahlberg/libsmb2 (SMB2/3, LGPL-2.1), commit below
 #   Mbed TLS 3.6.7       third_party/mbedtls (Apache-2.0), with mpc_mbedtls_config.h (FFmpeg's https://)
 #   zlib                 third_party/zlib
+#   FreeType 2.14.3      https://github.com/freetype/freetype (FTL or GPLv2; used under the FTL, GPLv3-compatible)
+#   FriBidi 1.0.16       https://github.com/fribidi/fribidi (LGPL-2.1)
+#   HarfBuzz 14.5.1      https://github.com/harfbuzz/harfbuzz (MIT ("Old MIT")): the core only (no glib, ICU, cairo)
+#   libass 0.17.5        https://github.com/libass/libass (ISC): ASS/SSA subtitles; no fontconfig (no font provider
+#                        on the console: the fonts are the app's own, the MKV's attachments and /data/mpcps5/fonts)
 # Fetched into build/deps/src at the pinned versions; built with the ps5-payload-dev SDK's prospero-* tools
 # (clang, meson, cmake) for the console and with clang for the host. Needs git, nasm, meson, ninja, cmake.
 #
@@ -25,6 +32,10 @@ JOBS=${JOBS:-$(nproc)}
 FFMPEG_TAG=n7.1.1
 DAV1D_TAG=1.5.1
 LIBSMB2_COMMIT=fc710a3ebd58a3c15d0ef24322f748e38a3d3a90
+FREETYPE_TAG=VER-2-14-3
+FRIBIDI_TAG=v1.0.16
+HARFBUZZ_TAG=14.5.1
+LIBASS_TAG=0.17.5
 mkdir -p "$SRC"
 
 fetch() { # dir url ref
@@ -33,9 +44,28 @@ fetch() { # dir url ref
 	fi
 	git -C "$SRC/$1" -c advice.detachedHead=false checkout -q "$3"
 }
-fetch ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
-fetch dav1d https://github.com/videolan/dav1d.git "$DAV1D_TAG"
-fetch libsmb2 https://github.com/sahlberg/libsmb2.git "$LIBSMB2_COMMIT"
+# a release tag, shallow (HarfBuzz's whole history is big)
+fetch_tag() { # dir url tag
+	if [ ! -d "$SRC/$1" ] || [ "$(git -C "$SRC/$1" describe --tags --exact-match 2>/dev/null)" != "$3" ]; then
+		rm -rf "$SRC/$1"
+		git -c advice.detachedHead=false clone -q --depth 1 -b "$3" "$2" "$SRC/$1"
+	fi
+}
+fetch_subs() {
+	fetch_tag freetype https://github.com/freetype/freetype.git "$FREETYPE_TAG"
+	fetch_tag fribidi https://github.com/fribidi/fribidi.git "$FRIBIDI_TAG"
+	fetch_tag harfbuzz https://github.com/harfbuzz/harfbuzz.git "$HARFBUZZ_TAG"
+	fetch_tag libass https://github.com/libass/libass.git "$LIBASS_TAG"
+}
+case "$WHAT" in
+	*subs) ;;
+	*)
+		fetch ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
+		fetch dav1d https://github.com/videolan/dav1d.git "$DAV1D_TAG"
+		fetch libsmb2 https://github.com/sahlberg/libsmb2.git "$LIBSMB2_COMMIT"
+		;;
+esac
+fetch_subs
 
 FF_OPTS="--enable-gpl --enable-version3 --disable-programs --disable-doc --disable-avdevice --disable-postproc
 	--disable-iconv --disable-vaapi --disable-vdpau --disable-xlib --disable-sdl2 --disable-bzlib --disable-lzma --disable-libdrm
@@ -97,12 +127,54 @@ build() { # ps5|host
 		--extra-cflags="$CFLAGS -I$P/include" --extra-ldflags="-L$P/lib" >"$B/ffmpeg.log")
 	make -C "$B/ffmpeg" -j"$JOBS" >>"$B/ffmpeg.log" 2>&1
 	make -C "$B/ffmpeg" install >>"$B/ffmpeg.log" 2>&1
+	build_subs "$t"
 	echo "== $t: done -> $P"
+}
+
+# The subtitle renderer: FreeType, FriBidi, HarfBuzz (core only), libass; static, with meson. Only their own
+# build folders are made again (build/deps/build-$t-subs), so this runs without touching FFmpeg.
+build_subs() { # ps5|host
+	local t=$1 P=$DEPS/prefix-$1 B=$DEPS/build-$1-subs CFLAGS MESON cross=()
+	rm -rf "$B" && mkdir -p "$B" "$P/lib/pkgconfig" "$P/include"
+	if [ "$t" = ps5 ]; then
+		CFLAGS="-O2 -fPIC -march=znver2"
+		MESON=$PS5_PAYLOAD_SDK/bin/prospero-meson
+		# the SDK's pkg-config looks in its own sysroot: ours looks in the prefix
+		printf "[binaries]\npkg-config = 'pkg-config'\n[properties]\npkg_config_libdir = ['%s']\n" "$P/lib/pkgconfig" >"$B/prefix.ini"
+		cross=(--cross-file="$B/prefix.ini")
+		export PKG_CONFIG_LIBDIR=$P/lib/pkgconfig
+	else
+		CFLAGS="-O2 -fPIC" MESON=meson
+		export PKG_CONFIG_LIBDIR=$P/lib/pkgconfig CC=clang CXX=clang++
+	fi
+	local common=(--default-library=static --buildtype=release -Db_pie=true --prefix="$P" --libdir=lib --wrap-mode=nofallback)
+	sub() { # name src options...
+		local n=$1 s=$2
+		shift 2
+		echo "== $t: $n"
+		CFLAGS="$CFLAGS" CXXFLAGS="$CFLAGS" $MESON setup "$s" "$B/$n" "${cross[@]}" "${common[@]}" "$@" >"$B/$n.log"
+		ninja -C "$B/$n" -j"$JOBS" install >>"$B/$n.log"
+	}
+	sub freetype "$SRC/freetype" -Dbrotli=disabled -Dbzip2=disabled -Dharfbuzz=disabled -Dpng=disabled -Dzlib=disabled \
+		-Dtests=disabled
+	sub fribidi "$SRC/fribidi" -Ddocs=false -Dbin=false -Dtests=false
+	sub harfbuzz "$SRC/harfbuzz" -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dchafa=disabled -Dpng=disabled \
+		-Dzlib=disabled -Dicu=disabled -Dfreetype=disabled -Draster=disabled -Dvector=disabled -Dgpu=disabled \
+		-Dsubset=disabled -Dtests=disabled -Dintrospection=disabled -Ddocs=disabled -Dutilities=disabled \
+		-Dbenchmark=disabled
+	sub libass "$SRC/libass" -Dfontconfig=disabled -Ddirectwrite=disabled -Dcoretext=disabled -Dlibunibreak=disabled \
+		-Drequire-system-font-provider=false -Dasm=enabled -Dtest=disabled -Dcompare=disabled -Dprofile=disabled \
+		-Dfuzz=disabled -Dcheckasm=disabled
+	unset PKG_CONFIG_LIBDIR CC CXX
+	echo "== $t: subtitle libraries -> $P"
 }
 
 case "$WHAT" in
 	ps5) build ps5 ;;
 	host) build host ;;
 	all) build ps5 && build host ;;
-	*) echo "usage: $0 [ps5|host|all]"; exit 1 ;;
+	ps5-subs) build_subs ps5 ;;
+	host-subs) build_subs host ;;
+	subs) build_subs ps5 && build_subs host ;;
+	*) echo "usage: $0 [ps5|host|all|ps5-subs|host-subs|subs]"; exit 1 ;;
 esac

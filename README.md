@@ -175,13 +175,22 @@ Previous/Next goes by chapter, then by playlist item, then to the neighbouring f
   external file wins, as in MPC-HC. File > Subtitles > Load Subtitles... adds another.
 - Text files may be UTF-8, UTF-16 or ANSI: ANSI is read as **Windows-1252**, as MPC-HC reads it on a Western
   Windows (accents in Portuguese, Spanish, French... come out right).
-- Play > Subtitle Track: the tracks, on/off, the delay (+/- 100 ms). Options > Subtitles / Default Style:
-  size, bold, outline, the bottom margin, relative to the video or the window.
-- MPC-HC's default style: bold white text with a black outline and shadow, sized to the picture. ASS styling
-  (fonts, colours, positions, karaoke) is not drawn: the text is, with line breaks, italics (slanted) and top
-  alignment.
+- **ASS/SSA** (embedded in MKV, or `.ass`/`.ssa` files) is drawn by **libass**, as authored -- the way MPC-HC's
+  own renderer draws it: positions (`\pos`, `\an`, margins), the script's styles, fonts and sizes, colours,
+  borders and shadows, rotation, karaoke and the other timed effects, several lines at once, the script's
+  PlayResX/Y scaled to the picture as shown (zoom, pan and the aspect ratio included). Fonts: the MKV's
+  attached fonts, then the fonts in `/data/mpcps5/fonts`, then the app's own (Selawik, Selawik Bold, Roboto);
+  a font the script names and nobody has is drawn in Selawik, and a character Selawik hasn't got in the first
+  font of `/data/mpcps5/fonts` (there is no system font lookup on the console).
+- Play > Subtitle Track: the tracks, on/off, the delay (+/- 100 ms; ASS/SSA too). Options > Subtitles / Default
+  Style: size, bold, outline, the bottom margin, relative to the video or the window -- for the other formats
+  (SRT, WebVTT, MicroDVD...): ASS/SSA keeps its own styles.
+- Those other text formats get MPC-HC's default style: bold white text with a black outline and shadow, sized to
+  the picture, with line breaks, italics (slanted) and top alignment. PGS, VobSub and DVB pictures are scaled
+  with the video.
 - Chinese, Japanese, Korean and other scripts: put a font (`.ttf`/`.otf`, for example Noto Sans CJK) in
-  `/data/mpcps5/fonts` and start the player again; Selawik and Roboto cover Latin, Greek and Cyrillic.
+  `/data/mpcps5/fonts` and start the player again; Selawik and Roboto cover Latin, Greek and Cyrillic (for
+  ASS/SSA, Roboto only when the script asks for it by name).
 
 ## Audio
 
@@ -346,6 +355,11 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   (the console's video decoder: its structures, memory, access-unit and picture handling, recovery rules)
   brought over to FFmpeg's packets and frames, GPL-2.0-or-later; and the idea of the 8-channel output and its
   channel order.
+- **libass** 0.17.5 -- ASS/SSA subtitles; ISC; the libass authors (<https://github.com/libass/libass>). With
+  **FreeType** 2.14.3 (dual FreeType Project Licence / GPLv2, used here under the FTL, which goes with GPLv3:
+  portions of this software are copyright (C) The FreeType Project, www.freetype.org; all rights reserved), **HarfBuzz** 14.5.1 (MIT,
+  the core only: no glib, ICU or cairo) and **FriBidi** 1.0.16 (LGPL-2.1), all static, built without fontconfig
+  by `tools/build-deps.sh` (`tools/build-deps.sh subs` -- `make deps-subs` -- builds only these four).
 - **Mbed TLS** 3.6.7 (Apache-2.0), **zlib**, **Mozilla's CA list** (MPL-2.0, via certifi).
 - **Selawik** (SIL OFL 1.1, Microsoft) -- the stand-in for Segoe UI; **Roboto** (Apache-2.0).
 - **NanoSVG** (zlib licence), **stb_truetype / stb_image** (public domain / MIT).

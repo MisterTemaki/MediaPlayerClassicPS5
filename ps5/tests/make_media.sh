@@ -107,4 +107,49 @@ $FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i "aevalsrc=0.998*s
 	-c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a pcm_s16le -shortest "$D/loud.mkv"
 # a playlist of two files
 printf '#EXTM3U\nred.mp4\nchapters.mkv\n' >"$D/list.m3u"
+# libass (group 20): grey.mp4, 640x360 grey, 6 s; styled.ass beside it: (a) green text at \pos(20,20) top left,
+# (b) the "Big" style (48 px yellow, a 5 px blue outline) at the bottom centre, (c) red text turned 90 degrees (\frz90)
+# in the middle, all from 0 to 5 s, in a 640x360 script
+$FF -f lavfi -i color=c=gray:size=640x360:rate=25 -t 6 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "$D/grey.mp4"
+cat >"$D/styled.ass" <<'EOF'
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 360
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+Style: Big,Arial,48,&H0000FFFF,&H000000FF,&H00FF0000,&H00000000,-1,0,0,0,100,100,0,0,1,5,0,2,10,10,12,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,{\an7\pos(20,20)\c&H00FF00&\bord0\shad0\fs30}Top left
+Dialogue: 0,0:00:00.00,0:00:05.00,Big,,0,0,0,,BIG STYLE
+Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,{\an5\pos(320,180)\frz90\c&H0000FF&\bord0\shad0\fs30}ROTATED
+EOF
+# fonts.mkv: grey, an ASS track whose style asks for a font only the file has (attached: DejaVu Serif, or another
+# TrueType font of the system's), magenta at the top centre; attached-font.txt: "file|family"
+FONT=/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf
+[ -f "$FONT" ] || FONT=$(fc-list -f '%{file}\n' ':fontformat=TrueType' | grep -iv 'selawik\|roboto' | grep '\.ttf$' | head -1)
+FAMILY=$(fc-scan --format '%{family[0]}' "$FONT")
+echo "$(basename "$FONT")|$FAMILY" >"$D/attached-font.txt"
+cat >"$D/fontsub.ass" <<EOF
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 360
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Attached,$FAMILY,40,&H00FF00FF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,8,10,10,20,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:05.00,Attached,,0,0,0,,Attached font
+EOF
+$FF -i "$D/grey.mp4" -i "$D/fontsub.ass" -map 0:v -map 1:s -c:v copy -c:s ass -attach "$FONT" \
+	-metadata:s:t mimetype=application/x-truetype-font "$D/fonts.mkv"
+rm -f "$D/fontsub.ass"
 echo "media in $D"
