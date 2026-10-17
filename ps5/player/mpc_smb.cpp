@@ -4,6 +4,8 @@
 
 #include "mpc_smb.h"
 
+#include "mpc_i18n.h"
+
 #include "OrbisPaths.h"
 
 #include <fcntl.h>
@@ -89,7 +91,7 @@ smb2_context* Connect(const Url& u, const std::string& share, std::string* error
 	if (!c)
 	{
 		if (error)
-			*error = "Out of memory";
+			*error = T("Out of memory");
 		return nullptr;
 	}
 	smb2_set_timeout(c, 15);
@@ -101,7 +103,7 @@ smb2_context* Connect(const Url& u, const std::string& share, std::string* error
 	if (smb2_connect_share(c, u.server.c_str(), share.c_str(), u.user.empty() ? "guest" : u.user.c_str()) < 0)
 	{
 		if (error)
-			*error = std::string("Can't connect to \\\\") + u.server + "\\" + share + ": " + smb2_get_error(c);
+			*error = Fmt(T("Can't connect to \\\\%s\\%s: %s"), u.server.c_str(), share.c_str(), smb2_get_error(c));
 		OrbisLog("[smb] connect %s/%s: %s", u.server.c_str(), share.c_str(), smb2_get_error(c));
 		smb2_destroy_context(c);
 		return nullptr;
@@ -154,7 +156,7 @@ File* OpenFile(const std::string& url, std::string* error)
 	if (!Parse(url, u) || u.share.empty() || u.path.empty())
 	{
 		if (error)
-			*error = "Not a file on a share: " + url;
+			*error = Fmt(T("Not a file on a share: %s"), url.c_str());
 		return nullptr;
 	}
 	smb2_context* c = Connect(u, u.share, error);
@@ -164,7 +166,7 @@ File* OpenFile(const std::string& url, std::string* error)
 	if (!fh)
 	{
 		if (error)
-			*error = std::string("Can't open ") + u.path + ": " + smb2_get_error(c);
+			*error = Fmt(T("Can't open %s: %s"), u.path.c_str(), smb2_get_error(c));
 		smb2_disconnect_share(c);
 		smb2_destroy_context(c);
 		return nullptr;
@@ -277,7 +279,7 @@ bool List(const std::string& url, std::vector<Entry>& out, std::string* error)
 	if (!Parse(url, u) || u.share.empty())
 	{
 		if (error)
-			*error = "No share in " + url;
+			*error = Fmt(T("No share in %s"), url.c_str());
 		return false;
 	}
 	smb2_context* c = Connect(u, u.share, error);
@@ -287,7 +289,7 @@ bool List(const std::string& url, std::vector<Entry>& out, std::string* error)
 	if (!d)
 	{
 		if (error)
-			*error = std::string("Can't list the folder: ") + smb2_get_error(c);
+			*error = Fmt(T("Can't list the folder: %s"), smb2_get_error(c));
 		smb2_disconnect_share(c);
 		smb2_destroy_context(c);
 		return false;
@@ -315,7 +317,7 @@ bool Shares(const std::string& url, std::vector<std::string>& out, std::string* 
 	if (!Parse(url, u))
 	{
 		if (error)
-			*error = "Not an smb:// address";
+			*error = T("Not an smb:// address");
 		return false;
 	}
 	smb2_context* c = Connect(u, "IPC$", error);
@@ -334,7 +336,7 @@ bool Shares(const std::string& url, std::vector<std::string>& out, std::string* 
 		smb2_free_data(c, rep);
 	}
 	else if (error)
-		*error = std::string("Can't list the shares: ") + smb2_get_error(c);
+		*error = Fmt(T("Can't list the shares: %s"), smb2_get_error(c));
 	smb2_disconnect_share(c);
 	smb2_destroy_context(c);
 	return ok;

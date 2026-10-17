@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "mpc_i18n.h"
 #include "mpc_ui.h"
 
 #include <functional>
@@ -24,19 +25,21 @@ struct MenuItem
 	bool radio = false; // a bullet instead of a check
 	std::string accel; // the shortcut, right-aligned (here: the controller's button)
 
+	// the text and the shortcut in the interface's language (mpc_i18n.h); a name (a file, a track) comes back as it is
+
 	static MenuItem Sep() { return MenuItem(); }
 	static MenuItem Cmd(const std::string& t, int id, const std::string& accel = "")
 	{
 		MenuItem m;
-		m.text = t;
+		m.text = T(t);
 		m.id = id;
-		m.accel = accel;
+		m.accel = accel.empty() ? accel : T(accel);
 		return m;
 	}
 	static MenuItem Popup(const std::string& t, std::vector<MenuItem> items)
 	{
 		MenuItem m;
-		m.text = t;
+		m.text = T(t);
 		m.popup = true;
 		m.sub = std::move(items);
 		return m;

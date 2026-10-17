@@ -11,6 +11,7 @@
 #include "mpc_dialogs.h"
 #include "mpc_font.h"
 #include "mpc_gdi.h"
+#include "mpc_i18n.h"
 #include "mpc_menu.h"
 #include "mpc_player.h"
 #include "mpc_vdec.h"
@@ -419,7 +420,7 @@ void MainFrame::Layout()
 	int x = 0;
 	for (const auto& n : menu_names_)
 	{
-		const int w = UiFont().Measure(StripPrefix(n)) + ScaleX(14);
+		const int w = UiFont().Measure(StripPrefix(T(n))) + ScaleX(14);
 		menu_items_.push_back(CRect(x, r_menubar_.top, x + w, r_menubar_.bottom - ScaleY(1)));
 		x += w;
 	}
@@ -728,20 +729,20 @@ std::vector<std::pair<std::string, std::string>> MainFrame::StatsRows() const
 	char b[160];
 	if (player_.HasVideo())
 	{
-		snprintf(b, sizeof(b), "%.3f (%.1f shown)", st.fps, st.shown_fps);
+		snprintf(b, sizeof(b), T("%.3f (%.1f shown)"), st.fps, st.shown_fps);
 		rows.push_back({"Frame rate", b});
-		snprintf(b, sizeof(b), "%llu dropped, %d queued", (unsigned long long)st.dropped, st.queued_video);
+		snprintf(b, sizeof(b), T("%llu dropped, %d queued"), (unsigned long long)st.dropped, st.queued_video);
 		rows.push_back({"Frames", b});
-		snprintf(b, sizeof(b), "decode %.1f ms, scale %.1f ms", st.decode_ms, st.convert_ms);
+		snprintf(b, sizeof(b), T("decode %.1f ms, scale %.1f ms"), st.decode_ms, st.convert_ms);
 		rows.push_back({"Timing", b});
-		rows.push_back({"Decoder", st.hw_decoding ? "PS5 video decoder (hardware)" : "FFmpeg (software)"});
+		rows.push_back({"Decoder", T(st.hw_decoding ? "PS5 video decoder (hardware)" : "FFmpeg (software)")});
 	}
 	snprintf(b, sizeof(b), "%lld kb/s", (long long)(st.bitrate / 1000));
 	rows.push_back({"Bitrate", b});
-	snprintf(b, sizeof(b), "%d ms queued, %llu underruns", int(ps5audio::Queued() * 1000 / ps5audio::kRate),
+	snprintf(b, sizeof(b), T("%d ms queued, %llu underruns"), int(ps5audio::Queued() * 1000 / ps5audio::kRate),
 		(unsigned long long)st.underruns);
 	rows.push_back({"Buffers", b});
-	snprintf(b, sizeof(b), "audio %+d ms, subtitles %+d ms", int(player_.AudioDelay() * 1000), int(player_.SubtitleDelay() * 1000));
+	snprintf(b, sizeof(b), T("audio %+d ms, subtitles %+d ms"), int(player_.AudioDelay() * 1000), int(player_.SubtitleDelay() * 1000));
 	rows.push_back({"Sync offset", b});
 	return rows;
 }
@@ -753,13 +754,13 @@ void MainFrame::PaintInfoBar(CDC& dc, const CRect& r, const std::vector<std::pai
 	const Font& f = UiFont();
 	int w = ScaleX(100);
 	for (const auto& row : rows)
-		w = std::max(w, f.Measure(row.first + ":"));
+		w = std::max(w, f.Measure(T(row.first) + ":"));
 	const int sep = ScaleX(10), h = ScaleY(17);
 	int y = r.top + ScaleY(2);
 	for (const auto& row : rows)
 	{
 		CRect lr(r.left + 1, y, r.left + w - sep, y + h);
-		DrawText(dc, f, row.first + ":", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, RGB(255, 255, 255));
+		DrawText(dc, f, T(row.first) + ":", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, RGB(255, 255, 255));
 		CRect vr(r.left + w + sep, y, r.right - 1, y + h);
 		DrawText(dc, f, row.second, vr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, RGB(255, 255, 255));
 		y += h;
@@ -772,23 +773,23 @@ std::string MainFrame::StatusText() const
 	switch (player_.State())
 	{
 		case PlayState::Opening:
-			return "Opening...";
+			return T("Opening...");
 		case PlayState::Playing:
 		{
 			if (player_.Rate() != 1.0)
 			{
 				char b[64];
-				snprintf(b, sizeof(b), "Playing [%gx]", player_.Rate());
+				snprintf(b, sizeof(b), T("Playing [%gx]"), player_.Rate());
 				return b;
 			}
-			return "Playing";
+			return T("Playing");
 		}
 		case PlayState::Paused:
-			return "Paused";
+			return T("Paused");
 		case PlayState::Stopped:
-			return "Stopped";
+			return T("Stopped");
 		case PlayState::Failed:
-			return "Failed to open";
+			return T("Failed to open");
 		default:
 			return "";
 	}
@@ -857,7 +858,7 @@ void MainFrame::PaintPlaylist(CDC& dc, const CRect& r)
 	// the sizing bar's caption: "Playlist", a close button
 	CRect cap(r.left + ScaleX(2), r.top + ScaleY(2), r.right - ScaleX(2), r.top + ScaleY(18));
 	CRect ct(cap.left + ScaleX(4), cap.top, cap.right - ScaleX(20), cap.bottom);
-	DrawText(dc, UiFont(), "Playlist", ct, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, sys::WindowText);
+	DrawText(dc, UiFont(), T("Playlist"), ct, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, sys::WindowText);
 	const int cx = cap.right - ScaleX(9), cy = cap.CenterPoint().y, s = ScaleX(4);
 	for (int i = -s; i <= s; i++)
 	{
@@ -1192,7 +1193,7 @@ void MainFrame::PaintOsd(CDC& dc)
 	{
 		const PlayerStats st = player_.Stats();
 		char b[256];
-		snprintf(b, sizeof(b), "%dx%d  %.3f fps (%.1f shown)  dropped %llu  decode %.1f ms  scale %.1f ms",
+		snprintf(b, sizeof(b), T("%dx%d  %.3f fps (%.1f shown)  dropped %llu  decode %.1f ms  scale %.1f ms"),
 			player_.VideoWidth(), player_.VideoHeight(), st.fps, st.shown_fps, (unsigned long long)st.dropped,
 			st.decode_ms, st.convert_ms);
 		text = text.empty() ? b : text + "   " + b;
@@ -1235,7 +1236,7 @@ void MainFrame::PaintMenuBar(CDC& dc)
 		return;
 	dc.FillSolidRect(r_menubar_, sys::MenuBar);
 	for (size_t i = 0; i < menu_items_.size(); i++)
-		DrawMenuBarItem(dc, menu_items_[i], menu_names_[i], int(i) == menubar_hot_ && menubar_open_ < 0,
+		DrawMenuBarItem(dc, menu_items_[i], T(menu_names_[i]), int(i) == menubar_hot_ && menubar_open_ < 0,
 			int(i) == menubar_open_, menu_keyboard_);
 }
 
@@ -1247,7 +1248,7 @@ void MainFrame::PaintTooltip(CDC& dc)
 	static const char* const kTips[13] = {"Play", "Pause", "Stop", "", "Previous", "Decrease Rate", "Increase Rate", "Next", "",
 		"Frame Step", "", "", "Mute"};
 	if (hover_what_ < 13)
-		tip = kTips[hover_what_];
+		tip = T(kTips[hover_what_]);
 	else if (hover_what_ == 100)
 		tip = std::to_string(s_.volume) + "%";
 	else if (hover_what_ == 200 && Loaded() && player_.Duration() > 0)
@@ -1416,7 +1417,7 @@ std::vector<MenuItem> MainFrame::TrackMenu(TrackType t) const
 	{
 		v.push_back(M::Sep());
 		char b[64];
-		snprintf(b, sizeof(b), "Delay: %+d ms", int(std::lround(player_.SubtitleDelay() * 1000)));
+		snprintf(b, sizeof(b), T("Delay: %+d ms"), int(std::lround(player_.SubtitleDelay() * 1000)));
 		v.push_back(M::Cmd(b, 0).Enable(false));
 		v.push_back(M::Cmd("Delay +100 ms", ID_SUB_DELAY_UP));
 		v.push_back(M::Cmd("Delay -100 ms", ID_SUB_DELAY_DOWN));
@@ -1426,7 +1427,7 @@ std::vector<MenuItem> MainFrame::TrackMenu(TrackType t) const
 	{
 		v.push_back(M::Sep());
 		char b[64];
-		snprintf(b, sizeof(b), "Delay: %+d ms", int(std::lround(player_.AudioDelay() * 1000)));
+		snprintf(b, sizeof(b), T("Delay: %+d ms"), int(std::lround(player_.AudioDelay() * 1000)));
 		v.push_back(M::Cmd(b, 0).Enable(false));
 		v.push_back(M::Cmd("Delay +10 ms", ID_AUDIO_DELAY_UP));
 		v.push_back(M::Cmd("Delay -10 ms", ID_AUDIO_DELAY_DOWN));
@@ -1657,7 +1658,7 @@ void MainFrame::SkipBack()
 			if (ch[i].time < pos - 3)
 			{
 				Seek(ch[i].time);
-				Osd("Chapter " + std::to_string(i + 1) + ": " + ch[i].name);
+				Osd(Fmt(T("Chapter %d: %s"), i + 1, ch[i].name.c_str()));
 				return;
 			}
 	}
@@ -1683,7 +1684,7 @@ void MainFrame::SkipForward()
 		if (ch[i].time > pos + 1)
 		{
 			Seek(ch[i].time);
-			Osd("Chapter " + std::to_string(i + 1) + ": " + ch[i].name);
+			Osd(Fmt(T("Chapter %d: %s"), i + 1, ch[i].name.c_str()));
 			return;
 		}
 	if (playlist_.size() > 1 && pl_cur_ + 1 < int(playlist_.size()))
@@ -1695,7 +1696,7 @@ void MainFrame::SkipForward()
 		if (it != files.end() && it + 1 != files.end())
 			Open(*(it + 1));
 		else
-			Osd("No more media in the current folder.");
+			Osd(T("No more media in the current folder."));
 	}
 }
 
@@ -1757,7 +1758,7 @@ void MainFrame::Command(int id)
 	switch (id)
 	{
 		case ID_FILE_OPENQUICK:
-			ShowFileBrowser("Open", BrowseFilter::Media, [this](const std::string& path) {
+			ShowFileBrowser(T("Open"), BrowseFilter::Media, [this](const std::string& path) {
 				if (path.empty())
 					return;
 				s_.last_dir = ParentFolder(path);
@@ -1788,13 +1789,13 @@ void MainFrame::Command(int id)
 			});
 			break;
 		case ID_FILE_OPENDIRECTORY:
-			ShowFileBrowser("Open Directory", BrowseFilter::Folder, [this](const std::string& dir) {
+			ShowFileBrowser(T("Open Directory"), BrowseFilter::Folder, [this](const std::string& dir) {
 				if (dir.empty())
 					return;
 				const std::vector<std::string> files = ListFolderMedia(dir);
 				if (files.empty())
 				{
-					MessageBox("There are no media files in this folder.", "Open Directory", MB_OK, 2);
+					MessageBox(T("There are no media files in this folder."), T("Open Directory"), MB_OK, 2);
 					return;
 				}
 				playlist_ = files;
@@ -1825,23 +1826,24 @@ void MainFrame::Command(int id)
 			std::replace(fixed.begin() + long(OrbisDir("screenshots").size() + 1), fixed.end(), ':', '.');
 			std::string err;
 			if (player_.SavePicture(fixed, &err))
-				Osd("Image saved: " + FileName(fixed), 3);
+				Osd(Fmt(T("Image saved: %s"), FileName(fixed).c_str()), 3);
 			else
-				MessageBox(err, "Save Image", MB_OK, 3);
+				MessageBox(T(err), T("Save Image"), MB_OK, 3);
 			break;
 		}
 		case ID_FILE_SUBTITLES_LOAD:
-			ShowFileBrowser("Open subtitle", BrowseFilter::Subtitles, [this](const std::string& path) {
+			ShowFileBrowser(T("Open subtitle"), BrowseFilter::Subtitles, [this](const std::string& path) {
 				if (path.empty())
 					return;
 				std::string err;
 				if (player_.AddSubtitleFile(path, &err))
 				{
 					subs_enabled_ = true;
-					Osd("Subtitles loaded: " + FileName(path));
+					Osd(Fmt(T("Subtitles loaded: %s"), FileName(path).c_str()));
 				}
 				else
-					MessageBox("Failed to load subtitle file \"" + FileName(path) + "\":\n" + err, "Media Player Classic Home Cinema", MB_OK, 3);
+					MessageBox(Fmt(T("Failed to load subtitle file \"%s\":\n%s"), FileName(path).c_str(), T(err).c_str()),
+						"Media Player Classic Home Cinema", MB_OK, 3);
 			});
 			break;
 		case ID_FILE_PROPERTIES:
@@ -1936,7 +1938,7 @@ void MainFrame::Command(int id)
 		{
 			s.aspect_ratio = id - ID_ASPECTRATIO_DAR;
 			static const char* const kNames[] = {"Default (DAR)", "4:3", "5:4", "16:9", "235:100", "185:100", "Square pixels (SAR)"};
-			Osd(std::string("Aspect Ratio: ") + kNames[s.aspect_ratio]);
+			Osd(Fmt(T("Aspect Ratio: %s"), T(kNames[s.aspect_ratio])));
 			break;
 		}
 		case ID_VIEW_INCSIZE:
@@ -1996,12 +1998,12 @@ void MainFrame::Command(int id)
 			if (player_.State() == PlayState::Playing)
 			{
 				player_.Pause();
-				Osd("Pause");
+				Osd(T("Pause"));
 			}
 			else if (loaded)
 			{
 				player_.Play();
-				Osd("Play");
+				Osd(T("Play"));
 			}
 			else if (!current_url_.empty() && player_.State() != PlayState::Opening)
 				Open(current_url_);
@@ -2010,21 +2012,21 @@ void MainFrame::Command(int id)
 			if (loaded)
 			{
 				player_.Play();
-				Osd("Play");
+				Osd(T("Play"));
 			}
 			break;
 		case ID_PLAY_PAUSE:
 			if (loaded)
 			{
 				player_.Pause();
-				Osd("Pause");
+				Osd(T("Pause"));
 			}
 			break;
 		case ID_PLAY_STOP:
 			if (loaded)
 			{
 				player_.Stop();
-				Osd("Stop");
+				Osd(T("Stop"));
 			}
 			break;
 		case ID_PLAY_FRAMESTEP:
@@ -2052,23 +2054,23 @@ void MainFrame::Command(int id)
 				rate_index_ = std::max(0, std::min(int(sizeof(kRates) / sizeof(kRates[0])) - 1, rate_index_ + (id == ID_PLAY_INCRATE ? 1 : -1)));
 			player_.SetRate(kRates[rate_index_]);
 			char b[64];
-			snprintf(b, sizeof(b), "Rate: %gx", kRates[rate_index_]);
+			snprintf(b, sizeof(b), T("Rate: %gx"), kRates[rate_index_]);
 			Osd(b);
 			break;
 		}
 		case ID_VOLUME_UP:
 			// CVolumeCtrl::IncreaseVolume: up to the next step
 			SetVolume(s.volume + 5 - s.volume % 5);
-			Osd("Volume: " + std::to_string(s.volume) + "%");
+			Osd(Fmt(T("Volume: %d%%"), s.volume));
 			break;
 		case ID_VOLUME_DOWN:
 			SetVolume(s.volume % 5 ? s.volume - s.volume % 5 : s.volume - 5);
-			Osd("Volume: " + std::to_string(s.volume) + "%");
+			Osd(Fmt(T("Volume: %d%%"), s.volume));
 			break;
 		case ID_VOLUME_MUTE:
 			s.mute = !s.mute;
 			ApplyAudio();
-			Osd(s.mute ? "Volume: Off" : "Volume: On");
+			Osd(T(s.mute ? "Volume: Off" : "Volume: On"));
 			break;
 		case ID_AFTERPLAYBACK_DONOTHING:
 			s.after_playback = AfterPlayback::DoNothing;
@@ -2094,14 +2096,14 @@ void MainFrame::Command(int id)
 		{
 			s.sub_delay_ms = id == ID_SUB_DELAY_RESET ? 0 : s.sub_delay_ms + (id == ID_SUB_DELAY_UP ? 100 : -100);
 			player_.SetSubtitleDelay(s.sub_delay_ms / 1000.0);
-			Osd("Subtitle delay: " + std::to_string(s.sub_delay_ms) + " ms");
+			Osd(Fmt(T("Subtitle delay: %d ms"), s.sub_delay_ms));
 			break;
 		}
 		case ID_AUDIO_DELAY_UP:
 		case ID_AUDIO_DELAY_DOWN:
 			s.audio_delay_ms += id == ID_AUDIO_DELAY_UP ? 10 : -10;
 			player_.SetAudioDelay(s.audio_delay_ms / 1000.0);
-			Osd("Audio delay: " + std::to_string(s.audio_delay_ms) + " ms");
+			Osd(Fmt(T("Audio delay: %d ms"), s.audio_delay_ms));
 			break;
 		case ID_NAVIGATE_SKIPBACK:
 			SkipBack();
@@ -2133,9 +2135,9 @@ void MainFrame::Command(int id)
 			ShowOrganizeFavoritesDialog();
 			break;
 		case ID_HELP_HOMEPAGE:
-			MessageBox("MPC-HC's home page is https://mpc-hc.org/ and its code is at https://github.com/mpc-hc/mpc-hc.\n\n"
-					   "This PS5 port: https://github.com/MisterTemaki",
-				"Home Page", MB_OK, 1);
+			MessageBox(T("MPC-HC's home page is https://mpc-hc.org/ and its code is at https://github.com/mpc-hc/mpc-hc.\n\n"
+						 "This PS5 port: https://github.com/MisterTemaki"),
+				T("Home Page"), MB_OK, 1);
 			break;
 		case ID_HELP_ABOUT:
 			ShowAboutDialog();
@@ -2230,7 +2232,7 @@ void MainFrame::LoadPlaylistFile(const std::string& path)
 	FILE* f = fopen(path.c_str(), "r");
 	if (!f)
 	{
-		MessageBox("Can't open " + path, "Open", MB_OK, 3);
+		MessageBox(Fmt(T("Can't open %s"), path.c_str()), T("Open"), MB_OK, 3);
 		return;
 	}
 	const std::string dir = ParentFolder(path);
@@ -2282,11 +2284,11 @@ void MainFrame::CheckForUpdates()
 		case update::Phase::Done: upd_seen_ = update::Phase::Idle; break; // TickUpdate asks again about the restart
 		case update::Phase::Checking:
 		case update::Phase::Downloading:
-		case update::Phase::Installing: Osd("The update is on its way...", 2); break;
+		case update::Phase::Installing: Osd(T("The update is on its way..."), 2); break;
 		default:
 			upd_user_ = true;
 			update::StartCheck(false);
-			Osd("Checking for updates...", 3);
+			Osd(T("Checking for updates..."), 3);
 			break;
 	}
 }
@@ -2297,19 +2299,20 @@ void MainFrame::OfferUpdate(const update::Status& st)
 	snprintf(size, sizeof(size), "%.1f MB", st.size / 1048576.0);
 	if (!have_data_)
 	{
-		MessageBox("Media Player Classic PS5 " + st.latest + " is available (you have " MPCPS5_PS5_VERSION ").\n\n"
-				   "To install it, the app has to be unlocked: send MediaPlayerClassicPS5-v" MPCPS5_PS5_VERSION
-				   ".elf with your payload loader, then open the app again.",
-			"Check for updates", MB_OK, 1);
+		MessageBox(Fmt(T("Media Player Classic PS5 %s is available (you have %s).\n\n"
+						 "To install it, the app has to be unlocked: send MediaPlayerClassicPS5-v%s.elf with your payload "
+						 "loader, then open the app again."),
+					   st.latest.c_str(), MPCPS5_PS5_VERSION, MPCPS5_PS5_VERSION),
+			T("Check for updates"), MB_OK, 1);
 		return;
 	}
-	MessageBox("Media Player Classic PS5 " + st.latest + " is available (you have " MPCPS5_PS5_VERSION ").\n\nDownload it (" +
-				   size + ") and install it now?",
-		"Check for updates", MB_YESNO, 4, [this](int r) {
+	MessageBox(Fmt(T("Media Player Classic PS5 %s is available (you have %s).\n\nDownload it (%s) and install it now?"),
+				   st.latest.c_str(), MPCPS5_PS5_VERSION, size),
+		T("Check for updates"), MB_YESNO, 4, [this](int r) {
 			if (r == IDYES && update::StartInstall())
 			{
 				upd_installing_ = true;
-				Osd("Downloading the update...", 2);
+				Osd(T("Downloading the update..."), 2);
 			}
 		});
 }
@@ -2327,7 +2330,7 @@ void MainFrame::RestartForUpdate()
 			usleep(100 * 1000);
 	OrbisLogOpen("boot-after-update");
 	OrbisLog("[update] sceSystemServiceLoadExec(%s) -> %x", path.c_str(), unsigned(rc));
-	MessageBox("Close Media Player Classic PS5 and open it again to use the new version.", "Check for updates", MB_OK, 1);
+	MessageBox(T("Close Media Player Classic PS5 and open it again to use the new version."), T("Check for updates"), MB_OK, 1);
 }
 
 void MainFrame::TickUpdate()
@@ -2341,8 +2344,8 @@ void MainFrame::TickUpdate()
 			case update::Phase::UpToDate:
 				OrbisLog("[update] up to date (%s)", MPCPS5_PS5_VERSION);
 				if (upd_user_)
-					MessageBox("You are using the latest version of Media Player Classic PS5 (" MPCPS5_PS5_VERSION ").",
-						"Check for updates", MB_OK, 1);
+					MessageBox(Fmt(T("You are using the latest version of Media Player Classic PS5 (%s)."), MPCPS5_PS5_VERSION),
+						T("Check for updates"), MB_OK, 1);
 				upd_user_ = upd_auto_ = false;
 				break;
 			case update::Phase::Available:
@@ -2354,17 +2357,17 @@ void MainFrame::TickUpdate()
 				break;
 			case update::Phase::Failed:
 				if (upd_user_ || upd_installing_)
-					MessageBox("Media Player Classic PS5 could not be updated:\n" + st.error +
-								   (upd_installing_ ? "\n\nNothing was changed." : ""),
-						"Check for updates", MB_OK, 3);
+					MessageBox(Fmt(T("Media Player Classic PS5 could not be updated:\n%s"), T(st.error).c_str()) +
+								   (upd_installing_ ? T("\n\nNothing was changed.") : ""),
+						T("Check for updates"), MB_OK, 3);
 				OrbisLog("[update] failed: %s", st.error.c_str());
 				upd_user_ = upd_auto_ = upd_installing_ = false;
 				break;
 			case update::Phase::Done:
 				OrbisLog("[update] %s installed: offering the restart", st.latest.c_str());
 				upd_installing_ = false;
-				MessageBox("Media Player Classic PS5 " + st.latest + " is installed.\n\nRestart the app now to use it?",
-					"Check for updates", MB_YESNO, 4, [this](int r) {
+				MessageBox(Fmt(T("Media Player Classic PS5 %s is installed.\n\nRestart the app now to use it?"), st.latest.c_str()),
+					T("Check for updates"), MB_YESNO, 4, [this](int r) {
 						if (r == IDYES)
 							RestartForUpdate();
 					});
@@ -2378,9 +2381,9 @@ void MainFrame::TickUpdate()
 		upd_osd_ = now;
 		char b[96];
 		if (st.phase == update::Phase::Downloading)
-			snprintf(b, sizeof(b), "Downloading the update: %d%%", st.total ? int(st.done * 100 / st.total) : 0);
+			snprintf(b, sizeof(b), T("Downloading the update: %d%%"), st.total ? int(st.done * 100 / st.total) : 0);
 		else
-			snprintf(b, sizeof(b), "Installing the update: %d/%d", int(st.done), int(st.total));
+			snprintf(b, sizeof(b), T("Installing the update: %d/%d"), int(st.done), int(st.total));
 		Osd(b, 1.0);
 	}
 }
@@ -2401,7 +2404,7 @@ void MainFrame::Tick()
 				pl_durations_[pl_cur_] = player_.Duration();
 			const double pos = player_.Position();
 			if (pos > 1)
-				Osd("Resumed at " + FormatTime(pos, player_.Duration() >= 3600), 2.5);
+				Osd(Fmt(T("Resumed at %s"), FormatTime(pos, player_.Duration() >= 3600).c_str()), 2.5);
 			else
 				Osd(FileName(current_url_), 2.0);
 			s_.Save();
@@ -2409,8 +2412,9 @@ void MainFrame::Tick()
 		if (st == PlayState::Failed)
 		{
 			const std::string err = player_.Error();
-			MessageBox("Failed to open \"" + FileName(current_url_) + "\":\n" + err, "Media Player Classic Home Cinema", MB_OK, 3);
-			ProsperoNotify("Media Player Classic PS5: could not open %s", FileName(current_url_).c_str());
+			MessageBox(Fmt(T("Failed to open \"%s\":\n%s"), FileName(current_url_).c_str(), T(err).c_str()),
+				"Media Player Classic Home Cinema", MB_OK, 3);
+			ProsperoNotify(T("Media Player Classic PS5: could not open %s"), FileName(current_url_).c_str());
 			player_.Close();
 		}
 		last_state_ = st;
@@ -2438,7 +2442,7 @@ void MainFrame::Tick()
 			else
 			{
 				player_.Pause();
-				Osd("No more media in the current folder.", 3);
+				Osd(T("No more media in the current folder."), 3);
 			}
 		}
 		else if (s_.after_playback == AfterPlayback::Exit)
@@ -2780,9 +2784,10 @@ int MainFrame::Run(const std::string& first)
 	if (!first.empty())
 		OpenAny(first);
 	if (!have_data_)
-		MessageBox("Media Player Classic PS5 has no access to the console's storage (/data) or USB drives.\n\nSend "
-				   "MediaPlayerClassicPS5-v" MPCPS5_PS5_VERSION ".elf with your payload loader (it unlocks the app), then open the "
-				   "app again. Network streams still work.",
+		MessageBox(Fmt(T("Media Player Classic PS5 has no access to the console's storage (/data) or USB drives.\n\nSend "
+						 "MediaPlayerClassicPS5-v%s.elf with your payload loader (it unlocks the app), then open the app "
+						 "again. Network streams still work."),
+					   MPCPS5_PS5_VERSION),
 			"Media Player Classic Home Cinema", MB_OK, 2);
 
 	Bitmap screen{ps5video::Surface(), ps5video::kWidth, ps5video::kHeight, ps5video::kWidth};

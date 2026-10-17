@@ -14,17 +14,21 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 130 host tests
+> **Status (1.1.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 148 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
-> doesn't (the log is in `/data/mpcps5/logs/boot.log`).
+> doesn't (with `debug_logs=1` in `/data/mpcps5/mpc-hc.ini` the log goes to `/data/mpcps5/logs/boot.log`).
 
 **1.1:** what VLC for PS5 ([ZiZc3/VLC](https://github.com/ZiZc3/VLC)) showed can be done on the console:
 **hardware decoding** of H.264 and HEVC (8 and 10-bit, up to 4K) on the PS5's video decoder, **HDR10 and HLG
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.1.1:** the interface in five languages -- English (the default), Spanish, Portuguese (Brazil), French and
+German -- picked in **View > Options > Player > Language** (kept in `mpc-hc.ini`). Debug logs are now off by
+default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Contents
 
@@ -43,8 +47,8 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.1.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.1.elf`).
+1. Send `MediaPlayerClassicPS5-v1.1.1.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.1.1.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -243,7 +247,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 /data/mpcps5/media           a place for media on the console's storage
 /data/mpcps5/fonts           extra subtitle fonts
 /data/mpcps5/screenshots     File > Save Image
-/data/mpcps5/logs/boot.log   the log (boot.prev.log: the run before; installer.log, helper.log)
+/data/mpcps5/logs/boot.log   the log, only with debug_logs=1 in mpc-hc.ini (boot.prev.log: the run before;
+                             installer.log, helper.log)
 /data/mpcps5/update-check.txt  when the app last looked for an update
 ```
 
@@ -260,7 +265,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.1.elf, the release zip, mpc-ps5-v1.1-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.1.1.elf, the release zip, mpc-ps5-v1.1.1-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 

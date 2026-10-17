@@ -4,6 +4,7 @@
 
 #include "mpc_dialogs.h"
 
+#include "mpc_i18n.h"
 #include "mpc_player.h"
 #include "mpc_settings.h"
 #include "mpc_smb.h"
@@ -114,7 +115,7 @@ bool ListDir(const std::string& path, std::vector<FsEntry>& out, std::string* er
 	if (!d)
 	{
 		if (err)
-			*err = "Can't open the folder " + path;
+			*err = Fmt(T("Can't open the folder %s"), path.c_str());
 		return false;
 	}
 	while (dirent* e = readdir(d))
@@ -213,13 +214,13 @@ std::string SizeText(uint64_t b)
 {
 	char s[64];
 	if (b < 1024)
-		snprintf(s, sizeof(s), "%llu bytes", (unsigned long long)b);
+		snprintf(s, sizeof(s), T("%llu bytes"), (unsigned long long)b);
 	else if (b < (1ull << 20))
-		snprintf(s, sizeof(s), "%llu KB", (unsigned long long)((b + 1023) / 1024));
+		snprintf(s, sizeof(s), T("%llu KB"), (unsigned long long)((b + 1023) / 1024));
 	else if (b < (1ull << 30))
-		snprintf(s, sizeof(s), "%.1f MB", b / 1048576.0);
+		snprintf(s, sizeof(s), T("%.1f MB"), b / 1048576.0);
 	else
-		snprintf(s, sizeof(s), "%.2f GB", b / 1073741824.0);
+		snprintf(s, sizeof(s), T("%.2f GB"), b / 1073741824.0);
 	return s;
 }
 
@@ -359,19 +360,19 @@ const Image* FileIcon(const std::string& name)
 std::string TypeName(const std::string& name, bool dir)
 {
 	if (dir)
-		return "File folder";
+		return T("File folder");
 	std::string e = LowerExt(name);
 	if (e.empty())
-		return "File";
+		return T("File");
 	for (char& c : e)
 		c = char(toupper(static_cast<unsigned char>(c)));
 	if (IsSubtitleFile(name))
-		return e + " Subtitle File";
+		return Fmt(T("%s Subtitle File"), e.c_str());
 	if (IsPlaylistFile(name))
-		return e + " Playlist";
+		return Fmt(T("%s Playlist"), e.c_str());
 	if (IsMediaFile(name))
 		return "MPC-HC." + e;
-	return e + " File";
+	return Fmt(T("%s File"), e.c_str());
 }
 
 std::string DateText(int64_t t)
@@ -431,33 +432,33 @@ public:
 	{
 		places.clear();
 		nav->items.clear();
-		nav->items.push_back({"This PS5", 0, Icon(Ico::Computer), false});
-		places.push_back({"This PS5", "", Ico::Computer});
+		nav->items.push_back({T("This PS5"), 0, Icon(Ico::Computer), false});
+		places.push_back({T("This PS5"), "", Ico::Computer});
 		auto add = [&](const std::string& n, const std::string& p, Ico ic, int level = 1) {
 			nav->items.push_back({n, level, Icon(ic), false});
 			places.push_back({n, p, ic});
 		};
-		add("Media (" + OrbisDir("media") + ")", OrbisDir("media"), Ico::Folder);
-		add("Internal storage (/data)", "/data", Ico::Drive);
+		add(Fmt(T("Media (%s)"), OrbisDir("media").c_str()), OrbisDir("media"), Ico::Folder);
+		add(T("Internal storage (/data)"), "/data", Ico::Drive);
 		for (int i = 0; i < 8; i++)
 		{
 			const std::string p = "/mnt/usb" + std::to_string(i);
 			if (OrbisIsDir(p))
-				add("USB Drive " + std::to_string(i) + " (" + p + ")", p, Ico::Usb);
+				add(Fmt(T("USB Drive %d (%s)"), i, p.c_str()), p, Ico::Usb);
 		}
 		for (int i = 0; i < 2; i++)
 		{
 			const std::string p = "/mnt/ext" + std::to_string(i);
 			if (OrbisIsDir(p))
-				add("Extended Storage " + std::to_string(i) + " (" + p + ")", p, Ico::Usb);
+				add(Fmt(T("Extended Storage %d (%s)"), i, p.c_str()), p, Ico::Usb);
 		}
-		nav->items.push_back({"Network", 0, Icon(Ico::Network), false});
-		places.push_back({"Network", "smb://", Ico::Network});
+		nav->items.push_back({T("Network"), 0, Icon(Ico::Network), false});
+		places.push_back({T("Network"), "smb://", Ico::Network});
 		for (const NetServer& s : AppSettings().servers)
 			add(s.name, s.url, Ico::Server);
-		nav->items.push_back({"Add a network location...", 1, Icon(Ico::Add), false});
+		nav->items.push_back({T("Add a network location..."), 1, Icon(Ico::Add), false});
 		Place ap;
-		ap.name = "Add a network location...";
+		ap.name = T("Add a network location...");
 		ap.icon = Ico::Add;
 		ap.add_network = true;
 		places.push_back(ap);
@@ -499,7 +500,7 @@ public:
 					e.name = places[i].name;
 					e.dir = true;
 					entries.push_back(e);
-					list->rows.push_back({places[i].name, "", places[i].path.compare(0, 6, "smb://") == 0 ? "Network location" : "Drive", ""});
+					list->rows.push_back({places[i].name, "", T(places[i].path.compare(0, 6, "smb://") == 0 ? "Network location" : "Drive"), ""});
 					list->icons.push_back(Icon(places[i].icon));
 				}
 		}
@@ -511,7 +512,7 @@ public:
 				e.name = s.name;
 				e.dir = true;
 				entries.push_back(e);
-				list->rows.push_back({s.name, "", "Network location", HideSecret(s.url)});
+				list->rows.push_back({s.name, "", T("Network location"), HideSecret(s.url)});
 				list->icons.push_back(Icon(Ico::Server));
 			}
 		}
@@ -545,7 +546,7 @@ public:
 		}
 		if (!entries.empty())
 			list->sel = 0;
-		address->text = dir.empty() ? "This PS5" : dir == "smb://" ? "Network" : HideSecret(dir);
+		address->text = dir.empty() ? T("This PS5") : dir == "smb://" ? T("Network") : HideSecret(dir);
 		name->text = filter == BrowseFilter::Folder ? (dir.empty() || dir == "smb://" ? "" : FileName(dir)) : "";
 		// the navigation pane follows
 		for (size_t i = 0; i < places.size(); i++)
@@ -632,7 +633,7 @@ public:
 		dc.FillSolidRect(CRect(c.left, nav->rect.top, c.right, list->rect.bottom), RGB(255, 255, 255));
 		dc.HLine(c.left, c.right, list->rect.bottom, RGB(230, 230, 230));
 		CRect hint(c.left + DuX(7), c.bottom - DuY(10), c.right - DuX(7), c.bottom - DuY(2));
-		DrawText(dc, UiFont(), "Cross: open   Circle: cancel   L1/R1: next control   Triangle: up one level", hint,
+		DrawText(dc, UiFont(), T("Cross: open   Circle: cancel   L1/R1: next control   Triangle: up one level"), hint,
 			DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, sys::GrayText);
 	}
 
@@ -672,17 +673,18 @@ void ShowFileBrowser(const std::string& title, BrowseFilter filter, std::functio
 	d->bup->rect = R(40, 4, 16, 14);
 	d->address = d->Add(new Edit);
 	d->address->rect = R(60, 4, cw - 64, 14);
-	d->address->keyboard_title = "Go to an address (a folder, or smb://server/share)";
+	d->address->keyboard_title = T("Go to an address (a folder, or smb://server/share)");
 	// the panes
 	d->nav = d->Add(new TreeView);
 	d->nav->rect = R(4, 22, 140, 250);
 	d->list = d->Add(new ListView);
 	d->list->rect = R(148, 22, cw - 152, 250);
 	const int lw = d->list->rect.Width() - ScaleX(20);
-	d->list->columns = {{"Name", lw * 46 / 100}, {"Date modified", lw * 20 / 100}, {"Type", lw * 18 / 100}, {"Size", lw * 16 / 100, true}};
+	d->list->columns = {{T("Name"), lw * 46 / 100}, {T("Date modified"), lw * 20 / 100}, {T("Type"), lw * 18 / 100},
+		{T("Size"), lw * 16 / 100, true}};
 	// the bottom panel: File name, the types, Open / Cancel
 	Static* fl = d->Add(new Static);
-	fl->text = filter == BrowseFilter::Folder ? "Folder:" : "File &name:";
+	fl->text = T(filter == BrowseFilter::Folder ? "Folder:" : "File &name:");
 	fl->flags = DT_RIGHT | DT_VCENTER | DT_SINGLELINE;
 	fl->rect = R(4, 280, 64, 14);
 	d->name = d->Add(new Edit);
@@ -691,18 +693,18 @@ void ShowFileBrowser(const std::string& title, BrowseFilter filter, std::functio
 	d->types = d->Add(new ComboBox);
 	d->types->rect = R(cw - 156, 280, 152, 14);
 	if (filter == BrowseFilter::Subtitles)
-		d->types->items = {"Subtitle files (*.srt;*.ass;*.ssa;*.sub;*.vtt;*.smi)", "All files (*.*)"};
+		d->types->items = {T("Subtitle files (*.srt;*.ass;*.ssa;*.sub;*.vtt;*.smi)"), T("All files (*.*)")};
 	else if (filter == BrowseFilter::Folder)
-		d->types->items = {"Folders"};
+		d->types->items = {T("Folders")};
 	else
-		d->types->items = {"Media files (all types)", "All files (*.*)"};
+		d->types->items = {T("Media files (all types)"), T("All files (*.*)")};
 	d->types->sel = 0;
 	d->ok = d->Add(new Button);
-	d->ok->text = filter == BrowseFilter::Folder ? "Select Folder" : "&Open";
+	d->ok->text = T(filter == BrowseFilter::Folder ? "Select Folder" : "&Open");
 	d->ok->rect = R(cw - 156, 298, 74, 15);
 	d->ok->is_default = true;
 	d->cancel = d->Add(new Button);
-	d->cancel->text = "Cancel";
+	d->cancel->text = T("Cancel");
 	d->cancel->rect = R(cw - 78, 298, 74, 15);
 
 	FileBrowser* fb = d;
@@ -732,7 +734,7 @@ void ShowFileBrowser(const std::string& title, BrowseFilter filter, std::functio
 		else if (OrbisIsFile(t))
 			fb->Finish(t);
 		else
-			MessageBox("Can't find '" + t + "'. Check the spelling and try again.", fb->title, MB_OK, 3);
+			MessageBox(Fmt(T("Can't find '%s'. Check the spelling and try again."), t.c_str()), fb->title, MB_OK, 3);
 	};
 	d->types->on_change = [fb] { fb->Navigate(fb->dir, false); };
 	d->list->on_open = [fb] { fb->OpenSelected(); };
@@ -796,15 +798,15 @@ void ShowOpenDialog(std::function<void(const std::string&, const std::string&, b
 		}
 	};
 	OpenDlg* d = new OpenDlg;
-	d->title = "Open";
+	d->title = T("Open");
 	d->done = std::move(done);
 	d->rect = CRect(0, 0, Dialog::DuX(255) + 2, Dialog::DuY(113) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	Static* t = d->Add(new Static);
-	t->text = "Type the address of a movie or audio file (on the Internet or your computer) and the player will open it for you.";
+	t->text = T("Type the address of a movie or audio file (on the Internet or your computer) and the player will open it for you.");
 	t->rect = d->DuRect(35, 5, 213, 25);
 	Static* l1 = d->Add(new Static);
-	l1->text = "Open:";
+	l1->text = T("Open:");
 	l1->rect = d->DuRect(10, 32, 245, 8);
 	d->open = d->Add(new ComboBox);
 	d->open->editable = true;
@@ -813,32 +815,32 @@ void ShowOpenDialog(std::function<void(const std::string&, const std::string&, b
 	if (!d->open->items.empty())
 		d->open->text = d->open->items.front();
 	Button* b1 = d->Add(new Button);
-	b1->text = "Browse...";
+	b1->text = T("Browse...");
 	b1->rect = d->DuRect(200, 41, 50, 14);
 	Static* l2 = d->Add(new Static);
-	l2->text = "Dub:";
+	l2->text = T("Dub:");
 	l2->rect = d->DuRect(10, 58, 245, 8);
 	d->dub = d->Add(new ComboBox);
 	d->dub->editable = true;
 	d->dub->rect = d->DuRect(10, 68, 188, 14);
 	d->dub->enabled = false; // a separate audio file is not supported yet
 	Button* b2 = d->Add(new Button);
-	b2->text = "Browse...";
+	b2->text = T("Browse...");
 	b2->rect = d->DuRect(200, 67, 50, 14);
 	b2->enabled = false;
 	d->add = d->Add(new CheckBox);
-	d->add->text = "Add to playlist without opening";
+	d->add->text = T("Add to playlist without opening");
 	d->add->rect = d->DuRect(10, 84, 235, 8);
 	Button* ok = d->Add(new Button);
-	ok->text = "OK";
+	ok->text = T("OK");
 	ok->is_default = true;
 	ok->rect = d->DuRect(148, 94, 50, 14);
 	Button* cancel = d->Add(new Button);
-	cancel->text = "Cancel";
+	cancel->text = T("Cancel");
 	cancel->rect = d->DuRect(200, 94, 50, 14);
 	OpenDlg* dd = d;
 	b1->on_click = [dd] {
-		ShowFileBrowser("Open", BrowseFilter::Media, [dd](const std::string& p) {
+		ShowFileBrowser(T("Open"), BrowseFilter::Media, [dd](const std::string& p) {
 			if (!p.empty())
 				dd->open->text = p;
 		});
@@ -911,16 +913,16 @@ void ShowGoToDialog(double pos, double fps, std::function<void(double)> done)
 		}
 	};
 	GoTo* d = new GoTo;
-	d->title = "Go To...";
+	d->title = T("Go To...");
 	d->done = std::move(done);
 	d->fps = fps > 0 ? fps : 25;
 	d->rect = CRect(0, 0, Dialog::DuX(186) + 2, Dialog::DuY(120) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	Static* t1 = d->Add(new Static);
-	t1->text = "Enter a timecode using the format [hh:]mm:ss.ms to jump to a specified time. You do not need to enter the separators explicitly.";
+	t1->text = T("Enter a timecode using the format [hh:]mm:ss.ms to jump to a specified time. You do not need to enter the separators explicitly.");
 	t1->rect = d->DuRect(5, 5, 173, 27);
 	Static* l1 = d->Add(new Static);
-	l1->text = "Time";
+	l1->text = T("Time");
 	l1->rect = d->DuRect(10, 42, 35, 8);
 	d->time = d->Add(new Edit);
 	d->time->rect = d->DuRect(47, 39, 80, 14);
@@ -928,24 +930,24 @@ void ShowGoToDialog(double pos, double fps, std::function<void(double)> done)
 	const long ms = long(pos * 1000);
 	snprintf(b, sizeof(b), "%02ld:%02ld:%02ld.%03ld", ms / 3600000, (ms / 60000) % 60, (ms / 1000) % 60, ms % 1000);
 	d->time->text = b;
-	d->time->keyboard_title = "Time ([hh:]mm:ss.ms)";
+	d->time->keyboard_title = T("Time ([hh:]mm:ss.ms)");
 	Button* g1 = d->Add(new Button);
-	g1->text = "Go!";
+	g1->text = T("Go!");
 	g1->is_default = true;
 	g1->rect = d->DuRect(131, 39, 50, 14);
 	Static* t2 = d->Add(new Static);
-	t2->text = "Enter two numbers to jump to a specified frame, the first is the frame number, the second is the frame rate.";
+	t2->text = T("Enter two numbers to jump to a specified frame, the first is the frame number, the second is the frame rate.");
 	t2->rect = d->DuRect(5, 64, 173, 26);
 	Static* l2 = d->Add(new Static);
-	l2->text = "Frame";
+	l2->text = T("Frame");
 	l2->rect = d->DuRect(10, 99, 35, 8);
 	d->frame = d->Add(new Edit);
 	d->frame->rect = d->DuRect(47, 96, 81, 14);
 	snprintf(b, sizeof(b), "%ld, %.3f", long(std::lround(pos * d->fps)), d->fps);
 	d->frame->text = b;
-	d->frame->keyboard_title = "Frame, frame rate";
+	d->frame->keyboard_title = T("Frame, frame rate");
 	Button* g2 = d->Add(new Button);
-	g2->text = "Go!";
+	g2->text = T("Go!");
 	g2->rect = d->DuRect(131, 96, 50, 14);
 	GoTo* dd = d;
 	g1->on_click = [dd] { dd->GoTime(); };
@@ -957,6 +959,19 @@ void ShowGoToDialog(double pos, double fps, std::function<void(double)> done)
 
 // ===========================================================================================================
 // Properties (CPPageFileInfoSheet: Details, MediaInfo)
+namespace
+{
+// a Details() key on the screen: "Duration", "Video #0" (the kind translated, the number kept); the file's own
+// tags come back as they are
+std::string KeyText(const std::string& key)
+{
+	const size_t hash = key.find(" #");
+	if (hash != std::string::npos)
+		return T(key.substr(0, hash)) + key.substr(hash);
+	return T(key);
+}
+} // namespace
+
 void ShowPropertiesDialog(Player& player, const std::string& url)
 {
 	struct Props : public Dialog
@@ -984,11 +999,11 @@ void ShowPropertiesDialog(Player& player, const std::string& url)
 		}
 	};
 	Props* d = new Props;
-	d->title = FileName(url) + " Properties";
+	d->title = Fmt(T("%s Properties"), FileName(url).c_str());
 	d->rect = CRect(0, 0, Dialog::DuX(248) + 2, Dialog::DuY(250) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	d->tabs = d->Add(new TabControl);
-	d->tabs->tabs = {"Details", "MediaInfo"};
+	d->tabs->tabs = {T("Details"), T("MediaInfo")};
 	d->tabs->rect = d->DuRect(7, 7, 234, 216);
 	Props* dd = d;
 	d->tabs->on_change = [dd] { dd->Show(dd->tabs->sel); };
@@ -1022,9 +1037,9 @@ void ShowPropertiesDialog(Player& player, const std::string& url)
 		snprintf(b, sizeof(b), "%d x %d", player.VideoWidth(), player.VideoHeight());
 		vsize = b;
 	}
-	const char* labels[] = {"Type:", "Size:", "Media length:", "Video size:", "Created:"};
-	const std::string values[] = {type, size.empty() ? "Not known" : size, length.empty() ? "Not known" : length,
-		vsize.empty() ? "Not applicable" : vsize, created.empty() ? "Not known" : created};
+	const char* labels[] = {T("Type:"), T("Size:"), T("Media length:"), T("Video size:"), T("Created:")};
+	const std::string values[] = {type, size.empty() ? T("Not known") : size, length.empty() ? T("Not known") : length,
+		vsize.empty() ? T("Not applicable") : vsize, created.empty() ? T("Not known") : created};
 	for (int i = 0; i < 5; i++)
 	{
 		add_static(labels[i], 10, 36 + i * 15, 60, 8, 0);
@@ -1034,19 +1049,19 @@ void ShowPropertiesDialog(Player& player, const std::string& url)
 	tags->rect = d->DuRect(7 + 10, 21 + 115, 213, 77);
 	for (const auto& kv : det)
 		if (kv.first.find('#') == std::string::npos && kv.first != "Format" && kv.first != "Duration" && kv.first != "File size")
-			tags->lines.push_back(kv.first + ": " + kv.second);
+			tags->lines.push_back(KeyText(kv.first) + ": " + kv.second);
 	d->page[0].push_back(tags);
 	// MediaInfo (IDD_FILEMEDIAINFO): the whole report
 	TextView* mi = d->Add(new TextView);
 	mi->rect = d->DuRect(9, 23, 230, 198);
-	mi->lines.push_back("General");
-	mi->lines.push_back("Complete name : " + HideSecret(url));
+	mi->lines.push_back(T("General"));
+	mi->lines.push_back(T("Complete name") + std::string(" : ") + HideSecret(url));
 	for (const auto& kv : det)
 	{
 		if (kv.first.find('#') != std::string::npos)
 		{
 			mi->lines.push_back("");
-			mi->lines.push_back(kv.first);
+			mi->lines.push_back(KeyText(kv.first));
 			// "codec (profile), WxH, fps, ..." one per line
 			std::string v = kv.second;
 			size_t p = 0;
@@ -1058,18 +1073,18 @@ void ShowPropertiesDialog(Player& player, const std::string& url)
 			}
 		}
 		else
-			mi->lines.push_back(kv.first + " : " + kv.second);
+			mi->lines.push_back(KeyText(kv.first) + " : " + kv.second);
 	}
 	d->page[1].push_back(mi);
 	Button* ok = d->Add(new Button);
-	ok->text = "OK";
+	ok->text = T("OK");
 	ok->is_default = true;
 	ok->rect = d->DuRect(85, 229, 50, 14);
 	Button* cancel = d->Add(new Button);
-	cancel->text = "Cancel";
+	cancel->text = T("Cancel");
 	cancel->rect = d->DuRect(139, 229, 50, 14);
 	Button* apply = d->Add(new Button);
-	apply->text = "&Apply";
+	apply->text = T("&Apply");
 	apply->rect = d->DuRect(193, 229, 50, 14);
 	apply->enabled = false;
 	ok->on_click = [dd] { dd->EndDialog(1); };
@@ -1093,7 +1108,7 @@ void ShowAboutDialog()
 		}
 	};
 	About* d = new About;
-	d->title = "About";
+	d->title = T("About");
 	d->rect = CRect(0, 0, Dialog::DuX(260) + 2, Dialog::DuY(206) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	auto S = [&](const std::string& t, int x, int y, int w, int h, COLORREF c = sys::WindowText) {
@@ -1104,38 +1119,38 @@ void ShowAboutDialog()
 		return s;
 	};
 	S("MPC-HC 1.7.13 (PS5 port " MPCPS5_PS5_VERSION ")", 60, 8, 200, 8);
-	S("Copyright \xC2\xA9 2002-2017 see Authors.txt", 60, 20, 200, 8, sys::HotTrack);
+	S(T("Copyright \xC2\xA9 2002-2017 see Authors.txt"), 60, 20, 200, 8, sys::HotTrack);
 	S("https://mpc-hc.org/  -  PS5: github.com/MisterTemaki", 60, 32, 200, 8, sys::HotTrack);
-	S("This program is freeware and released under the GNU General Public License.", 7, 46, 246, 18);
-	S("English translation made by MPC-HC Team. PS5 port: MisterTemaki, with PS5SX2's PS5 layer.", 7, 66, 246, 8);
+	S(T("This program is freeware and released under the GNU General Public License."), 7, 46, 246, 18);
+	S(T("English translation made by MPC-HC Team. PS5 port: MisterTemaki, with PS5SX2's PS5 layer."), 7, 66, 246, 8);
 	GroupBox* g1 = d->Add(new GroupBox);
-	g1->text = "Build information";
+	g1->text = T("Build information");
 	g1->rect = d->DuRect(7, 80, 246, 60);
-	S("Version:", 13, 92, 85, 8);
+	S(T("Version:"), 13, 92, 85, 8);
 	S("1.7.13 / PS5 " MPCPS5_PS5_VERSION, 95, 92, 155, 8);
-	S("Compiler:", 13, 104, 85, 8);
+	S(T("Compiler:"), 13, 104, 85, 8);
 #if defined(__clang__)
 	S(std::string("Clang ") + __clang_version__, 95, 104, 155, 8);
 #else
 	S("GCC " __VERSION__, 95, 104, 155, 8);
 #endif
-	S("FFmpeg:", 13, 116, 85, 8);
-	S(FFmpegVersion() + " (LAV Filters' engine)", 95, 116, 155, 8);
-	S("Build date:", 13, 128, 85, 8);
+	S(T("FFmpeg:"), 13, 116, 85, 8);
+	S(Fmt(T("%s (LAV Filters' engine)"), FFmpegVersion().c_str()), 95, 116, 155, 8);
+	S(T("Build date:"), 13, 128, 85, 8);
 	S(__DATE__ " " __TIME__, 95, 128, 155, 8);
 	GroupBox* g2 = d->Add(new GroupBox);
-	g2->text = "Operating system";
+	g2->text = T("Operating system");
 	g2->rect = d->DuRect(7, 146, 246, 36);
-	S("Name:", 13, 158, 85, 8);
+	S(T("Name:"), 13, 158, 85, 8);
 	S("PlayStation 5", 95, 158, 155, 8);
-	S("Version:", 13, 170, 85, 8);
-	S("native title (ps5-payload-dev SDK)", 95, 170, 155, 8);
+	S(T("Version:"), 13, 170, 85, 8);
+	S(T("native title (ps5-payload-dev SDK)"), 95, 170, 155, 8);
 	Button* copy = d->Add(new Button);
-	copy->text = "Copy to clipboard";
+	copy->text = T("Copy to clipboard");
 	copy->rect = d->DuRect(7, 186, 110, 14);
 	copy->enabled = false;
 	Button* ok = d->Add(new Button);
-	ok->text = "OK";
+	ok->text = T("OK");
 	ok->is_default = true;
 	ok->rect = d->DuRect(204, 186, 50, 14);
 	About* dd = d;
@@ -1200,14 +1215,14 @@ public:
 	Static* Text(int p, const std::string& t, int x, int y, int w, int h, unsigned flags = DT_LEFT | DT_WORDBREAK)
 	{
 		Static* s = P(p, new Static, x, y, w, h);
-		s->text = t;
+		s->text = T(t);
 		s->flags = flags;
 		return s;
 	}
 	CheckBox* Check(int p, const std::string& t, int x, int y, int w, int h, bool v, bool en = true)
 	{
 		CheckBox* c = P(p, new CheckBox, x, y, w, h);
-		c->text = t;
+		c->text = T(t);
 		c->checked = v;
 		c->enabled = en;
 		return c;
@@ -1222,7 +1237,7 @@ public:
 	GroupBox* Group(int p, const std::string& t, int x, int y, int w, int h)
 	{
 		GroupBox* g = P(p, new GroupBox, x, y, w, h);
-		g->text = t;
+		g->text = T(t);
 		return g;
 	}
 	NumberBox* Number(int p, int x, int y, int w, int h, int v, int lo, int hi, int step = 1, const std::string& suffix = "")
@@ -1238,15 +1253,16 @@ public:
 	ComboBox* Combo(int p, int x, int y, int w, int h, const std::vector<std::string>& items, int sel)
 	{
 		ComboBox* c = P(p, new ComboBox, x, y, w, h);
-		c->items = items;
+		for (const std::string& i : items)
+			c->items.push_back(T(i));
 		c->sel = sel;
 		return c;
 	}
 	int NewPage(const std::string& name, int level = 0)
 	{
 		pages.emplace_back();
-		names.push_back(name);
-		tree->items.push_back({name, level, nullptr, false});
+		names.push_back(T(name));
+		tree->items.push_back({T(name), level, nullptr, false});
 		return int(pages.size()) - 1;
 	}
 };
@@ -1256,7 +1272,7 @@ void ShowOptionsDialog(std::function<void()> applied)
 {
 	Settings& s = AppSettings();
 	Options* d = new Options;
-	d->title = "Options";
+	d->title = T("Options");
 	d->applied = std::move(applied);
 	const int W = Dialog::DuX(436), H = Dialog::DuY(290);
 	d->rect = CRect(0, 0, W + 2, H + d->CaptionHeight() + 1);
@@ -1272,7 +1288,9 @@ void ShowOptionsDialog(std::function<void()> applied)
 	d->Radio(p, "Use the same player for each media file", 10, 17, 105, 27, true, 1);
 	d->Radio(p, "Open a new player for each media file played", 10, 72, 105, 27, false, 1)->enabled = false;
 	d->Group(p, "Language", 5, 129, 115, 30);
-	d->Combo(p, 10, 141, 105, 13, {"English"}, 0);
+	ComboBox* lang = d->Combo(p, 10, 141, 105, 13, {}, s.language); // the languages by their own names
+	for (int i = 0; i < int(Language::Count); i++)
+		lang->items.push_back(LanguageName(i));
 	d->Group(p, "Title bar", 5, 164, 115, 68);
 	CheckBox* t0 = d->Radio(p, "Display full path", 10, 176, 105, 8, s.title_bar == 0, 2);
 	CheckBox* t1 = d->Radio(p, "File name only", 10, 188, 105, 8, s.title_bar == 1, 2);
@@ -1294,7 +1312,8 @@ void ShowOptionsDialog(std::function<void()> applied)
 	d->Check(p, "Remember last window position", 129, 193, 160, 8, true, false);
 	d->Check(p, "Remember last window size", 129, 206, 160, 8, true, false);
 	d->Check(p, "Remember last Pan-n-Scan Zoom", 129, 219, 160, 8, false, false);
-	d->apply_fns.push_back([&s, t0, t1, t2, osd, hist, fpos] {
+	d->apply_fns.push_back([&s, t0, t1, t2, osd, hist, fpos, lang] {
+		s.language = std::max(0, std::min(int(Language::Count) - 1, lang->sel));
 		s.title_bar = t0->checked ? 0 : t1->checked ? 1 : 2;
 		(void)t2;
 		s.show_osd = osd->checked;
@@ -1413,8 +1432,8 @@ void ShowOptionsDialog(std::function<void()> applied)
 	d->Group(sp, "Screen Alignment && Margins", 114, 5, 177, 60);
 	d->Text(sp, "Bottom", 119, 20, 40, 8);
 	NumberBox* margin = d->Number(sp, 160, 17, 50, 14, s.sub_margin, 0, 200);
-	d->Text(sp, "Extra fonts (Chinese, Japanese...): put .ttf/.otf files in " + OrbisDir("fonts") + " and start the player again.",
-		114, 72, 177, 40);
+	d->Text(sp, "", 114, 72, 177, 40)->text =
+		Fmt(T("Extra fonts (Chinese, Japanese...): put .ttf/.otf files in %s and start the player again."), OrbisDir("fonts").c_str());
 	d->apply_fns.push_back([&s, sdel, pvid, fsize, bold, ow, margin] {
 		s.sub_delay_ms = sdel->value;
 		s.sub_position = pvid->checked ? 0 : 1;
@@ -1451,7 +1470,7 @@ void ShowOptionsDialog(std::function<void()> applied)
 	NumberBox* speed = d->Number(p, 175, 33, 50, 14, s.cursor_speed, 1, 5);
 	d->Group(p, "Network locations", 5, 70, 286, 120);
 	ListView* servers = d->P(p, new ListView, 10, 82, 220, 100);
-	servers->columns = {{"Name", servers->rect.Width() * 40 / 100}, {"Address", servers->rect.Width() * 58 / 100}};
+	servers->columns = {{T("Name"), servers->rect.Width() * 40 / 100}, {T("Address"), servers->rect.Width() * 58 / 100}};
 	auto fill_servers = [&s, servers] {
 		servers->rows.clear();
 		for (const auto& v : s.servers)
@@ -1461,9 +1480,9 @@ void ShowOptionsDialog(std::function<void()> applied)
 	};
 	fill_servers();
 	Button* addsrv = d->P(p, new Button, 235, 82, 50, 14);
-	addsrv->text = "Add...";
+	addsrv->text = T("Add...");
 	Button* delsrv = d->P(p, new Button, 235, 100, 50, 14);
-	delsrv->text = "Delete";
+	delsrv->text = T("Delete");
 	addsrv->on_click = [&s, fill_servers] {
 		ShowAddNetworkDialog([&s, fill_servers](const std::string& n, const std::string& u) {
 			s.servers.push_back({n, u});
@@ -1477,10 +1496,10 @@ void ShowOptionsDialog(std::function<void()> applied)
 	};
 	d->Group(p, "Settings management", 5, 194, 286, 28);
 	Button* reset = d->P(p, new Button, 10, 204, 86, 14);
-	reset->text = "Reset";
+	reset->text = T("Reset");
 	reset->on_click = [o] {
-		MessageBox("Restore all the settings to their defaults? (Recent files, favorites and network locations are kept.)",
-			"Options", MB_YESNO, 4, [o](int r) {
+		MessageBox(T("Restore all the settings to their defaults? (Recent files, favorites and network locations are kept.)"),
+			T("Options"), MB_YESNO, 4, [o](int r) {
 				if (r != IDYES)
 					return;
 				Settings& st = AppSettings();
@@ -1489,6 +1508,7 @@ void ShowOptionsDialog(std::function<void()> applied)
 				fresh.favorites = st.favorites;
 				fresh.servers = st.servers;
 				fresh.positions = st.positions;
+				fresh.debug_logs = st.debug_logs; // not one of the Options' settings
 				st = fresh;
 				o->EndDialog(1);
 				if (o->applied)
@@ -1503,14 +1523,14 @@ void ShowOptionsDialog(std::function<void()> applied)
 
 	// the buttons
 	Button* ok = d->Add(new Button);
-	ok->text = "OK";
+	ok->text = T("OK");
 	ok->is_default = true;
 	ok->rect = d->DuRect(270, 270, 50, 14);
 	Button* cancel = d->Add(new Button);
-	cancel->text = "Cancel";
+	cancel->text = T("Cancel");
 	cancel->rect = d->DuRect(326, 270, 50, 14);
 	Button* apply = d->Add(new Button);
-	apply->text = "&Apply";
+	apply->text = T("&Apply");
 	apply->rect = d->DuRect(382, 270, 50, 14);
 	ok->on_click = [o] {
 		o->Apply();
@@ -1536,31 +1556,31 @@ void ShowAddFavoriteDialog(const std::string& name, std::function<void(const std
 		std::function<void(const std::string&, bool)> done;
 	};
 	Fav* d = new Fav;
-	d->title = "Add Favorite";
+	d->title = T("Add Favorite");
 	d->done = std::move(done);
 	d->rect = CRect(0, 0, Dialog::DuX(252) + 2, Dialog::DuY(84) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	GroupBox* g = d->Add(new GroupBox);
-	g->text = "Choose a name for your shortcut:";
+	g->text = T("Choose a name for your shortcut:");
 	g->rect = d->DuRect(5, 5, 242, 29);
 	d->name = d->Add(new ComboBox);
 	d->name->editable = true;
 	d->name->text = name;
 	d->name->rect = d->DuRect(10, 17, 232, 13);
 	d->pos = d->Add(new CheckBox);
-	d->pos->text = "Remember position";
+	d->pos->text = T("Remember position");
 	d->pos->checked = true;
 	d->pos->rect = d->DuRect(10, 38, 232, 8);
 	CheckBox* rel = d->Add(new CheckBox);
-	rel->text = "Relative drive";
+	rel->text = T("Relative drive");
 	rel->enabled = false;
 	rel->rect = d->DuRect(10, 50, 232, 10);
 	Button* ok = d->Add(new Button);
-	ok->text = "OK";
+	ok->text = T("OK");
 	ok->is_default = true;
 	ok->rect = d->DuRect(143, 62, 50, 14);
 	Button* cancel = d->Add(new Button);
-	cancel->text = "Cancel";
+	cancel->text = T("Cancel");
 	cancel->rect = d->DuRect(197, 62, 50, 14);
 	Fav* dd = d;
 	ok->on_click = [dd] {
@@ -1592,11 +1612,11 @@ void ShowOrganizeFavoritesDialog()
 		}
 	};
 	Org* d = new Org;
-	d->title = "Organize Favorites";
+	d->title = T("Organize Favorites");
 	d->rect = CRect(0, 0, Dialog::DuX(276) + 2, Dialog::DuY(170) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	TabControl* tabs = d->Add(new TabControl);
-	tabs->tabs = {"Files", "DVDs", "Devices"};
+	tabs->tabs = {T("Files"), T("DVDs"), T("Devices")};
 	tabs->rect = d->DuRect(5, 5, 205, 160);
 	tabs->tab_stop = false;
 	d->list = d->Add(new ListView);
@@ -1604,19 +1624,19 @@ void ShowOrganizeFavoritesDialog()
 	d->list->rect = d->DuRect(8, 21, 199, 141);
 	d->list->columns = {{"", d->list->rect.Width() * 75 / 100}, {"", d->list->rect.Width() * 23 / 100, true}};
 	Button* ren = d->Add(new Button);
-	ren->text = "Rename";
+	ren->text = T("Rename");
 	ren->rect = d->DuRect(214, 17, 58, 14);
 	Button* up = d->Add(new Button);
-	up->text = "Move Up";
+	up->text = T("Move Up");
 	up->rect = d->DuRect(214, 43, 58, 14);
 	Button* dn = d->Add(new Button);
-	dn->text = "Move Down";
+	dn->text = T("Move Down");
 	dn->rect = d->DuRect(214, 58, 58, 14);
 	Button* del = d->Add(new Button);
-	del->text = "Delete";
+	del->text = T("Delete");
 	del->rect = d->DuRect(214, 84, 58, 14);
 	Button* ok = d->Add(new Button);
-	ok->text = "OK";
+	ok->text = T("OK");
 	ok->is_default = true;
 	ok->rect = d->DuRect(214, 151, 58, 14);
 	Org* dd = d;
@@ -1625,7 +1645,7 @@ void ShowOrganizeFavoritesDialog()
 		const int i = dd->list->sel;
 		if (i < 0 || i >= int(fav.size()))
 			return;
-		OnScreenKeyboard("Rename", fav[i].name, false, [dd, i, &fav](bool okk, const std::string& t) {
+		OnScreenKeyboard(T("Rename"), fav[i].name, false, [dd, i, &fav](bool okk, const std::string& t) {
 			if (okk && !t.empty() && i < int(fav.size()))
 				fav[i].name = t;
 			dd->Fill();
@@ -1675,22 +1695,22 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 		std::function<void(const std::string&, const std::string&)> done;
 	};
 	Net* d = new Net;
-	d->title = "Add Network Location";
+	d->title = T("Add Network Location");
 	d->done = std::move(done);
 	d->rect = CRect(0, 0, Dialog::DuX(280) + 2, Dialog::DuY(176) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	Static* intro = d->Add(new Static);
-	intro->text = "Specify the location of your network share (a shared folder on a Windows PC, a NAS, Samba). "
-				  "The share and the user are optional: without a share the server's shares are listed.";
+	intro->text = T("Specify the location of your network share (a shared folder on a Windows PC, a NAS, Samba). "
+					"The share and the user are optional: without a share the server's shares are listed.");
 	intro->rect = d->DuRect(7, 7, 266, 26);
 	auto row = [&](const char* label, int y, Edit*& e, const char* kb) {
 		Static* l = d->Add(new Static);
-		l->text = label;
+		l->text = T(label);
 		l->flags = DT_RIGHT | DT_VCENTER | DT_SINGLELINE;
 		l->rect = d->DuRect(7, y, 80, 14);
 		e = d->Add(new Edit);
 		e->rect = d->DuRect(92, y, 181, 14);
-		e->keyboard_title = kb;
+		e->keyboard_title = T(kb);
 	};
 	row("Server (name or IP):", 40, d->host, "Server name or IP address (e.g. 192.168.0.10)");
 	row("Share (optional):", 60, d->share, "Share name (e.g. Videos)");
@@ -1702,11 +1722,11 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 	d->share->cue = "Videos";
 	d->user->cue = "guest";
 	Button* ok = d->Add(new Button);
-	ok->text = "OK";
+	ok->text = T("OK");
 	ok->is_default = true;
 	ok->rect = d->DuRect(169, 154, 50, 14);
 	Button* cancel = d->Add(new Button);
-	cancel->text = "Cancel";
+	cancel->text = T("Cancel");
 	cancel->rect = d->DuRect(223, 154, 50, 14);
 	Net* dd = d;
 	ok->on_click = [dd] {
@@ -1720,7 +1740,7 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 				c = '/';
 		if (host.empty())
 		{
-			MessageBox("Type the server's name or IP address.", dd->title, MB_OK, 2);
+			MessageBox(T("Type the server's name or IP address."), dd->title, MB_OK, 2);
 			return;
 		}
 		auto esc = [](const std::string& s) {

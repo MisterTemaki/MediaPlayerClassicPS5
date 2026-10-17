@@ -83,6 +83,9 @@ std::string SettingsPath()
 
 void Settings::Load()
 {
+	// off by default; the host tests turn the default on (orbis_paths.cpp reads the same variable)
+	if (const char* d = getenv("MPCPS5_LOGS_DEFAULT"))
+		debug_logs = atoi(d) != 0;
 	FILE* f = fopen(SettingsPath().c_str(), "r");
 	if (!f)
 		return;
@@ -172,6 +175,10 @@ void Settings::Load()
 			dpi = n == 96 || n == 120 || n == 144 || n == 168 || n == 192 ? n : 144;
 		else if (k == "CursorSpeed")
 			cursor_speed = Clamp(n, 1, 5);
+		else if (k == "Language")
+			language = Clamp(n, 0, 4);
+		else if (k == "debug_logs")
+			debug_logs = b;
 		else if (k == "LastDir")
 			last_dir = Unescape(v);
 		else if (k.compare(0, 4, "File") == 0 && k.size() > 4 && isdigit(static_cast<unsigned char>(k[4])))
@@ -221,7 +228,8 @@ void Settings::Save() const
 	fprintf(f, "HardwareDecoding=%d\nHdrToneMapping=%d\nHdrPeak=%d\n", hw_decoding, hdr_tonemap, hdr_peak);
 	fprintf(f, "SubFontSize=%d\nSubBold=%d\nSubOutline=%d\nSubMargin=%d\nSubPosition=%d\nSubDelay=%d\n", sub_font_size,
 		sub_bold, sub_outline, sub_margin, sub_position, sub_delay_ms);
-	fprintf(f, "Dpi=%d\nCursorSpeed=%d\nLastDir=%s\n", dpi, cursor_speed, Escape(last_dir).c_str());
+	fprintf(f, "Dpi=%d\nCursorSpeed=%d\nLanguage=%d\ndebug_logs=%d\nLastDir=%s\n", dpi, cursor_speed, language,
+		debug_logs ? 1 : 0, Escape(last_dir).c_str());
 	fprintf(f, "[Recent File List]\n");
 	for (size_t i = 0; i < recent.size(); i++)
 		fprintf(f, "File%zu=%s\n", i + 1, Escape(recent[i]).c_str());

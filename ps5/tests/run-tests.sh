@@ -10,6 +10,8 @@ INSTALLER=$PWD/build/host/mpc-ps5-installer
 HELPER=$PWD/build/host/mpc-ps5-helper
 # ports nobody listens on, so the app's ordinary runs find no helper and no ELF loader
 export MPCPS5_HELPER_PORT=$((20000 + RANDOM % 10000)) MPCPS5_ELFLDR_PORT=$((30000 + RANDOM % 10000)) MPCPS5_JB_NO_OTHERS=1
+# debug logs are off by default (1.1.1); the tests read boot.log, so their default is on (group 18 checks the real one)
+export MPCPS5_LOGS_DEFAULT=1
 CHECK="python3 $PWD/tests/check_ppm.py"
 REGION="python3 $PWD/tests/check_region.py"
 WORK=${WORK:-$(mktemp -d)}
@@ -421,10 +423,10 @@ release() { # tag contentVersion [bad]
 u16run() { MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.1 01.010.000
+release v1.1.1 01.011.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.1.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -451,6 +453,71 @@ for i in $(seq 1 80); do grep -q 'a newer version is installed' $T/inst2.txt 2>/
 expect "grep -q 'a newer version is installed' $T/inst2.txt && grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png" "an older payload sent again leaves the update (and its art) alone"
 expect "! grep -q 'runtime error\|AddressSanitizer' $T/inst.txt $T/inst2.txt" "the payload: no sanitizer reports"
 stop16
+fi
+
+if want 17; then
+echo "== 17. languages: English by default; Spanish, Portuguese (Brazil), French and German translated"
+expect "python3 $PWD/tests/check_i18n.py $PWD/player/mpc_i18n.cpp >/dev/null" "every translation has its five languages and the English format specifiers"
+# the menus (the bar, every menu and the context menu), the bars, the dialogs (About, Options, Open, the file
+# browser, Properties, Go To with the keyboard, Add Favorite), the OSD, a message box
+S="5:cmd info;6:cmd stats;20:key menu;30:key right;40:key right;50:key right;60:key right;70:key right;80:key escape"
+S="$S;82:key escape;88:mouse 960,540;90:rclick;100:key escape;110:cmd about;130:key escape;140:cmd options;170:key escape"
+S="$S;180:cmd open;195:key escape;200:cmd quickopen;220:key escape;230:cmd props;245:key escape;250:cmd goto;258:key enter"
+S="$S;270:key escape;275:key escape;280:cmd addfav;290:key escape;300:cmd volup;305:cmd mute;310:cmd faster;315:cmd next"
+S="$S;320:cmd pause;325:cmd opendir;340:key escape;350:open $WORK/no-such-file.mkv;380:key enter;390:quit"
+for L in 1 2 3 4; do
+	T=$(newroot t17_$L)
+	cp "$MEDIA/chapters.mkv" "$T/root/media/"
+	ini "$T" "Language=$L"
+	rc=$(MPCPS5_HOST_I18N_MISSING=$T/missing.txt run "$T" "0:0" "$S" "145,255,262" "$T/root/media/chapters.mkv")
+	touch $T/missing.txt
+	# what was shown untranslated: only names (the file's, its tracks', the buttons') and texts made from translated formats
+	python3 - $T/missing.txt $PWD/player/mpc_i18n.cpp > $T/untranslated.txt <<'PY'
+import re, sys
+src = open(sys.argv[2], encoding='utf-8').read()
+translated = set(re.findall(r'"((?:[^"\\]|\\.)*)"', src))
+spec = re.compile(r'%(?:%|[-+ #0]*\d*(?:\.\d+)?(?:hh|h|ll|l|z)?[diouxXeEfgGcsp])')
+formats = [re.compile('^' + ''.join('.*' if spec.fullmatch(part) else re.escape(part)
+                                    for part in re.split('(' + spec.pattern + ')', f)) + '$', re.S)
+           for f in translated if '%' in f]
+names = {'L', 'R', 'L1', 'R1', 'L3', 'R3', 'MediaInfo', 'Selawik (Segoe UI)', 'English', 'Español',
+         'Português (Brasil)', 'Français', 'Deutsch', 'Media Player Classic Home Cinema', 'chapters.mkv',
+         'No such file or directory'}  # the last one: FFmpeg's own error text
+for line in open(sys.argv[1], encoding='utf-8'):
+    t = line.rstrip('\n')
+    if t in translated or t in names or not re.search('[A-Za-z]{2}', t):
+        continue
+    if any(f.match(t) for f in formats):
+        continue
+    # names: recent files (&1 ...), chapters (1. name  [time]), tracks (... [eng] (CODEC, ...)), the file's tags
+    if re.match(r'&\d ', t) or re.match(r'\d+\. ', t) or re.search(r' \[[a-z]{2,3}\] \(', t) or re.match(r'[a-z_]+$|[A-Z_]+$', t):
+        continue
+    print(t)
+PY
+	expect "[ $rc = 0 ] && [ ! -s $T/untranslated.txt ]" "language $L: every text shown is translated ($(head -c 300 $T/untranslated.txt | tr '\n' '|'))"
+	nosan "$T"
+done
+expect "grep -q 'Language=4' $T/root/mpc-hc.ini" "the language is kept in mpc-hc.ini"
+# English stays the default: no setting, the texts pass through as they are, the file says Language=0
+T=$(newroot t17en)
+rc=$(MPCPS5_HOST_I18N_MISSING=$T/missing.txt run "$T" "0:0" "10:cmd options;20:key escape;30:cmd about;40:key escape;50:quit" "")
+expect "[ $rc = 0 ] && [ ! -s $T/missing.txt ] && grep -q '^Language=0$' $T/root/mpc-hc.ini" "English by default (Language=0): nothing is looked up"
+nosan "$T"
+fi
+
+if want 18; then
+echo "== 18. debug logs: off by default (nothing written), on with debug_logs=1 in mpc-hc.ini"
+T=$(newroot t18)
+rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "30:quit" "")
+expect "[ $rc = 0 ] && [ ! -e $T/root/logs/boot.log ] && ! grep -q '^\[mpc-ps5' $T/out.txt" "no settings: no boot.log, nothing on stdout"
+expect "grep -q '^debug_logs=0$' $T/root/mpc-hc.ini" "the settings file says debug_logs=0"
+nosan "$T"
+T=$(newroot t18b)
+ini "$T" "debug_logs=1"
+rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "30:quit" "")
+expect "[ $rc = 0 ] && grep -q 'Media Player Classic PS5 $(sed -n 's/^VERSION ?= //p' Makefile), FFmpeg' $T/root/logs/boot.log" "debug_logs=1: boot.log written"
+expect "grep -q '^debug_logs=1$' $T/root/mpc-hc.ini" "and kept when the settings are saved"
+nosan "$T"
 fi
 
 echo

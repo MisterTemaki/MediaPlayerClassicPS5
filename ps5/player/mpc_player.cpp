@@ -4,6 +4,7 @@
 
 #include "mpc_player.h"
 
+#include "mpc_i18n.h"
 #include "mpc_res.h"
 #include "mpc_smb.h"
 #include "mpc_tonemap.h"
@@ -198,8 +199,8 @@ const char* const kChannelNames[] = {"", "mono", "stereo", "2.1", "4.0", "5.0", 
 std::string ChannelText(int ch)
 {
 	if (ch >= 1 && ch <= 8)
-		return kChannelNames[ch];
-	return std::to_string(ch) + " ch";
+		return T(kChannelNames[ch]);
+	return Fmt(T("%d ch"), ch);
 }
 
 std::string LangName(const std::string& code)
@@ -215,7 +216,7 @@ std::string LangName(const std::string& code)
 		{"hun", "Hungarian"}, {"gre", "Greek"}, {"ell", "Greek"}, {"rum", "Romanian"}, {"ron", "Romanian"},
 		{"ukr", "Ukrainian"}, {"vie", "Vietnamese"}, {"ind", "Indonesian"}, {"cat", "Catalan"}};
 	auto it = names.find(Lower(code));
-	return it == names.end() ? code : it->second;
+	return it == names.end() ? code : T(it->second);
 }
 
 // Removes ASS override blocks; reports italics and top alignment.
@@ -1705,7 +1706,7 @@ std::vector<Track> Player::Tracks(TrackType type) const
 		else if (p->codec_type == AVMEDIA_TYPE_VIDEO)
 			info += ", " + std::to_string(p->width) + "x" + std::to_string(p->height);
 		if (st->disposition & AV_DISPOSITION_FORCED)
-			info += ", forced";
+			info += T(", forced");
 		t.name = name.empty() ? info : name + " (" + info + ")";
 		out.push_back(t);
 	}
@@ -1796,7 +1797,7 @@ std::vector<Chapter> Player::Chapters() const
 		Chapter ch;
 		ch.time = c->start * av_q2d(c->time_base) - m->StreamStart();
 		const AVDictionaryEntry* t = av_dict_get(c->metadata, "title", nullptr, 0);
-		ch.name = t ? t->value : "Chapter " + std::to_string(i + 1);
+		ch.name = t ? std::string(t->value) : Fmt(T("Chapter %d"), i + 1);
 		out.push_back(ch);
 	}
 	return out;
@@ -2052,7 +2053,7 @@ bool Player::SavePicture(const std::string& path, std::string* error)
 	avcodec_free_context(&enc);
 	sws_freeContext(c);
 	if (!ok && error)
-		*error = "Can't write " + path;
+		*error = Fmt(T("Can't write %s"), path.c_str());
 	return ok;
 }
 
@@ -2112,7 +2113,7 @@ std::vector<std::pair<std::string, std::string>> Player::Details() const
 	if (ic->pb && avio_size(ic->pb) > 0)
 	{
 		char b[64];
-		snprintf(b, sizeof(b), "%.2f MiB (%lld bytes)", avio_size(ic->pb) / 1048576.0, (long long)avio_size(ic->pb));
+		snprintf(b, sizeof(b), T("%.2f MiB (%lld bytes)"), avio_size(ic->pb) / 1048576.0, (long long)avio_size(ic->pb));
 		d.push_back({"File size", b});
 	}
 	const AVDictionaryEntry* e = nullptr;

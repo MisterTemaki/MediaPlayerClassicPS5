@@ -5,6 +5,8 @@
 
 #include "mpc_update.h"
 
+#include "mpc_i18n.h"
+
 #include "OrbisPaths.h"
 #include "ProsperoNotify.h"
 #include "ProsperoUpdate.h"
@@ -122,7 +124,7 @@ void Init()
 	c.api_url = EnvOr("MPCPS5_UPDATE_API", "");
 	update::Init(c, AvioGet);
 	update::SetOnNewer([](const std::string& v) {
-		ProsperoNotify("Media Player Classic PS5 %s is available: Help, Check for updates.", v.c_str());
+		ProsperoNotify(mpc::T("Media Player Classic PS5 %s is available: Help, Check for updates."), v.c_str());
 		ProsperoNotifyFlush();
 	});
 }

@@ -93,6 +93,10 @@ struct Settings
 	// Interface
 	int dpi = 144; // 96 / 120 / 144 / 192 (100 % .. 200 %)
 	int cursor_speed = 3; // 1..5
+	int language = 0; // Options > Player > Language: 0 English, 1 Spanish, 2 Portuguese (Brazil), 3 French, 4 German
+	// boot.log and the others in <data>/logs: off unless mpc-hc.ini says debug_logs=1 (orbis_paths.cpp reads the
+	// same line; no menu item, the key is kept when the settings are saved)
+	bool debug_logs = false;
 	// Lists
 	std::vector<std::string> recent; // MRU, newest first
 	std::vector<FilePosition> positions;

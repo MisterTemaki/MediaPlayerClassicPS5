@@ -4,6 +4,8 @@
 
 #include "mpc_ui.h"
 
+#include "mpc_i18n.h"
+
 #include "ProsperoInput.h"
 #include "ProsperoSce.h"
 
@@ -598,7 +600,7 @@ void Edit::Activate()
 {
 	if (read_only || !enabled)
 		return;
-	OnScreenKeyboard(keyboard_title.empty() ? "Type" : keyboard_title, text, password,
+	OnScreenKeyboard(keyboard_title.empty() ? TC("keyboard", "Type") : keyboard_title, text, password,
 		[this](bool ok, const std::string& t) {
 			if (ok)
 			{
@@ -646,7 +648,7 @@ void ComboBox::Activate()
 		return;
 	if (editable && items.empty())
 	{
-		OnScreenKeyboard("Type", text, false, [this](bool ok, const std::string& t) {
+		OnScreenKeyboard(TC("keyboard", "Type"), text, false, [this](bool ok, const std::string& t) {
 			if (ok)
 			{
 				text = t;
@@ -658,7 +660,7 @@ void ComboBox::Activate()
 	}
 	std::vector<std::string> list = items;
 	if (editable)
-		list.insert(list.begin(), "(Type with the on-screen keyboard...)");
+		list.insert(list.begin(), T("(Type with the on-screen keyboard...)"));
 	DropDownList(rect, list, editable ? -1 : sel, [this](int i) {
 		if (i < 0)
 			return;
@@ -666,7 +668,7 @@ void ComboBox::Activate()
 		{
 			if (i == 0)
 			{
-				OnScreenKeyboard("Type", text, false, [this](bool ok, const std::string& t) {
+				OnScreenKeyboard(TC("keyboard", "Type"), text, false, [this](bool ok, const std::string& t) {
 					if (ok)
 					{
 						text = t;
@@ -1168,7 +1170,7 @@ void NumberBox::OnClick(int x, int y)
 
 void NumberBox::Activate()
 {
-	OnScreenKeyboard("Number", std::to_string(value), false, [this](bool ok, const std::string& t) {
+	OnScreenKeyboard(T("Number"), std::to_string(value), false, [this](bool ok, const std::string& t) {
 		if (!ok || t.empty())
 			return;
 		value = std::max(min, std::min(max, atoi(t.c_str())));
@@ -1758,7 +1760,7 @@ void MessageBox(const std::string& text, const std::string& caption, int buttons
 	for (size_t i = 0; i < bs.size(); i++)
 	{
 		Button* b = d->Add(new Button);
-		b->text = bs[i].text;
+		b->text = T(bs[i].text);
 		b->rect = CRect(x, c.bottom - ScaleY(42) + (ScaleY(42) - bh) / 2, x + bw, c.bottom - ScaleY(42) + (ScaleY(42) + bh) / 2);
 		b->is_default = i == 0;
 		const int id = bs[i].id;
@@ -1916,11 +1918,11 @@ public:
 				if (sel)
 					dc.FrameRect(kr, RGB(255, 255, 255));
 				CRect lr = kr;
-				const std::string label = key.action.empty() ? (Upper() ? key.shifted : key.label) : key.label;
+				const std::string label = key.action.empty() ? (Upper() ? key.shifted : key.label) : T(key.label);
 				DrawText(dc, kf, label, lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, RGB(255, 255, 255));
 			}
 		CRect hint(c.left + ScaleX(14), c.bottom - ScaleY(30), c.right - ScaleX(14), c.bottom - ScaleY(6));
-		DrawText(dc, UiFont(), "Cross: type   Square: backspace   Triangle: space   L2/R2: shift   Options: done   Circle: cancel",
+		DrawText(dc, UiFont(), T("Cross: type   Square: backspace   Triangle: space   L2/R2: shift   Options: done   Circle: cancel"),
 			hint, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, RGB(170, 170, 170));
 	}
 
@@ -2000,7 +2002,7 @@ void OnScreenKeyboard(const std::string& title, const std::string& text, bool pa
 	std::function<void(bool, const std::string&)> done)
 {
 	Keyboard* k = new Keyboard;
-	k->title = title.empty() ? "On-Screen Keyboard" : title;
+	k->title = title.empty() ? T("On-Screen Keyboard") : title;
 	k->text = text;
 	k->password = password;
 	k->done = std::move(done);
