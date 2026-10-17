@@ -247,6 +247,15 @@ private:
 	int hover_what_ = -1; // toolbar button / 100 volume / 200 seekbar
 	std::string osd_;
 	double osd_until_ = 0;
+	// idle drawing (Run): on the console always; on the host only with MPCPS5_HOST_IDLE=1
+#ifdef __PROSPERO__
+	bool idle_allowed_ = true;
+#else
+	bool idle_allowed_ = getenv("MPCPS5_HOST_IDLE") != nullptr;
+#endif
+	bool idle_ = false;
+	double last_activity_ = 0, last_paint_ = 0;
+	unsigned long long idle_presents_ = 0;
 	double last_click_t_ = 0;
 	PlayState last_state_ = PlayState::Closed;
 	std::string current_url_;
@@ -2934,7 +2943,37 @@ int MainFrame::Run(const std::string& first)
 		}
 		WindowManager::Get().Tick();
 		Tick();
-		player_.UpdateVideo();
+		const bool new_picture = player_.UpdateVideo();
+		// Idle: nothing playing or opening, no dialog or menu, no OSD, no pointer, nothing pressed for 2 s: the window
+		// is drawn twice a second (the clock, the status) instead of at every refresh; the first input, a picture or
+		// a playing file brings the full rate back at once. (Host tests: only with MPCPS5_HOST_IDLE=1, as their
+		// screenshots are taken by frame number.)
+		{
+			const double now = NowSeconds();
+			if (!events.empty() || new_picture)
+				last_activity_ = now;
+			const PlayState ps = player_.State();
+			const bool still = idle_allowed_ && (ps == PlayState::Closed || ps == PlayState::Paused ||
+													ps == PlayState::Stopped || ps == PlayState::Failed) &&
+							   !WindowManager::Get().HasModal() && now >= osd_until_ && !input_.CursorVisible() &&
+							   now - last_activity_ >= 2.0;
+			if (still && now - last_paint_ < 0.5)
+			{
+				if (!idle_)
+					OrbisLog("[ui] idle: the window drawn twice a second until something happens");
+				idle_ = true;
+				usleep(16000);
+				frame++;
+				continue;
+			}
+			if (!still && idle_)
+			{
+				idle_ = false;
+				OrbisLog("[ui] active again: drawn at every refresh");
+			}
+			last_paint_ = now;
+			idle_presents_ += still ? 1 : 0;
+		}
 		Paint(dc);
 		WindowManager::Get().Paint(dc);
 		if (input_.CursorVisible())

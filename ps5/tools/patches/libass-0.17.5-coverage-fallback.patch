@@ -1,0 +1,44 @@
+diff --git a/libass/ass_fontselect.c b/libass/ass_fontselect.c
+index 2303876..7c3fd6b 100644
+--- a/libass/ass_fontselect.c
++++ b/libass/ass_fontselect.c
+@@ -919,6 +919,39 @@ char *ass_font_select(ASS_FontSelector *priv,
+         }
+     }
+ 
++    // No font provider to ask (a console without fontconfig): any loaded font that has the character, the one
++    // closest in weight and slant (Media Player Classic PS5's patch)
++    if (!res && code && priv->n_font) {
++        ASS_FontInfo req = {0};
++        req.style_flags = (italic ? FT_STYLE_FLAG_ITALIC : 0);
++        req.weight      = bold;
++        ASS_FontInfo *best = NULL;
++        unsigned best_score = UINT_MAX;
++        for (int x = 0; x < priv->n_font; x++) {
++            ASS_FontInfo *fi = &priv->font_infos[x];
++            unsigned score = font_attributes_similarity(fi, &req);
++            if (score < best_score && check_glyph(fi, code)) {
++                best_score = score;
++                best = fi;
++            }
++        }
++        if (best) {
++            ASS_FontProvider *provider = best->provider;
++            *postscript_name = best->postscript_name;
++            *uid = best->uid;
++            *index = provider->funcs.get_font_index ?
++                provider->funcs.get_font_index(best->priv) : best->index;
++            if (best->path == NULL) {
++                data->func = provider->funcs.get_data;
++                data->priv = best->priv;
++                res = best->postscript_name ? best->postscript_name : best->families[0];
++            } else
++                res = best->path;
++            ass_msg(priv->library, MSGL_INFO, "fontselect: glyph 0x%X from a loaded font that has it: %s",
++                    code, res);
++        }
++    }
++
+     if (!res && priv->path_default) {
+         res = priv->path_default;
+         *index = priv->index_default;

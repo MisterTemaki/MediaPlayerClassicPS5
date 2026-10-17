@@ -436,10 +436,10 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 u16run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.2.2 01.022.000
+release v1.2.3 01.023.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.2.2)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.2.3)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -752,6 +752,27 @@ printf '1\r\n00:00:00,000 --> 00:00:05,000\r\nPlain SRT line\r\n' >"$T/root/medi
 rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
 expect "[ $rc = 0 ] && grep -q 'subtitles loaded: .*movie.srt$' $T/root/logs/boot.log && ! grep -q 'libass' $T/root/logs/boot.log" "movie.srt: FFmpeg's text, libass not started"
 expect "$REGION $T/dump/flip00060.ppm 500 700 1420 977 255 255 255 30 1500 >/dev/null" "its line drawn as before: white at the bottom"
+nosan "$T"
+fi
+
+if want 21; then
+echo "== 21. a character the chosen font hasn't got comes from a loaded font that has it; the idle window drawn twice a second"
+T=$(newroot t21)
+mkdir -p $T/root/fonts
+cp /usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf $T/root/fonts/aa-LiberationSans.ttf
+cp "$(readlink -f /usr/share/fonts/truetype/fonts-japanese-gothic.ttf)" $T/root/fonts/zz-gothic.ttf
+cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
+printf '[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,40,&H0000FF00,&H0000FF00,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,{\\pos(20,20)}\xe6\x97\xa5\xe6\x9c\xac \xe2\x98\x83\n' >"$T/root/media/movie.ass"
+rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'glyph 0x65E5 from a loaded font that has it: IPAGothic' $T/root/logs/boot.log && ! grep -q 'failed to find any fallback' $T/root/logs/boot.log" "Japanese (and a snowman), which Selawik and the folder's first font lack: taken from the folder's font that has them"
+expect "$REGION $T/dump/flip00060.ppm 150 65 700 220 0 255 0 40 800 >/dev/null" "... and drawn (green, top left)"
+nosan "$T"
+# idle: a paused film with nothing happening is drawn twice a second; 320 frames fit in 250 flips
+T=$(newroot t21b)
+cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+rc=$(MPCPS5_HOST_IDLE=1 MAXFLIPS=250 run "$T" "0:0" "20:cmd pause;300:mouse 400,400;320:quit" "" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q '\[ui\] idle: the window drawn twice a second' $T/root/logs/boot.log" "paused, nothing pressed: idle (320 frames in under 250 flips)"
+expect "grep -q '\[ui\] active again: drawn at every refresh' $T/root/logs/boot.log" "the pointer moved: the full rate at once"
 nosan "$T"
 fi
 

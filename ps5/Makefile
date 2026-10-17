@@ -25,7 +25,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.2.2
+VERSION ?= 1.2.3
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5

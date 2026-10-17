@@ -14,7 +14,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.2.2):** builds with the ps5-payload-dev SDK into a signed native app and passes 223 host tests
+> **Status (1.2.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 229 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
@@ -25,6 +25,15 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.2.3:**
+- **Subtitles**: a character the chosen font hasn't got (Japanese, Chinese, Korean, symbols) comes from any loaded
+  font that has it: the app's own, the MKV's attachments, or `/data/mpcps5/fonts` (a small patch to libass, which
+  otherwise needs a system font service the console doesn't have). Put a font with the scripts you need in that
+  folder (for example a Noto Sans CJK or IPAGothic file).
+- **The window when nothing happens** (no file, paused or stopped, no dialog, menu, OSD or pointer, nothing pressed
+  for 2 s) is drawn twice a second instead of at every refresh; any input, a picture or a playing file brings the
+  full rate back at once.
 
 **1.2.2:** fixes from a third review, and **ASS/SSA subtitles drawn by libass** as they are authored (positions,
 styles, fonts, colours, outlines, rotation, karaoke and other effects; the MKV's attached fonts), see
@@ -94,8 +103,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.2.2.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.2.elf`).
+1. Send `MediaPlayerClassicPS5-v1.2.3.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.3.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -202,8 +211,9 @@ Previous/Next goes by chapter, then by playlist item, then to the neighbouring f
   borders and shadows, rotation, karaoke and the other timed effects, several lines at once, the script's
   PlayResX/Y scaled to the picture as shown (zoom, pan and the aspect ratio included). Fonts: the MKV's
   attached fonts, then the fonts in `/data/mpcps5/fonts`, then the app's own (Selawik, Selawik Bold, Roboto);
-  a font the script names and nobody has is drawn in Selawik, and a character Selawik hasn't got in the first
-  font of `/data/mpcps5/fonts` (there is no system font lookup on the console).
+  a font the script names and nobody has is drawn in Selawik, and a character the font in use hasn't got comes
+  from any of those fonts that has it (the closest in weight and slant; there is no system font lookup on the
+  console, so the port patches libass to look through the fonts it has).
 - Play > Subtitle Track: the tracks, on/off, the delay (+/- 100 ms; ASS/SSA too). Options > Subtitles / Default
   Style: size, bold, outline, the bottom margin, relative to the video or the window -- for the other formats
   (SRT, WebVTT, MicroDVD...): ASS/SSA keeps its own styles.
@@ -212,7 +222,7 @@ Previous/Next goes by chapter, then by playlist item, then to the neighbouring f
   with the video.
 - Chinese, Japanese, Korean and other scripts: put a font (`.ttf`/`.otf`, for example Noto Sans CJK) in
   `/data/mpcps5/fonts` and start the player again; Selawik and Roboto cover Latin, Greek and Cyrillic (for
-  ASS/SSA, Roboto only when the script asks for it by name).
+  ASS/SSA any of them fills in what the script's font lacks).
 
 ## Audio
 
@@ -345,7 +355,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.2.2.elf, the release zip, mpc-ps5-v1.2.2-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.2.3.elf, the release zip, mpc-ps5-v1.2.3-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 

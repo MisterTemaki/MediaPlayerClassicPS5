@@ -56,6 +56,12 @@ fetch_subs() {
 	fetch_tag fribidi https://github.com/fribidi/fribidi.git "$FRIBIDI_TAG"
 	fetch_tag harfbuzz https://github.com/harfbuzz/harfbuzz.git "$HARFBUZZ_TAG"
 	fetch_tag libass https://github.com/libass/libass.git "$LIBASS_TAG"
+	# the port's patch: with no font provider (no fontconfig on the console), a character the chosen font hasn't got
+	# comes from any loaded font that has it (tools/patches/libass-0.17.5-coverage-fallback.patch)
+	local patch=$PWD/tools/patches/libass-0.17.5-coverage-fallback.patch
+	if ! git -C "$SRC/libass" apply --reverse --check "$patch" 2>/dev/null; then
+		git -C "$SRC/libass" apply "$patch"
+	fi
 }
 case "$WHAT" in
 	*subs) ;;
