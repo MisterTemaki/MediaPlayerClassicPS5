@@ -14,7 +14,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.2.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 187 host tests
+> **Status (1.2.2):** builds with the ps5-payload-dev SDK into a signed native app and passes the host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
@@ -25,6 +25,26 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.2.2:** fixes from a third review:
+- **Updates**:
+  - nothing is installed while an earlier update isn't put back;
+  - `update.journal` is written whole and must read whole (a header, the files, `end`), else it is left alone and
+    the app asks for the payload;
+  - each update keeps its old copies as `<name>.old.<transaction>`, with each old file's SHA-256 in the journal (a
+    file already put back is recognised);
+  - the folders are synced and a sync that fails puts the old version back;
+  - the payload sent over an unfinished update repairs the app and clears what it left.
+- **Signed releases (Ed25519)**: a build made with a release key (`keys/release-ed25519.pub`, see
+  [Updates](#updates)) installs only a zip that comes with a valid `.sig` from that key, on top of GitHub's SHA-256.
+- **Network passwords**: `mpc-hc.ini` and `credentials.ini` carry a generation number; a changed password is
+  written as `credentials.ini.new` first and only replaces the old one once the new `mpc-hc.ini` is in place, so a
+  failed or cut-off save never loses the old password. `mpc-hc.ini` is synced to the disk before it replaces the old
+  one. When two saved addresses disagree, the network location's password wins, then the newest Recent File's.
+- **The PS5's video decoder**: each `frame_format` number not yet confirmed on a console is logged with what was
+  read from it (Sony's numbers aren't public; see the README's status).
+- **Surround**: an 8-channel port the console refuses is asked for again (at most every 10 seconds) instead of only
+  after a restart of the sound.
 
 **1.2.1:** fixes from a second review:
 - **Updates**: when an old file can't be put back after a failed install, the error says so, `update.journal` keeps
@@ -72,8 +92,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.2.1.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.1.elf`).
+1. Send `MediaPlayerClassicPS5-v1.2.2.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.2.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -264,8 +284,18 @@ Honest limits:
   the app puts the old version back when it next starts. A file that can't be put back stays in the journal and
   is tried again at the next start (the app says so; sending the payload again repairs everything). Then the `.old` files go, files the new version no longer
   has are removed, and the home screen's copy of the art is refreshed. Settings and media aren't touched.
-- The trust is GitHub's: HTTPS to `api.github.com` and the SHA-256 GitHub gives. Releases aren't signed with a key
-  of their own.
+- **Signed releases.** A build made with a release key (`keys/release-ed25519.pub`, 64 hex digits) installs only
+  a zip that comes with `<zip name>.sig`, its Ed25519 signature (RFC 8032) made with that key's private half, on top
+  of GitHub's SHA-256: a release served by GitHub but not signed by the project's key isn't installed. Without
+  `keys/release-ed25519.pub` the build checks GitHub's SHA-256 only, and its log says so. To set it up, once, on the
+  machine that makes the releases:
+  ```
+  tools/make_release_key.sh ~/.mpcps5/release-ed25519.pem   # the private key (keep it secret, out of the repo)
+  git add keys/release-ed25519.pub                          # the public key the app is built with
+  make dist RELEASE_SIGNING_KEY=~/.mpcps5/release-ed25519.pem   # signs the release zip: attach the .sig too
+  ```
+  Losing the private key means the builds with its public key can't update themselves any more (send the payload
+  of a new build instead).
 - **Your autoload:** the updated app is newer than the ELF in your autoload. The older ELF sees that and leaves the
   app alone (its notification says so). Put the new ELF in your autoload when you can.
 
@@ -278,7 +308,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 ```
 /data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback...),
                              Recent Files, file positions, Favorites, network locations (without passwords)
-/data/mpcps5/credentials.ini the passwords of those network addresses (smb://user@server<TAB>password)
+/data/mpcps5/credentials.ini the passwords of those network addresses (smb://user@server<TAB>password), with the
+                             generation of mpc-hc.ini it goes with (credentials.ini.new while a save is half done)
 /data/mpcps5/media           a place for media on the console's storage
 /data/mpcps5/fonts           extra subtitle fonts
 /data/mpcps5/screenshots     File > Save Image
@@ -303,7 +334,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.2.1.elf, the release zip, mpc-ps5-v1.2.1-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.2.2.elf, the release zip, mpc-ps5-v1.2.2-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 
@@ -347,6 +378,8 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   brought over to FFmpeg's packets and frames, GPL-2.0-or-later; and the idea of the 8-channel output and its
   channel order.
 - **Mbed TLS** 3.6.7 (Apache-2.0), **zlib**, **Mozilla's CA list** (MPL-2.0, via certifi).
+- **Monocypher** 4.0.2 -- Ed25519 for the release signatures; BSD-2-Clause or CC0; Loup Vaillant and contributors.
+  <https://github.com/LoupVaillant/Monocypher>
 - **Selawik** (SIL OFL 1.1, Microsoft) -- the stand-in for Segoe UI; **Roboto** (Apache-2.0).
 - **NanoSVG** (zlib licence), **stb_truetype / stb_image** (public domain / MIT).
 - **PS5SX2** -- the PS5 layer (video out, sound, pad, crash log, installer, helper, native app tooling); MIT.

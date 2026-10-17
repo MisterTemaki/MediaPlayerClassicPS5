@@ -321,6 +321,7 @@ expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
 expect "grep -q 'hardware decoding available' $T/root/logs/boot.log" "the decoder's library and compute queue made at start"
 expect "grep -q 'video decoder: HEVC 640x360 (console decoder)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 1$'" "HEVC Main 10 on the console's decoder"
 expect "grep -q 'pictures 640x368 (shown 640x360) 10-bit' $T/root/logs/boot.log" "10-bit pictures, the padding left out"
+expect "grep -q \"frame_format 2 with 2-byte samples isn't on the confirmed list yet\" $T/root/logs/boot.log" "a frame_format not confirmed on a console yet: said in the log"
 expect "$CHECK $T/dump/flip00045.ppm 960 400 255 0 255 12 >/dev/null" "its picture: magenta"
 expect "grep -q 'video decoder: H.264 640x360 (console decoder)' $T/root/logs/boot.log && state $T 2 | grep -q ' hw 1$'" "H.264 on it too"
 expect "$CHECK $T/dump/flip00115.ppm 960 400 red >/dev/null" "its picture: red"
@@ -409,26 +410,36 @@ MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew MPCPS5_PS5_APPMETA=$T/ap
 for i in $(seq 1 80); do grep -q 'listening on 127.0.0.1' $T/root/logs/installer.log 2>/dev/null && break; sleep 0.1; done
 stop16
 (cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
-release() { # tag contentVersion [bad]
+# the release key of the tests (the app gets its public half through MPCPS5_HOST_RELEASE_KEY), and another one
+openssl genpkey -algorithm ed25519 -out $T/release.pem 2>/dev/null
+openssl genpkey -algorithm ed25519 -out $T/other.pem 2>/dev/null
+PUBHEX=$(openssl pkey -in $T/release.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')
+release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 	rm -rf "$T/rel" && mkdir -p "$T/rel" && cp -r "$T/homebrew/PPSA99015" "$T/rel/PPSA99015" && rm -f "$T/rel/PPSA99015/manifest.sha256" "$T/rel/PPSA99015/sce_sys/old.bin"
 	echo "eboot $1" >"$T/rel/PPSA99015/eboot.bin"; echo "new art" >"$T/rel/PPSA99015/sce_sys/icon0.png"; echo extra >"$T/rel/PPSA99015/sce_sys/extra.bin"
 	sed -i "s/\"contentVersion\": \"[0-9.]*\"/\"contentVersion\": \"$2\"/" "$T/rel/PPSA99015/sce_sys/param.json"
 	python3 tools/make_release_zip.py "$T/rel/PPSA99015" PPSA99015 "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip" >/dev/null
 	local sha size
 	sha=$(sha256sum "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip" | cut -c1-64); size=$(stat -c %s "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip")
+	local z="$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip" signer=$T/release.pem sigasset
+	rm -f "$z.sig"
+	[ "${3:-}" = badsig ] && signer=$T/other.pem
+	[ "${3:-}" != unsigned ] && openssl pkeyutl -sign -inkey $signer -rawin -in "$z" -out "$z.sig"
+	sigasset=",{\"name\":\"MediaPlayerClassicPS5-$1-PPSA99015.zip.sig\",\"size\":64,\"browser_download_url\":\"http://127.0.0.1:$SPORT/MediaPlayerClassicPS5-$1-PPSA99015.zip.sig\"}"
+	[ "${3:-}" = unsigned ] && sigasset=""
 	[ "${3:-}" = bad ] && sha=0000${sha:4}
 	local digest="\"digest\":\"sha256:$sha\","
 	[ "${3:-}" = nodigest ] && digest=""
-	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,%s"browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}]}' \
-		"$1" "$1" "$1" $SPORT "$1" $size "$digest" $SPORT "$1" >"$SRV/latest.json"
+	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,%s"browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}%s]}' \
+		"$1" "$1" "$1" $SPORT "$1" $size "$digest" $SPORT "$1" "$sigasset" >"$SRV/latest.json"
 }
-u16run() { MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
+u16run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.2.1 01.021.000
+release v1.2.2 01.022.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.2.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.2.2)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -441,7 +452,16 @@ expect "grep -q \"\[update\] failed: .*SHA-256 doesn't match\" $T/root/logs/boot
 release v9.9 99.000.000 nodigest
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
-expect "grep -q \"\[update\] failed: GitHub gave no SHA-256\" $T/root/logs/boot.log && cmp -s $T/homebrew/PPSA99015/eboot.bin $T/eboot.before && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old' -o -name update.journal)\" ]" "no SHA-256 from GitHub: refused, nothing changed"
+expect "grep -q \"\[update\] failed: GitHub gave no SHA-256\" $T/root/logs/boot.log && cmp -s $T/homebrew/PPSA99015/eboot.bin $T/eboot.before && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old.*' -o -name 'update.journal*')\" ]" "no SHA-256 from GitHub: refused, nothing changed"
+# b2b: a release without a signature from the app's key, and one signed by another key: refused, nothing changed
+for how in unsigned badsig; do
+	release v9.9 99.000.000 $how
+	rm -f $T/root/logs/boot.log
+	rc=$(u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
+	want="The release has no signature (.sig) from this app's key"
+	[ $how = badsig ] && want="The release's signature doesn't match this app's key"
+	expect "grep -q \"\[update\] failed: $want: nothing was changed\" $T/root/logs/boot.log && cmp -s $T/homebrew/PPSA99015/eboot.bin $T/eboot.before" "$how: refused, nothing changed"
+done
 # b3: a file that can't be put in place half way (param.json, after others): every old file put back
 release v9.9 99.000.000
 ( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) >$T/before.sums
@@ -450,37 +470,62 @@ rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=sce_sys/param.json u16run "$T" "0:0" "100:cm
 expect "grep -q \"\[update\] failed: Couldn't replace sce_sys/param.json .*the old version was put back\" $T/root/logs/boot.log" "a rename fails half way: the install says the old version was put back"
 expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/before.sums" "... and it was: every file as before (no .new, .old or journal left)"
 # b4: an install cut off half way (the console turned off): put back when the app next starts
-cp $T/homebrew/PPSA99015/eboot.bin $T/homebrew/PPSA99015/eboot.bin.old
-echo "half-installed eboot" >$T/homebrew/PPSA99015/eboot.bin
-echo "a file the cut-off install added" >$T/homebrew/PPSA99015/sce_sys/added.bin
-echo "new param" >$T/homebrew/PPSA99015/sce_sys/param.json.new
-printf '1\teboot.bin\n0\tsce_sys/added.bin\n1\tsce_sys/param.json\n' >$T/homebrew/PPSA99015/update.journal
+H=$T/homebrew/PPSA99015
+sha() { sha256sum <"$1" | cut -c1-64; }
+cp $H/eboot.bin $H/eboot.bin.old.123-1
+printf 'mpcps5-update-journal 1 123-1\n1\t%s\teboot.bin\n0\t-\tsce_sys/added.bin\n1\t%s\tsce_sys/param.json\nend\n' "$(sha $H/eboot.bin)" "$(sha $H/sce_sys/param.json)" >$H/update.journal
+echo "half-installed eboot" >$H/eboot.bin
+echo "a file the cut-off install added" >$H/sce_sys/added.bin
+echo "new param" >$H/sce_sys/param.json.new
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:quit" "")
 expect "grep -q 'an install was cut off half way: the old version put back (3 file(s))' $T/root/logs/boot.log" "at the next start: the interrupted install found"
-expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/before.sums" "... and the old version put back (the old eboot.bin, the added file gone, no journal)"
+sums() { ( cd $H && find . -type f | sort | xargs sha256sum ); }
+expect "sums | cmp -s - $T/before.sums" "... and the old version put back (the old eboot.bin, the added file gone, no journal)"
 # b5: a rename fails and one old file can't be put back either: the error says so, the journal keeps that file,
 # the next start puts it back (and the start after a failed put-back tells the user)
 release v9.9 99.000.000
 rm -f $T/root/logs/boot.log
-rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=sce_sys/param.json MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
+rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=sce_sys/param.json MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
 expect "grep -q \"\[update\] failed: Couldn't replace sce_sys/param.json .*couldn't be put back completely (1 file(s))\" $T/root/logs/boot.log" "a put-back that fails too: the error says the old version isn't completely back"
-expect "grep -qx '1	sce_sys/icon0.png' $T/homebrew/PPSA99015/update.journal && [ \$(wc -l <$T/homebrew/PPSA99015/update.journal) = 1 ] && [ -f $T/homebrew/PPSA99015/sce_sys/icon0.png.old ]" "... the journal kept, with only that file, and its old copy kept"
+expect "[ \$(grep -c '	sce_sys/icon0.png$' $H/update.journal) = 1 ] && [ \$(wc -l <$H/update.journal) = 3 ] && tail -1 $H/update.journal | grep -qx end && ls $H/sce_sys/icon0.png.old.* >/dev/null" "... the journal kept (whole: header, that file, end), and its old copy kept"
+# b5b: a new install while that one isn't put back: refused, the old copy kept
 rm -f $T/root/logs/boot.log
-rc=$(MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "60:quit" "")
-expect "grep -q '0 file(s) put back, 1 not (journal kept for the next start)' $T/root/logs/boot.log && grep -q 'send the payload again to repair it' $T/out.txt && [ -f $T/homebrew/PPSA99015/update.journal ]" "a start that can't put it back either: journal kept, the user told"
+rc=$(MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
+expect "grep -q '0 file(s) put back, 1 not (journal kept for the next start)' $T/root/logs/boot.log && grep -q 'send the payload again to repair it' $T/out.txt && [ -f $H/update.journal ]" "a start that can't put it back either: journal kept, the user told"
+expect "grep -q \"\[update\] failed: An earlier update isn't finished being put back: nothing was installed\" $T/root/logs/boot.log && ls $H/sce_sys/icon0.png.old.* >/dev/null && ! grep -q 'eboot v9.9' $H/eboot.bin" "an install while one isn't put back: refused, its old copy kept"
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:quit" "")
-expect "grep -q 'the old version put back (1 file(s))' $T/root/logs/boot.log && ( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/before.sums" "the next start puts it back: every file as before, no journal"
+expect "grep -q 'the old version put back (1 file(s))' $T/root/logs/boot.log && sums | cmp -s - $T/before.sums" "the next start puts it back: every file as before, no journal"
+# b6: the disk can't confirm the new files (a folder's sync fails): everything put back, checked again at the next start
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_HOST_UPDATE_FAIL_SYNC=sce_sys u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
+expect "grep -q \"failed: The new files couldn't be written to the disk for sure: the old version was put back, but the disk didn't confirm it\" $T/root/logs/boot.log && [ -f $H/update.journal ]" "a sync that fails at the end: put back, the journal kept until the disk confirms"
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:quit" "")
+expect "grep -q 'the old version put back' $T/root/logs/boot.log && ! grep -q 'without their old copy\|its old copy is gone' $T/root/logs/boot.log && sums | cmp -s - $T/before.sums" "the next start: already back (the old files recognised by their SHA-256), the journal goes"
+# b7: a damaged journal (empty): nothing guessed, nothing installed, the payload repairs the app
+: >$H/update.journal
+echo "something" >$H/eboot.bin.old.9-9
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
+expect "grep -q \"can't be read as a whole journal: left alone\" $T/root/logs/boot.log && grep -q 'its record is damaged' $T/out.txt && [ -f $H/update.journal ]" "an empty journal: left alone, the user told to send the payload"
+expect "grep -q \"failed: An earlier update isn't finished being put back\" $T/root/logs/boot.log && ! grep -q 'eboot v9.9' $H/eboot.bin" "... and no update installed over it"
+MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst-repair.txt" 2>&1 &
+for i in $(seq 1 300); do grep -q 'listening on 127.0.0.1' $T/inst-repair.txt 2>/dev/null && break; sleep 0.1; done
+stop16
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+sleep 0.5
+expect "grep -q 'an update wasn.t finished; repairing the app' $T/inst-repair.txt && [ ! -e $H/update.journal ] && [ ! -e $H/eboot.bin.old.9-9 ] && sums | cmp -s - $T/before.sums" "the payload repairs it: its files, the journal and the leftovers gone"
 # c: the right file: the daily check (a day later) offers it, Yes installs it, Yes restarts into it
 release v9.9 99.000.000
 echo 0 >"$T/root/update-check.txt"
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "200:key enter;450:key enter;520:key enter;560:quit" "300")
 expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/logs/boot.log" "the daily check offers 9.9"
-expect "grep -q '\[update\] 9.9 installed: offering the restart' $T/root/logs/boot.log" "Yes: downloaded, every file checked, installed"
+expect "grep -q '\[update\] 9.9 installed: offering the restart' $T/root/logs/boot.log && grep -q \"the release's Ed25519 signature checks out\" $T/root/logs/boot.log" "Yes: downloaded, signature and every file checked, installed"
 expect "grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $T/homebrew/PPSA99015/sce_sys/param.json" "the new eboot.bin and param.json in place"
-expect "[ -f $T/homebrew/PPSA99015/sce_sys/extra.bin ] && [ ! -e $T/homebrew/PPSA99015/sce_sys/old.bin ] && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old' -o -name update.journal)\" ]" "a new file added, a gone one removed, the home screen's art refreshed (no .new, .old or journal left)"
+expect "[ -f $T/homebrew/PPSA99015/sce_sys/extra.bin ] && [ ! -e $T/homebrew/PPSA99015/sce_sys/old.bin ] && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old.*' -o -name 'update.journal*')\" ]" "a new file added, a gone one removed, the home screen's art refreshed (no .new, .old or journal left)"
 expect "grep -q 'sceSystemServiceLoadExec($T/homebrew/PPSA99015/eboot.bin)' $T/out.txt" "Yes again: the app restarts into the new eboot.bin"
 expect "grep -q 'is available: Help, Check for updates' $T/out.txt" "a notification says a new version is out"
 nosan "$T"
@@ -625,6 +670,13 @@ Server0=Home|smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS"
 rc=$(run "$T" "0:0" "30:quit" "")
 expect "[ $rc = 0 ] && grep -q 'passwords moved from mpc-hc.ini to credentials.ini' $T/root/logs/boot.log && ! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^Server0=Home|smb://bob@127.0.0.1:$SPORT/VIDEOS$' $T/root/mpc-hc.ini && grep -q s3cret $T/root/credentials.ini" "an older mpc-hc.ini: its passwords moved to credentials.ini at once"
 nosan "$T"
+# the 8-channel port refused once: stereo for that film; asked again (10 s later) for the next surround one
+T=$(newroot t19h)
+cp "$MEDIA/surround51.mkv" "$MEDIA/surround71.mkv" "$T/root/media/"
+ini "$T" "AudioOutput=1"
+rc=$(MPCPS5_HOST_AUDIO8_FAIL=1 run "$T" "0:0" "720:open $T/root/media/surround71.mkv;800:quit" "" "$T/root/media/surround51.mkv")
+expect "[ \$(grep -c 'sceAudioOutOpen(48 kHz, S16 8 channels, 256) -> -' $T/root/logs/boot.log) = 1 ] && grep -q 'sound: 8 channels -> 7.1 (8-channel output)' $T/root/logs/boot.log && grep -q '\[audio\] 8-channel output' $T/root/logs/boot.log" "the 8-channel port refused once: asked again for the next surround film, which gets it"
+nosan "$T"
 # credentials.ini can't be written: mpc-hc.ini is left as it was, so no password is lost; the next start moves it
 T=$(newroot t19f)
 ini "$T" "Volume=100
@@ -640,6 +692,22 @@ rc=$(MPCPS5_HOST_SETTINGS_FAIL=settings run "$T" "0:0" "20:quit" "smb://alice:pw
 expect "cmp -s $T/root/mpc-hc.ini $T/ini.before && grep -q s3cret $T/root/credentials.ini" "mpc-hc.ini can't be replaced: left as it was, its passwords kept"
 nosan "$T"
 kill $SPID 2>/dev/null
+# a password changed: the old one stays until the new mpc-hc.ini is in place (generations)
+T=$(newroot t19g)
+U=127.0.0.1:1/VIDEOS/x.mkv
+rc=$(run "$T" "0:0" "30:quit" "" "smb://bob:oldpass@$U")
+expect "grep -qx '; generation 1' $T/root/credentials.ini && grep -q 'oldpass' $T/root/credentials.ini && grep -qx 'Generation=1' $T/root/mpc-hc.ini" "a password kept: credentials.ini and mpc-hc.ini both say generation 1"
+rc=$(MPCPS5_HOST_SETTINGS_FAIL=settings run "$T" "0:0" "30:quit" "" "smb://bob:NEWpass@$U")
+expect "grep -q 'oldpass' $T/root/credentials.ini && ! grep -q NEWpass $T/root/credentials.ini && grep -qx 'Generation=1' $T/root/mpc-hc.ini && [ ! -e $T/root/credentials.ini.new ]" "the password changed but mpc-hc.ini can't be replaced: the old password and settings stay together"
+rc=$(MPCPS5_HOST_SETTINGS_FAIL=credentials-rename run "$T" "0:0" "30:quit" "" "smb://bob:NEWpass@$U")
+expect "grep -qx 'Generation=2' $T/root/mpc-hc.ini && grep -q oldpass $T/root/credentials.ini && grep -q NEWpass $T/root/credentials.ini.new" "cut off after mpc-hc.ini was replaced: the new password waits in credentials.ini.new (generation 2)"
+rm -f $T/root/logs/boot.log
+rc=$(run "$T" "0:0" "30:quit" "")
+expect "grep -q 'credentials.ini of generation 2 put in place' $T/root/logs/boot.log && grep -q NEWpass $T/root/credentials.ini && ! grep -q oldpass $T/root/credentials.ini && [ ! -e $T/root/credentials.ini.new ]" "the next start takes it: credentials.ini has the new password"
+printf '; generation 99\nsmb://bob@127.0.0.1:1\tstale\n' >$T/root/credentials.ini.new
+rc=$(run "$T" "0:0" "30:quit" "")
+expect "[ ! -e $T/root/credentials.ini.new ] && grep -q NEWpass $T/root/credentials.ini && ! grep -q stale $T/root/credentials.ini" "a credentials.ini.new of another generation (a save that didn't finish): dropped"
+nosan "$T"
 fi
 
 echo

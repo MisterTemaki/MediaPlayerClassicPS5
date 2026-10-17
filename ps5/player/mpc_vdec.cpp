@@ -478,6 +478,15 @@ void PendingAdd(Decoder* d, int64_t t)
 	d->pending.push_back(t);
 }
 
+// frame_format values seen on a console with a right picture, and their sample size (see Output). Empty until a
+// console run reports them.
+struct ConfirmedFormat
+{
+	uint32_t format;
+	unsigned bytes_per_sample;
+};
+constexpr ConfirmedFormat kConfirmedFormats[] = {{0xffffffffu, 0}}; // (a placeholder no picture has)
+
 // One decoded picture into an FFmpeg frame (NV12, or yuv420p10le with the 10 bits at the bottom as they come).
 void Output(Decoder* d, const VdecOutput& o)
 {
@@ -528,6 +537,16 @@ void Output(Decoder* d, const VdecOutput& o)
 	{
 		d->seen_bps = bps;
 		d->seen_format = o.frame_format;
+		// Sony's numbers for frame_format aren't public, and VLC for PS5 (whose console runs showed NV12 and 10-bit
+		// pictures right) reads the layout from the pitch as this does. The numbers seen on a console go into
+		// kConfirmedFormats once a boot.log shows them with a right picture; until then each new one is logged.
+		bool known = false;
+		for (const ConfirmedFormat& k : kConfirmedFormats)
+			known = known || (k.format == o.frame_format && k.bytes_per_sample == bps);
+		if (!known)
+			OrbisLog("[hwdec] frame_format %u with %u-byte samples isn't on the confirmed list yet: layout from the "
+					 "pitch (%s); please report how the picture looks",
+				o.frame_format, bps, bps == 2 ? "16-bit samples, 10 bits used" : "NV12");
 	}
 	const bool ten = bps == 2;
 	// only the picture's real size, not the decoder's padding (1088 rows for 1080)

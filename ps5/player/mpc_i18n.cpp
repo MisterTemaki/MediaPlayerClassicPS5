@@ -28,6 +28,11 @@ struct Entry
 };
 
 const Entry kTable[] = {
+	{"An update was cut off and its record is damaged, so the app can't put itself back. Send the payload again to repair it.",
+		"Una actualización se interrumpió y su registro está dañado, así que la app no puede restaurarse sola. Vuelve a enviar el payload para repararla.",
+		"Uma atualização foi interrompida e o registro dela está danificado, então o app não consegue se restaurar sozinho. Envie o payload de novo para repará-lo.",
+		"Une mise à jour a été interrompue et son journal est endommagé : l'app ne peut pas se remettre d'elle-même. Renvoyez le payload pour la réparer.",
+		"Ein Update wurde unterbrochen und sein Protokoll ist beschädigt, daher kann sich die App nicht selbst wiederherstellen. Den Payload erneut senden, um sie zu reparieren."},
 	{"An update was cut off and the app couldn't be fully put back as it was. If something doesn't work, send the payload again to repair it.",
 		"Una actualización se interrumpió y la app no pudo volver del todo a como estaba. Si algo no funciona, vuelve a enviar el payload para repararla.",
 		"Uma atualização foi interrompida e o app não pôde voltar totalmente ao que era. Se algo não funcionar, envie o payload de novo para repará-lo.",

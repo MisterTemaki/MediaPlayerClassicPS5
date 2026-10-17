@@ -293,7 +293,19 @@ int32_t sceAudioOutInit(void)
 }
 int32_t sceAudioOutOpen(int32_t, int32_t, int32_t, uint32_t, uint32_t, uint32_t format)
 {
-	return format == SCE_AUDIO_OUT_PARAM_FORMAT_S16_8CH ? 8 : 7; // 8: the 8-channel port
+	if (format == SCE_AUDIO_OUT_PARAM_FORMAT_S16_8CH)
+	{
+		// MPCPS5_HOST_AUDIO8_FAIL=n: the first n opens of the 8-channel port are refused
+		static int refused = 0;
+		if (const char* n = getenv("MPCPS5_HOST_AUDIO8_FAIL"))
+			if (refused < atoi(n))
+			{
+				refused++;
+				return (int32_t)0x80260005;
+			}
+		return 8; // 8: the 8-channel port
+	}
+	return 7;
 }
 int32_t sceAudioOutOutput(int32_t handle, const void* p)
 {

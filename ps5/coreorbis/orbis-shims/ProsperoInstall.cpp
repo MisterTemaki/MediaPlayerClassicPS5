@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <vector>
 
 // Overridden by install_data.cpp in the build that carries the app.
@@ -118,6 +119,40 @@ std::string InstalledVersion()
 	return ContentVersion(s);
 }
 
+// After a repair: the half-done update's journal, its old copies (<name>.old.<transaction>) and new files
+// (<name>.new) in the app folder and its subfolders. The journal goes last.
+void RemoveUpdateLeftovers(const std::string& dir)
+{
+	std::vector<std::string> dirs = {dir};
+	for (size_t i = 0; i < dirs.size(); i++)
+	{
+		DIR* d = opendir(dirs[i].c_str());
+		if (!d)
+			continue;
+		while (dirent* e = readdir(d))
+		{
+			const std::string name = e->d_name;
+			if (name == "." || name == "..")
+				continue;
+			const std::string path = dirs[i] + "/" + name;
+			struct stat st;
+			if (lstat(path.c_str(), &st) != 0)
+				continue;
+			if (S_ISDIR(st.st_mode))
+				dirs.push_back(path);
+			else if (name.find(".old.") != std::string::npos ||
+					 (name.size() > 4 && name.compare(name.size() - 4, 4, ".new") == 0) || name == "update.journal.tmp")
+			{
+				unlink(path.c_str());
+				OrbisLog("[install] removed %s (left by the unfinished update)", path.c_str());
+			}
+		}
+		closedir(d);
+	}
+	unlink((dir + "/update.journal").c_str());
+	OrbisLog("[install] the unfinished update's journal removed: the app is this payload's version again");
+}
+
 InstallResult InstallApp()
 {
 	const EmbeddedAppFile* files = EmbeddedAppFiles();
@@ -125,8 +160,13 @@ InstallResult InstallApp()
 		return InstallResult::NothingEmbedded;
 
 	const std::string dir = AppInstallDir();
+	// an in-app update left half done (its journal still there, see ProsperoUpdate.cpp): whatever version the files
+	// say, the payload repairs the app: every file written again from its own copy, the update's leftovers removed
+	const bool repair = OrbisIsFile(dir + "/update.journal");
+	if (repair)
+		OrbisLog("[install] %s/update.journal: an update wasn't finished; repairing the app from this payload", dir.c_str());
 	// a newer version installed (by the app's own update): this older payload doesn't put itself over it
-	for (const EmbeddedAppFile* f = files; f->rel; f++)
+	for (const EmbeddedAppFile* f = files; f->rel && !repair; f++)
 	{
 		std::string param;
 		if (strcmp(f->rel, "sce_sys/param.json") == 0 && EmbeddedContents(f, param))
@@ -184,6 +224,11 @@ InstallResult InstallApp()
 			return InstallResult::Failed;
 		OrbisLog("[install] wrote %s (%zu bytes)", path.c_str(), size);
 		written++;
+	}
+	if (repair)
+	{
+		RemoveUpdateLeftovers(dir);
+		return InstallResult::Updated;
 	}
 	if (written == 0)
 	{

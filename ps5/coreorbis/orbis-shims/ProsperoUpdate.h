@@ -41,6 +41,7 @@ struct Config
 	std::string app_dir;     // /data/homebrew/<title_id>
 	std::string appmeta_dir; // /user/appmeta/<title_id>
 	std::string api_url;     // "" -> https://api.github.com/repos/<repo>/releases/latest
+	std::string release_key; // the release signing key, 64 hex digits (Ed25519 public key); "": no signature checked
 };
 
 // GET url into out (at most max bytes); progress (when not null) follows the bytes read. The HTTP status, or -1.
@@ -100,6 +101,7 @@ struct Release
 	std::string zip_url, zip_name;
 	uint64_t size = 0;
 	std::string sha256; // hex, from the asset's digest ("" when GitHub gave none: then it isn't installed)
+	std::string sig_url; // the zip's Ed25519 signature, the asset "<zip name>.sig" (64 bytes); "" when there is none
 };
 // One release object of GitHub's answer; the asset ending in "-<title_id>.zip".
 bool ParseRelease(const std::string& json, const std::string& title_id, Release& out, std::string* why = nullptr);
@@ -108,6 +110,10 @@ int CompareVersions(const std::string& a, const std::string& b);
 std::string Sha256Hex(const uint8_t* data, size_t size);
 // Checks and installs the zip into config.app_dir (see above). "" when done, else why not (nothing changed then).
 // expect_sha256 is required: without GitHub's SHA-256 of the zip nothing is installed. files_done follows the files.
+// signature: the zip's Ed25519 signature (64 bytes), required when config.release_key is set.
 std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expect_sha256, const Config& config,
-	std::atomic<size_t>* files_done = nullptr, std::atomic<size_t>* files_total = nullptr);
+	std::atomic<size_t>* files_done = nullptr, std::atomic<size_t>* files_total = nullptr,
+	const std::vector<uint8_t>* signature = nullptr);
+// The zip signed by config.release_key's private key (Ed25519, RFC 8032)? False for a malformed key or signature.
+bool SignatureValid(const std::vector<uint8_t>& zip, const std::vector<uint8_t>& signature, const std::string& key_hex);
 } // namespace update

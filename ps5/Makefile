@@ -24,7 +24,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.2.1
+VERSION ?= 1.2.2
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -48,9 +48,16 @@ HELPER_SRC := coreorbis/orbis-shims/orbis_paths.cpp coreorbis/orbis-shims/Prospe
 INSTALLER_SRC := installer/installer_main.cpp $(HELPER_SRC) coreorbis/orbis-shims/ProsperoInstall.cpp \
 	coreorbis/orbis-shims/ProsperoUpdate.cpp
 
+# Ed25519 for the release signatures (Monocypher 4.0.2, BSD-2-Clause / CC0): in the app and the installer, which both
+# link ProsperoUpdate.cpp
+MONO_SRC := third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c
+# The release key: keys/release-ed25519.pub (64 hex digits, tools/make_release_key.sh) built in; without it the
+# build checks no signature (and says so in the log)
+RELEASE_KEY ?= $(shell tr -d ' \n' < keys/release-ed25519.pub 2>/dev/null)
+
 INCS := -Icoreorbis/include-orbis -Icoreorbis/orbis-shims -Iplayer -isystem third_party/stb -isystem third_party/nanosvg
 DEFS := -DMPCPS5_PS5_VERSION='"$(VERSION)"' -DMPCPS5_TITLE_ID='"$(TITLE_ID)"' -DMPCPS5_UPDATE_REPO='"$(UPDATE_REPO)"' -DMPC_ASSET_DIR='"$(abspath assets)"' \
-	-DORBIS_ROOT_DEFAULT='"/data/mpcps5"'
+	-DORBIS_ROOT_DEFAULT='"/data/mpcps5"' -DMPCPS5_RELEASE_KEY='"$(RELEASE_KEY)"' -Ithird_party/monocypher
 PORT_WARN := -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers
 FF_LIBS = -lavformat -lavcodec -lavfilter -lswscale -lswresample -lavutil -ldav1d -lsmb2 -lmbedtls -lmbedx509 -lmbedcrypto -lz
 
@@ -72,9 +79,9 @@ PS5_OPT := -O3 -fPIC -march=znver2 -fno-strict-aliasing
 PS5_PAYLOAD_LIBS := -lkernel_sys -lSceNet -lSceNetCtl -lSceSsl -lSceHttp2 -lpthread
 PS5_DEP_INCS := -isystem $(DEPS_PS5)/include
 
-PS5_EMU_OBJ := $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(EMU_SRC))
+PS5_EMU_OBJ := $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(EMU_SRC)) $(patsubst %.c,$(PS5_OUT)/port/%.o,$(MONO_SRC))
 PS5_HELPER_OBJ := $(PS5_OUT)/port/installer/helper_main.o $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(HELPER_SRC))
-PS5_INSTALLER_OBJ := $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(INSTALLER_SRC))
+PS5_INSTALLER_OBJ := $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(INSTALLER_SRC)) $(patsubst %.c,$(PS5_OUT)/port/%.o,$(MONO_SRC))
 
 ps5: $(PS5_OUT)/MediaPlayerClassicPS5.elf
 
@@ -84,6 +91,10 @@ deps:
 $(PS5_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h
 	@mkdir -p $(dir $@)
 	$(PS5_CXX) -std=c++17 $(PS5_OPT) $(DEFS) $(INCS) $(PS5_DEP_INCS) $(PORT_WARN) $(EXTRA_FLAGS) -c -o $@ $<
+
+$(PS5_OUT)/port/third_party/%.o: third_party/%.c
+	@mkdir -p $(dir $@)
+	$(PS5_CC) -std=c99 $(PS5_OPT) -c -o $@ $<
 
 $(PS5_OUT)/port/installer/helper_main.o: installer/installer_main.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h
 	@mkdir -p $(dir $@)
@@ -129,6 +140,8 @@ dist: $(PS5_OUT)/MediaPlayerClassicPS5.elf $(APP_FILES)
 	@mkdir -p $(DIST)
 	cp $< $(DIST)/MediaPlayerClassicPS5-v$(VERSION).elf
 	python3 tools/make_release_zip.py $(APP_OUT) $(TITLE_ID) $(DIST)/MediaPlayerClassicPS5-v$(VERSION)-$(TITLE_ID).zip
+	@if [ -n "$(RELEASE_SIGNING_KEY)" ]; then bash tools/sign_release.sh $(DIST)/MediaPlayerClassicPS5-v$(VERSION)-$(TITLE_ID).zip "$(RELEASE_SIGNING_KEY)"; \
+	elif [ -n "$(RELEASE_KEY)" ]; then echo "note: this build checks signatures; sign the zip (make dist RELEASE_SIGNING_KEY=<key>) or the app won't install it"; fi
 	cd ../.. && rm -f $(abspath $(DIST))/mpc-ps5-v$(VERSION)-src.zip && \
 		zip -qr $(abspath $(DIST))/mpc-ps5-v$(VERSION)-src.zip $(notdir $(abspath ..)) \
 		-x '*/ps5/build/*' '*/proto/native/build/*' '*.o' '*/.git/*'
@@ -232,15 +245,21 @@ HOST_SAN ?= -fsanitize=address,undefined -fno-omit-frame-pointer
 HOST_OPT := -O1 -g -mavx2 -fno-strict-aliasing
 HOST_DEP_INCS := -isystem $(DEPS_HOST)/include
 
-HOST_EMU_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(EMU_SRC) host/sce_host.cpp host/sce_host_vdec.cpp)
+HOST_EMU_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(EMU_SRC) host/sce_host.cpp host/sce_host_vdec.cpp) \
+	$(patsubst %.c,$(HOST_OUT)/port/%.o,$(MONO_SRC))
 HOST_HELPER_OBJ := $(HOST_OUT)/port/installer/helper_main.o $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(HELPER_SRC) host/sce_host.cpp)
-HOST_INSTALLER_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(INSTALLER_SRC) host/sce_host.cpp)
+HOST_INSTALLER_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(INSTALLER_SRC) host/sce_host.cpp) \
+	$(patsubst %.c,$(HOST_OUT)/port/%.o,$(MONO_SRC))
 
 host: $(HOST_OUT)/mpc-ps5-host $(HOST_OUT)/mpc-ps5-installer $(HOST_OUT)/mpc-ps5-helper
 
 $(HOST_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) $(EXTRA_FLAGS) -c -o $@ $<
+
+$(HOST_OUT)/port/third_party/%.o: third_party/%.c
+	@mkdir -p $(dir $@)
+	$(HOST_CC) -std=c99 $(HOST_OPT) $(HOST_SAN) -c -o $@ $<
 
 $(HOST_OUT)/port/installer/helper_main.o: installer/installer_main.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h
 	@mkdir -p $(dir $@)

@@ -136,6 +136,11 @@ void Init()
 	c.app_dir = EnvOr("MPCPS5_PS5_HOMEBREW", "/data/homebrew") + "/" MPCPS5_TITLE_ID;
 	c.appmeta_dir = EnvOr("MPCPS5_PS5_APPMETA", "/user/appmeta") + "/" MPCPS5_TITLE_ID;
 	c.api_url = EnvOr("MPCPS5_UPDATE_API", "");
+	c.release_key = MPCPS5_RELEASE_KEY; // keys/release-ed25519.pub at build time ("" when the build has none)
+#ifndef __PROSPERO__
+	if (const char* k = getenv("MPCPS5_HOST_RELEASE_KEY")) // the host tests' own key
+		c.release_key = k;
+#endif
 	update::Init(c, AvioGet); // also puts back an update cut off half way
 	if (!update::StartupProblem().empty())
 	{

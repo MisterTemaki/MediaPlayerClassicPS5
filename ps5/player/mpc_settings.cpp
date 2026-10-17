@@ -157,7 +157,7 @@ std::string Bare(const std::string& url, std::map<std::string, std::string>* sto
 	if (!SplitPassword(url, key, secret, bare))
 		return url;
 	if (store && !secret.empty())
-		(*store)[key] = secret;
+		store->emplace(key, secret); // the first one wins (see Save: the newest addresses go first)
 	return bare;
 }
 
@@ -173,10 +173,16 @@ std::string WithPassword(const std::string& url, const std::map<std::string, std
 	return url.substr(0, at) + ":" + it->second + url.substr(at);
 }
 
-std::map<std::string, std::string> ReadCredentials()
+// A credentials file: its passwords, and its generation ("; generation N", the first line; 0 in 1.2.1's files).
+// exists: whether the file was there.
+std::map<std::string, std::string> ReadCredentials(const std::string& path, int* gen = nullptr, bool* exists = nullptr)
 {
 	std::map<std::string, std::string> m;
-	FILE* f = fopen(CredentialsPath().c_str(), "r");
+	if (gen)
+		*gen = 0;
+	FILE* f = fopen(path.c_str(), "r");
+	if (exists)
+		*exists = f != nullptr;
 	if (!f)
 		return m;
 	char line[4096];
@@ -185,6 +191,12 @@ std::map<std::string, std::string> ReadCredentials()
 		std::string l = line;
 		while (!l.empty() && (l.back() == '\n' || l.back() == '\r'))
 			l.pop_back();
+		if (l.compare(0, 13, "; generation ") == 0)
+		{
+			if (gen)
+				*gen = atoi(l.c_str() + 13);
+			continue;
+		}
 		const size_t tab = l.find('\t');
 		if (tab != std::string::npos && l[0] != ';')
 			m[l.substr(0, tab)] = l.substr(tab + 1);
@@ -193,15 +205,17 @@ std::map<std::string, std::string> ReadCredentials()
 	return m;
 }
 
-// credentials.ini replaced as a whole (a temporary file, synced, then renamed over it), or removed when there is
-// nothing to keep. False, and the old file left as it was, when any step fails.
-bool WriteCredentials(const std::map<std::string, std::string>& m)
+std::map<std::string, std::string> ReadCredentials()
 {
-	const std::string path = CredentialsPath();
-	if (m.empty())
-		return unlink(path.c_str()) == 0 || errno == ENOENT;
-	const std::string tmp = path + ".tmp";
-	const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	return ReadCredentials(CredentialsPath());
+}
+
+// A credentials file written whole (even with no password: its generation says which mpc-hc.ini it goes with) and
+// synced. False, and nothing left at `path`, when any step fails.
+bool WriteCredentials(const std::string& path, const std::map<std::string, std::string>& m, int gen)
+{
+	unlink(path.c_str());
+	const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
 	if (fd < 0)
 		return false;
 	fchmod(fd, 0600);
@@ -209,19 +223,30 @@ bool WriteCredentials(const std::map<std::string, std::string>& m)
 	if (!f)
 	{
 		close(fd);
-		unlink(tmp.c_str());
+		unlink(path.c_str());
 		return false;
 	}
-	bool ok = fprintf(f, "; Media Player Classic PS5: the passwords of the network addresses in mpc-hc.ini "
-						 "(address<TAB>password)\n") > 0;
+	bool ok = fprintf(f, "; generation %d\n; Media Player Classic PS5: the passwords of the network addresses in "
+						 "mpc-hc.ini (address<TAB>password)\n",
+				  gen) > 0;
 	for (const auto& kv : m)
 		ok = ok && fprintf(f, "%s\t%s\n", kv.first.c_str(), kv.second.c_str()) > 0;
 	ok = ok && fflush(f) == 0 && fsync(fileno(f)) == 0;
 	ok = fclose(f) == 0 && ok;
-	ok = ok && !FailForTest("credentials") && rename(tmp.c_str(), path.c_str()) == 0;
+	ok = ok && !FailForTest("credentials");
 	if (!ok)
-		unlink(tmp.c_str());
+		unlink(path.c_str());
 	return ok;
+}
+
+void SyncFolder(const std::string& dir)
+{
+	const int fd = open(dir.c_str(), O_RDONLY);
+	if (fd >= 0)
+	{
+		fsync(fd);
+		close(fd);
+	}
 }
 } // namespace
 
@@ -241,6 +266,7 @@ void Settings::Load()
 	FILE* f = fopen(SettingsPath().c_str(), "r");
 	if (!f)
 		return;
+	int cred_gen = 0; // [Credentials] Generation: the credentials file this mpc-hc.ini goes with
 	char line[8192];
 	while (fgets(line, sizeof(line), f))
 	{
@@ -329,6 +355,8 @@ void Settings::Load()
 			cursor_speed = Clamp(n, 1, 5);
 		else if (k == "Language")
 			language = Clamp(n, 0, 4);
+		else if (k == "Generation")
+			cred_gen = n;
 		else if (k == "debug_logs")
 			debug_logs = b;
 		else if (k == "LastDir")
@@ -365,7 +393,27 @@ void Settings::Load()
 		if (SplitPassword(u, k, sec, b) && !sec.empty())
 			inline_secret = true;
 	};
-	const auto store = ReadCredentials();
+	// the credentials file of this mpc-hc.ini's generation: credentials.ini, or credentials.ini.new when a save was
+	// cut off after mpc-hc.ini was replaced (then it becomes credentials.ini); a .new of another generation is a save
+	// that didn't get as far as mpc-hc.ini, and goes
+	int gen_main = 0, gen_new = 0;
+	bool has_new = false;
+	auto store = ReadCredentials(CredentialsPath(), &gen_main);
+	const auto pending = ReadCredentials(CredentialsPath() + ".new", &gen_new, &has_new);
+	if (has_new && gen_new == cred_gen && gen_main != cred_gen)
+	{
+		store = pending;
+		if (rename((CredentialsPath() + ".new").c_str(), CredentialsPath().c_str()) == 0)
+			SyncFolder(OrbisRoot());
+		OrbisLog("[settings] credentials.ini of generation %d put in place (a save was cut off)", gen_new);
+	}
+	else
+	{
+		if (has_new)
+			unlink((CredentialsPath() + ".new").c_str());
+		if (gen_main != cred_gen)
+			OrbisLog("[settings] credentials.ini is generation %d, mpc-hc.ini wants %d: using it", gen_main, cred_gen);
+	}
 	auto fix = [&](std::string& u) {
 		seen(u);
 		u = WithPassword(u, store);
@@ -393,8 +441,19 @@ void Settings::Save() const
 	FILE* f = fopen(tmp.c_str(), "w");
 	if (!f)
 		return;
-	std::map<std::string, std::string> store; // the passwords the addresses below carry
-	auto bare = [&store](const std::string& u) { return Escape(Bare(u, &store)); };
+	// the passwords the addresses carry, one per user and server: when two addresses disagree (a password changed),
+	// the network locations' win, then the newest Recent File, then Favorites, positions, the last folder
+	std::map<std::string, std::string> store;
+	for (const NetServer& sv : servers)
+		Bare(sv.url, &store);
+	for (const std::string& u : recent)
+		Bare(u, &store);
+	for (const Favorite& fv : favorites)
+		Bare(fv.url, &store);
+	for (const FilePosition& fp : positions) // newest first too
+		Bare(fp.url, &store);
+	Bare(last_dir, &store);
+	auto bare = [](const std::string& u) { return Escape(Bare(u, nullptr)); };
 	fprintf(f, "; Media Player Classic PS5 settings (MPC-HC's names where it has one)\n[Settings]\n");
 	fprintf(f, "RememberFilePos=%d\nTitleBarTextStyle=%d\nShowOSD=%d\nKeepHistory=%d\n", remember_file_pos, title_bar,
 		show_osd, keep_history);
@@ -424,9 +483,19 @@ void Settings::Save() const
 	fprintf(f, "[Network]\n");
 	for (size_t i = 0; i < servers.size(); i++)
 		fprintf(f, "Server%zu=%s|%s\n", i, Escape(servers[i].name).c_str(), bare(servers[i].url).c_str());
-	// (not fsync'd: Save runs on the window's thread, when a file opens; a cut-off write leaves the old file, as
-	// the rename comes last)
-	bool ok = fflush(f) == 0 && !ferror(f);
+	// The passwords go with mpc-hc.ini by a generation number ([Credentials] Generation= in mpc-hc.ini, the first
+	// line of credentials.ini). When they change: credentials.ini.new of the next generation (synced), then
+	// mpc-hc.ini replaced, then credentials.ini.new renamed over credentials.ini. If anything fails before
+	// mpc-hc.ini is replaced, both old files stay as they were (the old passwords with the old settings); cut off
+	// after it, the next start takes credentials.ini.new, whose generation is mpc-hc.ini's.
+	int gen = 0;
+	bool had_file = false;
+	const std::map<std::string, std::string> had = ReadCredentials(CredentialsPath(), &gen, &had_file);
+	const bool change = store != had;
+	if (change)
+		gen++;
+	fprintf(f, "[Credentials]\nGeneration=%d\n", gen);
+	bool ok = fflush(f) == 0 && fsync(fileno(f)) == 0 && !ferror(f);
 	ok = fclose(f) == 0 && ok;
 	if (!ok)
 	{
@@ -434,17 +503,8 @@ void Settings::Save() const
 		OrbisLog("[settings] couldn't write %s: the settings on the disk are left as they were", tmp.c_str());
 		return;
 	}
-	// The two files change together without a password ever being only in memory:
-	// 1. credentials.ini gets the passwords the new mpc-hc.ini needs, plus the ones it has now (the old mpc-hc.ini
-	//    may still need those); if that fails, mpc-hc.ini isn't replaced (the old one, and the old passwords, stay);
-	// 2. mpc-hc.ini is replaced;
-	// 3. credentials.ini is cut down to what the new mpc-hc.ini needs (if that fails, a few spare passwords stay).
-	// (credentials.ini is only written when its passwords change: most saves don't touch it)
-	const std::map<std::string, std::string> had = ReadCredentials();
-	std::map<std::string, std::string> both = had;
-	for (const auto& kv : store)
-		both[kv.first] = kv.second;
-	if (both != had && !WriteCredentials(both))
+	const std::string cred_new = CredentialsPath() + ".new";
+	if (change && !WriteCredentials(cred_new, store, gen))
 	{
 		unlink(tmp.c_str());
 		OrbisLog("[settings] couldn't write credentials.ini: mpc-hc.ini left as it was (no password lost)");
@@ -453,11 +513,14 @@ void Settings::Save() const
 	if (FailForTest("settings") || rename(tmp.c_str(), path.c_str()) != 0)
 	{
 		unlink(tmp.c_str());
-		OrbisLog("[settings] couldn't replace %s (errno %d): left as it was", path.c_str(), errno);
+		unlink(cred_new.c_str());
+		OrbisLog("[settings] couldn't replace %s (errno %d): left as it was, and its passwords", path.c_str(), errno);
 		return;
 	}
-	if (both != store && !WriteCredentials(store))
-		OrbisLog("[settings] couldn't trim credentials.ini: it keeps passwords no longer used");
+	if (change && (FailForTest("credentials-rename") || rename(cred_new.c_str(), CredentialsPath().c_str()) != 0))
+		OrbisLog("[settings] credentials.ini.new not renamed: the next start puts it in place");
+	SyncFolder(OrbisRoot());
+	(void)had_file;
 }
 
 void Settings::AddRecent(const std::string& url)
