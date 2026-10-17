@@ -4,6 +4,7 @@
 
 #include "mpc_player.h"
 
+#include "mpc_ass.h"
 #include "mpc_i18n.h"
 #include "mpc_res.h"
 #include "mpc_smb.h"
@@ -40,6 +41,7 @@ extern "C" {
 #include <deque>
 #include <map>
 #include <mutex>
+#include <set>
 #include <thread>
 
 namespace mpc
@@ -510,6 +512,12 @@ struct Player::Impl
 	mutable std::mutex smu;
 	std::map<int, std::vector<SubItem>> subs; // per track id
 	std::vector<std::pair<int, std::string>> external_names;
+	// ASS/SSA tracks: drawn by libass (mpc_ass.h), made the first time one turns up
+	std::mutex ass_mu;
+	std::unique_ptr<ass::Renderer> ass_r;
+	std::set<int> ass_streams; // the embedded ASS/SSA tracks (set before the demuxer starts)
+	std::atomic<bool> ic_ready{false}; // the file's streams are known: its attached fonts can be read
+	bool ass_fonts_done = false;
 
 	// stats
 	std::atomic<uint64_t> dropped{0};
@@ -519,6 +527,37 @@ struct Player::Impl
 	double shown_t0 = 0;
 
 	~Impl() { Shutdown(); }
+
+	// ---------------------------------------------------------------------------------------------
+	// libass: the renderer (made when first asked for), the file's attached fonts given to it once
+	ass::Renderer* Ass(bool make)
+	{
+		std::lock_guard<std::mutex> l(ass_mu);
+		if (!ass_r && make)
+			ass_r.reset(new ass::Renderer);
+		if (ass_r && !ass_fonts_done && ic_ready && ic)
+		{
+			ass_fonts_done = true;
+			for (unsigned i = 0; i < ic->nb_streams; i++)
+			{
+				const AVStream* st = ic->streams[i];
+				if (st->codecpar->codec_type != AVMEDIA_TYPE_ATTACHMENT || !st->codecpar->extradata ||
+					st->codecpar->extradata_size <= 0)
+					continue;
+				const AVDictionaryEntry* fn = av_dict_get(st->metadata, "filename", nullptr, 0);
+				const AVDictionaryEntry* mt = av_dict_get(st->metadata, "mimetype", nullptr, 0);
+				const std::string name = fn ? fn->value : "font" + std::to_string(i);
+				const std::string mime = mt ? Lower(mt->value) : "";
+				const std::string ext = Ext(name);
+				if (mime.find("font") == std::string::npos && mime.find("truetype") == std::string::npos &&
+					mime.find("opentype") == std::string::npos && ext != "ttf" && ext != "otf" && ext != "ttc")
+					continue;
+				ass_r->AddFont(name, st->codecpar->extradata, size_t(st->codecpar->extradata_size));
+				OrbisLog("[subs] attached font loaded: %s (%d bytes)", name.c_str(), st->codecpar->extradata_size);
+			}
+		}
+		return ass_r.get();
+	}
 
 	// ---------------------------------------------------------------------------------------------
 	static int Interrupt(void* p)
@@ -625,6 +664,7 @@ struct Player::Impl
 			OrbisLog("[player] stream info: %s (going on)", AvErr(r).c_str());
 		if (quit)
 			return;
+		ic_ready = true;
 		duration = ic->duration > 0 ? ic->duration / double(AV_TIME_BASE) : 0;
 		seekable = ic->pb ? (ic->pb->seekable & AVIO_SEEKABLE_NORMAL) != 0 || duration > 0 : duration > 0;
 
@@ -671,6 +711,17 @@ struct Player::Impl
 				std::lock_guard<std::mutex> l(mu);
 				sdecs[int(i)] = c;
 				sub_streams.push_back(int(i));
+			}
+			// ASS/SSA: libass draws it, from the script's header and each packet as it comes
+			const AVCodecParameters* p = ic->streams[i]->codecpar;
+			if (sdecs.count(int(i)) && (p->codec_id == AV_CODEC_ID_ASS || p->codec_id == AV_CODEC_ID_SSA))
+			{
+				if (ass::Renderer* r = Ass(true))
+				{
+					r->NewTrack(int(i), p->extradata, p->extradata ? size_t(p->extradata_size) : 0);
+					if (r->HasTrack(int(i)))
+						ass_streams.insert(int(i));
+				}
 			}
 		}
 		// subtitles on by default when a track is marked default or forced (MPC-HC: "Auto-load subtitles")
@@ -908,6 +959,19 @@ struct Player::Impl
 
 	void DecodeSubtitle(int idx, AVCodecContext* c, AVPacket* pkt)
 	{
+		if (ass_streams.count(idx))
+		{
+			// libass's track: the packet as it is ("ReadOrder,Layer,Style,..."), its time from the file's start
+			AVStream* st = ic->streams[idx];
+			const int64_t ts = pkt->pts != AV_NOPTS_VALUE ? pkt->pts : pkt->dts;
+			if (ts == AV_NOPTS_VALUE || !pkt->data || pkt->size <= 0)
+				return;
+			const double start = ts * av_q2d(st->time_base) - StreamStart();
+			const double dur = pkt->duration > 0 ? pkt->duration * av_q2d(st->time_base) : 5.0;
+			if (ass::Renderer* r = Ass(false))
+				r->AddEvent(idx, pkt->data, size_t(pkt->size), int64_t(std::llround(start * 1000)), int64_t(std::llround(dur * 1000)));
+			return;
+		}
 		AVSubtitle sub = {};
 		int got = 0;
 		if (avcodec_decode_subtitle2(c, &sub, &got, pkt) >= 0 && got)
@@ -1389,6 +1453,28 @@ struct Player::Impl
 		else if (!ValidUtf8(data))
 			data = Cp1252ToUtf8(data);
 
+		// .ass / .ssa: the whole script to libass; if it finds nothing in it, FFmpeg reads it as before
+		const std::string ext = Ext(path);
+		if (ext == "ass" || ext == "ssa")
+		{
+			ass::Renderer* r = Ass(true);
+			int id;
+			{
+				std::lock_guard<std::mutex> l(smu);
+				id = 1000 + int(external_names.size());
+			}
+			if (r && r->ReadScript(id, data))
+			{
+				{
+					std::lock_guard<std::mutex> l(smu);
+					const size_t slash = path.find_last_of('/');
+					external_names.push_back({id, path.substr(slash == std::string::npos ? 0 : slash + 1)});
+				}
+				OrbisLog("[player] subtitles loaded: %s (ASS, libass)", path.c_str());
+				return true;
+			}
+		}
+
 		MemReader mem;
 		mem.data = std::move(data);
 		const int bufsize = 32768;
@@ -1397,7 +1483,6 @@ struct Player::Impl
 		AVFormatContext* sc = avformat_alloc_context();
 		sc->pb = pb;
 		sc->flags |= AVFMT_FLAG_CUSTOM_IO;
-		const std::string ext = Ext(path);
 		const AVInputFormat* fmt = nullptr;
 		if (ext == "srt")
 			fmt = av_find_input_format("srt");
@@ -2122,6 +2207,23 @@ SubtitleShow Player::Subtitles() const
 		out.ref_h = m->vdec->height;
 	}
 	return out;
+}
+
+bool Player::AssSubtitles(int frame_w, int frame_h, int storage_w, int storage_h, const CRect& clip, const Image** img,
+	int* x, int* y, bool* changed)
+{
+	*img = nullptr;
+	*changed = false;
+	const int track = m->sstream;
+	if (track < 0)
+		return false;
+	ass::Renderer* r = m->Ass(false);
+	if (!r || !r->HasTrack(track))
+		return false;
+	const double t = Position() - m->sub_delay;
+	*img = r->Render(track, int64_t(std::llround(t * 1000)), frame_w, frame_h, storage_w, storage_h, clip.left, clip.top,
+		clip.right, clip.bottom, x, y, changed);
+	return true;
 }
 
 std::vector<std::pair<std::string, std::string>> Player::Details() const

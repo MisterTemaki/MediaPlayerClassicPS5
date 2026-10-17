@@ -1058,6 +1058,25 @@ void MainFrame::PaintSubtitles(CDC& dc)
 {
 	if (!Loaded() || !subs_enabled_)
 		return;
+	{
+		// ASS/SSA: libass's picture, as authored, over the video as shown (the Subtitles options don't apply)
+		const CRect fr = player_.HasVideo() && player_.HasPicture() ? video_rect_ : r_video_area_;
+		CRect vis = fr;
+		if (!fr.IsRectEmpty() && vis.Intersect(r_video_area_))
+		{
+			const Image* img = nullptr;
+			int x = 0, y = 0;
+			bool changed = false;
+			const CRect clip(vis.left - fr.left, vis.top - fr.top, vis.right - fr.left, vis.bottom - fr.top);
+			if (player_.AssSubtitles(fr.Width(), fr.Height(), player_.VideoWidth(), player_.VideoHeight(), clip, &img, &x,
+					&y, &changed))
+			{
+				if (img)
+					dc.AlphaBlit(fr.left + x, fr.top + y, img->Bmp());
+				return;
+			}
+		}
+	}
 	const SubtitleShow sub = player_.Subtitles();
 	if (sub.Empty())
 		return;
