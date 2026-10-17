@@ -5,12 +5,14 @@
 //   1. Check: GitHub's answer for the newest release (api.github.com/repos/<repo>/releases/latest) names the app's
 //      zip (the asset ending in "-<TITLE_ID>.zip", the same zip the homebrew catalog lists), its size and SHA-256.
 //      Newer than this version (by the tag, "v1.8" > "1.7"): it can be installed.
-//   2. Install: the zip is downloaded (into memory), its size and SHA-256 checked; it holds the app folder
-//      (<TITLE_ID>/ ...) stored without compression and a manifest (<TITLE_ID>/manifest.sha256: "<sha-256> *<path>"
-//      lines); every file is checked against the manifest. Only then is anything written: each file beside the old
-//      one as <name>.new, then all renamed over the old ones, eboot.bin and the manifest last; files the old
-//      manifest had and the new one hasn't are removed; the home screen's copy of the art (/user/appmeta/<ID>) is
-//      brought up to date. If anything fails before the renames, the .new files go and nothing has changed.
+//   2. Install: the zip is downloaded (into memory), its size and SHA-256 checked (a release GitHub gives no SHA-256
+//      for isn't installed); it holds the app folder (<TITLE_ID>/ ...) stored without compression and a manifest
+//      (<TITLE_ID>/manifest.sha256: "<sha-256> *<path>" lines); every file is checked against the manifest. Only
+//      then is anything written: each file beside the old one as <name>.new; then, with update.journal listing
+//      them, each old file renamed to <name>.old and the new one into its place, eboot.bin and the manifest last;
+//      a rename that fails puts every old file back, and an install cut off half way (the console turned off) is
+//      put back when the app next starts. Then the .old files go, files the old manifest had and the new one hasn't
+//      are removed, and the home screen's copy of the art (/user/appmeta/<ID>) is brought up to date.
 //   3. The running app is the old build: it has to be opened again.
 //
 // The data folder (/data/<app>/: games, saves, settings) isn't touched. Everything runs on a thread of its own;
@@ -65,7 +67,11 @@ struct Status
 	std::string error;
 };
 
+// Also puts back an install that was cut off half way (RecoverInterrupted on config.app_dir).
 void Init(const Config& config, Fetch fetch);
+// An install interrupted while its files were going into place (update.journal still there): the old files back
+// (<name>.old), the new ones removed. The files put back; 0 when there was nothing to do.
+int RecoverInterrupted(const std::string& app_dir);
 // The version installed (the app says which when it asks: a helper of an older build may be the one running).
 void SetCurrentVersion(const std::string& version);
 const Config& CurrentConfig();
@@ -89,15 +95,15 @@ struct Release
 	std::string tag, version; // "v1.8", "1.8"
 	std::string zip_url, zip_name;
 	uint64_t size = 0;
-	std::string sha256; // hex, from the asset's digest ("" when GitHub gave none)
+	std::string sha256; // hex, from the asset's digest ("" when GitHub gave none: then it isn't installed)
 };
 // One release object of GitHub's answer; the asset ending in "-<title_id>.zip".
 bool ParseRelease(const std::string& json, const std::string& title_id, Release& out, std::string* why = nullptr);
 // "1.10" > "1.9"; a leading "v" is ignored. <0, 0, >0.
 int CompareVersions(const std::string& a, const std::string& b);
 std::string Sha256Hex(const uint8_t* data, size_t size);
-// Checks and installs the zip into config.app_dir (see above). "" when done, else why not (nothing changed then,
-// unless the error says otherwise). files_done follows the files written.
+// Checks and installs the zip into config.app_dir (see above). "" when done, else why not (nothing changed then).
+// expect_sha256 is required: without GitHub's SHA-256 of the zip nothing is installed. files_done follows the files.
 std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expect_sha256, const Config& config,
 	std::atomic<size_t>* files_done = nullptr, std::atomic<size_t>* files_total = nullptr);
 } // namespace update

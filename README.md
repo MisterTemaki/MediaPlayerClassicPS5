@@ -14,7 +14,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.1.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 148 host tests
+> **Status (1.2):** builds with the ps5-payload-dev SDK into a signed native app and passes 172 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
@@ -25,6 +25,20 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.2:** fixes from a code review, nothing new to learn:
+- **Audio boost** (up to +300%): a loud passage now clips at the 16-bit limits instead of wrapping around to the
+  other sign (a loud crackle); the 8-channel output's handle is handed to the sound thread safely.
+- **HDR tone mapping**: the five worker threads are made once and kept, instead of five new threads for every
+  picture (up to 300 thread starts a second at 60 fps).
+- **The PS5's video decoder**: each picture's layout and size are checked against the buffer the player gave the
+  decoder before it is read; anything unexpected hands the video to FFmpeg (and `boot.log` says what came out).
+- **Network passwords** are no longer kept in `mpc-hc.ini`: they go to `credentials.ini` (see
+  [Settings and files](#settings-and-files)), an older `mpc-hc.ini` has them moved out at the first start, and a
+  password in an address shows as `***` in every log line.
+- **Updates**: only over HTTPS with the certificate checked, and only when GitHub gives the download's SHA-256; a
+  file that can't be put in place puts the old version back, and an install cut off half way (the console turned
+  off) is put back when the app next starts. See [Updates](#updates).
 
 **1.1.1:** the interface in five languages -- English (the default), Spanish, Portuguese (Brazil), French and
 German -- picked in **View > Options > Player > Language** (kept in `mpc-hc.ini`). Debug logs are now off by
@@ -47,8 +61,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.1.1.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.1.1.elf`).
+1. Send `MediaPlayerClassicPS5-v1.2.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -132,7 +146,8 @@ Where:
 - **Network shares (SMB 2/3)**: in the Open dialog, *Network > Add a network location...*: the PC's name or IP
   address, the share (optional: without it the server's shares are listed), user and password (empty: guest),
   a name. The location stays in the navigation pane. Addresses can also be typed:
-  `smb://user:password@192.168.0.10/Videos/Movie.mkv`. Windows 10/11 needs the share's user and password
+  `smb://user:password@192.168.0.10/Videos/Movie.mkv` (once a password is kept, `smb://user@192.168.0.10/...`
+  uses it). Windows 10/11 needs the share's user and password
   (guest access is off by default there); a NAS or Samba share may allow guest.
 - **The Internet**: `http://` and `https://` (certificates checked against Mozilla's list), HLS (`.m3u8`),
   `rtmp://`, `rtsp://`, `udp://`. Type the address in File > Open File.
@@ -189,7 +204,8 @@ mapped: scaled to the window as 16-bit R'G'B', then turned to linear light (PQ's
 mastering metadata, 1000 nits when it has neither) to the picture's white, and encoded for the screen
 (gamma 2.4). Curves: **BT.2390** (the default), Hable and Reinhard, or Off (the signal as it comes: washed out).
 "White" sets how bright the picture is: the nits shown as the screen's white (250 by default, 100-400).
-This is done by the CPU on the scaled picture (1080p at most), in six threads.
+This is done by the CPU on the scaled picture (1080p at most), in six threads (five workers made at the first HDR
+picture and kept).
 
 **Surround.** With Audio Renderer on surround, 5.1 and 7.1 tracks go to the console's 8-channel output
 (L R C LFE Ls Rs Lb Rb); the console mixes it down itself for a stereo TV. 5.1 fills the first six, 7.1's side
@@ -226,12 +242,18 @@ Honest limits:
   (about 40 MB) with the progress on the screen, installs it, then offers to restart into the new version.
 - Once a day, when the app starts, it looks by itself (a notification, and the same question). Nothing is
   installed unless you answer Yes.
-- The app does it with FFmpeg's HTTPS (the one the network streams use, the certificate checked against
-  Mozilla's list). Installing needs the app unlocked by the payload (it writes `/data/homebrew/PPSA99015/`).
-- The zip is checked before anything is written: its size and SHA-256 against what GitHub gives, then every file
-  against the zip's own list (`PPSA99015/manifest.sha256`). Each file is written beside the old one, then all are
-  put in place with `eboot.bin` last; files the new version no longer has are removed, and the home screen's copy
-  of the art is refreshed. If anything fails before that, nothing has changed. Settings and media aren't touched.
+- The app does it with FFmpeg's HTTPS (the one the network streams use), always with the certificate checked
+  against Mozilla's list (`/data/mpcps5/cacert.pem`, written by the app at start): without that list, or over plain
+  HTTP, nothing is fetched. Installing needs the app unlocked by the payload (it writes `/data/homebrew/PPSA99015/`).
+- The zip is checked before anything is written: its size and SHA-256 against what GitHub gives (a release
+  without GitHub's SHA-256 isn't installed), then every file against the zip's own list
+  (`PPSA99015/manifest.sha256`). Each file is written beside the old one; then, with `update.journal` listing them,
+  each old file becomes `<name>.old` and the new one takes its place, `eboot.bin` and the manifest last. If a file
+  can't be put in place, every old one is put back; if the install is cut off half way (the console turned off),
+  the app puts the old version back when it next starts. Then the `.old` files go, files the new version no longer
+  has are removed, and the home screen's copy of the art is refreshed. Settings and media aren't touched.
+- The trust is GitHub's: HTTPS to `api.github.com` and the SHA-256 GitHub gives. Releases aren't signed with a key
+  of their own.
 - **Your autoload:** the updated app is newer than the ELF in your autoload. The older ELF sees that and leaves the
   app alone (its notification says so). Put the new ELF in your autoload when you can.
 
@@ -243,7 +265,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 
 ```
 /data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback...),
-                             Recent Files, file positions, Favorites, network locations
+                             Recent Files, file positions, Favorites, network locations (without passwords)
+/data/mpcps5/credentials.ini the passwords of those network addresses (smb://user@server<TAB>password)
 /data/mpcps5/media           a place for media on the console's storage
 /data/mpcps5/fonts           extra subtitle fonts
 /data/mpcps5/screenshots     File > Save Image
@@ -252,8 +275,11 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 /data/mpcps5/update-check.txt  when the app last looked for an update
 ```
 
-Network passwords are kept in `mpc-hc.ini` as part of the share's address (as Windows' saved network
-credentials, but in plain text): don't share that file.
+Network passwords are kept out of `mpc-hc.ini` (so that file can be shared when asking for help) and out of the
+logs (`smb://user:***@server`): they are in `credentials.ini`, readable by its owner only, and only the passwords
+of the addresses still saved are kept (removing a network location removes its password). It isn't encryption:
+on a jailbroken console anything that can read `/data` can read it. `mpc-hc.ini` files of 1.1.1 and before have
+their passwords moved out at the first start.
 
 ## Building
 
@@ -265,7 +291,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.1.1.elf, the release zip, mpc-ps5-v1.1.1-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.2.elf, the release zip, mpc-ps5-v1.2-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 
@@ -273,7 +299,8 @@ The layout is the emulator ports': `eboot.bin` is the player, a native title (`p
 `coreorbis/`, linked by `proto/native`'s tools); the payload is the installer and the helper, with the app
 folder inside (the eboot and the backgrounds compressed: the payload is about 12 MB). The host build runs
 the same code on Linux (`host/sce_host.cpp` fakes the PS5 calls; `MPCPS5_HOST_SCRIPT` and
-`MPCPS5_HOST_PAD` drive it, flips are saved as PPM).
+`MPCPS5_HOST_PAD` drive it, flips are saved as PPM). `tests/fuzz/fuzz_update.cpp` is a libFuzzer harness for the
+updater's parsers (GitHub's JSON, the release zip and its manifest); the command is at its top.
 
 Source map:
 
@@ -288,7 +315,7 @@ Source map:
 | `player/mpc_dialogs.cpp` | MPC-HC's dialogs (from mpc-hc.rc's templates) and the Open dialog |
 | `player/mpc_gdi.cpp`, `mpc_font.cpp`, `mpc_res.cpp` | a small GDI, fonts (stb_truetype), MPC-HC's resources |
 | `player/mpc_smb.cpp`, `mpc_console.cpp` | SMB through libsmb2; the console glue (thread stacks, name lookups) |
-| `player/mpc_settings.cpp` | mpc-hc.ini |
+| `player/mpc_settings.cpp` | mpc-hc.ini, and credentials.ini (the network passwords) |
 
 ## Credits and licences
 

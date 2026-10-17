@@ -6,7 +6,7 @@
 // primaries, compresses the highlights from the film's peak (its mastering metadata, 1000 nits when it has none)
 // to the picture's white (Options > Output, 250 nits by default), and encodes it for the screen (gamma 2.4).
 // The curves are BT.2390's EETF (the default), Hable's filmic one and Reinhard's; run on the scaled picture
-// (1080p at most), in a few threads.
+// (1080p at most), in six threads: the caller and five workers kept for the run.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
@@ -51,6 +51,9 @@ struct Params
 
 // src: R, G, B, A 16-bit (AV_PIX_FMT_RGBA64LE, full range), w x h, src_pitch in pixels.
 // dst: RGBA 8-bit (AV_PIX_FMT_RGBA), dst_pitch in pixels.
+// Pictures 360 rows high or more are shared between the caller and five worker threads made at the first one and
+// kept (WorkerThreads() says how many were started: 0 or 5, never more).
 void Convert(const uint16_t* src, int src_pitch, uint32_t* dst, int dst_pitch, int w, int h, const Params& p);
+int WorkerThreads();
 } // namespace tonemap
 } // namespace mpc

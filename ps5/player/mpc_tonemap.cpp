@@ -4,12 +4,17 @@
 
 #include "mpc_tonemap.h"
 
+#include "OrbisPaths.h"
+#include "ProsperoCrash.h"
+
 extern "C" {
 #include <libavutil/mastering_display_metadata.h>
 }
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -209,20 +214,105 @@ double SourcePeak(const AVFrame* f)
 	return 1000;
 }
 
+namespace
+{
+// The workers that share a picture's rows with the caller: made once, at the first HDR picture, and kept for the
+// rest of the run (a picture used to start and join its own threads: up to 300 thread starts a second at 60 fps).
+// One picture at a time (Convert holds g_mu throughout); each picture is a new generation the workers wake for,
+// each takes its band of rows, the last one done wakes the caller.
+constexpr int kBands = 6; // the caller + 5 workers
+
+struct Job
+{
+	const Tables* t = nullptr;
+	const uint16_t* src = nullptr;
+	int src_pitch = 0;
+	uint32_t* dst = nullptr;
+	int dst_pitch = 0, w = 0, h = 0;
+};
+
+class Pool
+{
+public:
+	Pool()
+	{
+		for (int i = 1; i < kBands; i++)
+			std::thread([this, i] { Work(i); }).detach(); // kept until the app exits
+		started_.store(kBands - 1);
+		OrbisLog("[tonemap] %d worker threads started (kept for the run)", kBands - 1);
+	}
+
+	void Run(const Job& job)
+	{
+		std::unique_lock<std::mutex> l(m_);
+		job_ = job;
+		left_ = kBands - 1;
+		gen_++;
+		l.unlock();
+		cv_.notify_all();
+		Rows(*job.t, job.src, job.src_pitch, job.dst, job.dst_pitch, job.w, 0, job.h / kBands);
+		l.lock();
+		done_cv_.wait(l, [this] { return left_ == 0; });
+	}
+
+	static int Started() { return started_.load(); }
+
+private:
+	void Work(int band)
+	{
+		crashlog::ArmThread(); // a crash here is reported too (the thread never ends: nothing to disarm)
+		uint64_t seen = 0;
+		for (;;)
+		{
+			std::unique_lock<std::mutex> l(m_);
+			cv_.wait(l, [&] { return gen_ != seen; });
+			seen = gen_;
+			const Job job = job_;
+			l.unlock();
+			Rows(*job.t, job.src, job.src_pitch, job.dst, job.dst_pitch, job.w, job.h * band / kBands,
+				job.h * (band + 1) / kBands);
+			l.lock();
+			if (--left_ == 0)
+				done_cv_.notify_one();
+		}
+	}
+
+	std::mutex m_;
+	std::condition_variable cv_, done_cv_;
+	Job job_;
+	uint64_t gen_ = 0;
+	int left_ = 0;
+	static std::atomic<int> started_;
+};
+std::atomic<int> Pool::started_{0};
+} // namespace
+
 void Convert(const uint16_t* src, int src_pitch, uint32_t* dst, int dst_pitch, int w, int h, const Params& p)
 {
-	std::unique_lock<std::mutex> l(g_mu);
+	// g_mu for the whole picture: the tables aren't rebuilt under a picture still being converted
+	std::lock_guard<std::mutex> l(g_mu);
 	if (!g_t.valid || !Same(g_t.key, p))
 		Build(g_t, p);
-	l.unlock();
-	const Tables& t = g_t;
-	const int n = h >= 360 ? 6 : 1;
-	std::vector<std::thread> th;
-	for (int i = 1; i < n; i++)
-		th.emplace_back(Rows, std::cref(t), src, src_pitch, dst, dst_pitch, w, h * i / n, h * (i + 1) / n);
-	Rows(t, src, src_pitch, dst, dst_pitch, w, 0, h / n);
-	for (auto& x : th)
-		x.join();
+	if (h < 360)
+	{
+		Rows(g_t, src, src_pitch, dst, dst_pitch, w, 0, h);
+		return;
+	}
+	static Pool* pool = new Pool(); // never deleted: its threads wait for pictures until the app exits
+	Job job;
+	job.t = &g_t;
+	job.src = src;
+	job.src_pitch = src_pitch;
+	job.dst = dst;
+	job.dst_pitch = dst_pitch;
+	job.w = w;
+	job.h = h;
+	pool->Run(job);
+}
+
+int WorkerThreads()
+{
+	return Pool::Started();
 }
 } // namespace tonemap
 } // namespace mpc

@@ -34,6 +34,8 @@ extern "C" {
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -1467,7 +1469,30 @@ struct Player::Impl
 };
 
 // ===========================================================================================================
-Player::Player() : m(new Impl) {}
+namespace
+{
+// FFmpeg's own messages (its default: stderr, from its level up), with any password in an address hidden first: its
+// protocols print the addresses they open.
+void AvLog(void* avcl, int level, const char* fmt, va_list vl)
+{
+	if (level > av_log_get_level())
+		return;
+	char line[1024];
+	int prefix = 1;
+	av_log_format_line2(avcl, level, fmt, vl, line, sizeof(line), &prefix);
+	OrbisHidePasswords(line);
+	fputs(line, stderr);
+}
+} // namespace
+
+Player::Player() : m(new Impl)
+{
+	static const bool once = [] {
+		av_log_set_callback(AvLog);
+		return true;
+	}();
+	(void)once;
+}
 Player::~Player() = default;
 
 void Player::Open(const std::string& url, double start_s, bool start_paused)

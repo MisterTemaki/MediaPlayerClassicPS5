@@ -19,7 +19,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/surround71.mkv" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/loud.mkv" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -416,17 +416,19 @@ release() { # tag contentVersion [bad]
 	python3 tools/make_release_zip.py "$T/rel/PPSA99015" PPSA99015 "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip" >/dev/null
 	local sha size
 	sha=$(sha256sum "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip" | cut -c1-64); size=$(stat -c %s "$SRV/MediaPlayerClassicPS5-$1-PPSA99015.zip")
-	[ -n "${3:-}" ] && sha=0000${sha:4}
-	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,"digest":"sha256:%s","browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}]}' \
-		"$1" "$1" "$1" $SPORT "$1" $size $sha $SPORT "$1" >"$SRV/latest.json"
+	[ "${3:-}" = bad ] && sha=0000${sha:4}
+	local digest="\"digest\":\"sha256:$sha\","
+	[ "${3:-}" = nodigest ] && digest=""
+	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,%s"browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}]}' \
+		"$1" "$1" "$1" $SPORT "$1" $size "$digest" $SPORT "$1" >"$SRV/latest.json"
 }
 u16run() { MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.1.1 01.011.000
+release v1.2 01.020.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.1.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.2)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -435,6 +437,28 @@ rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
 expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/logs/boot.log" "Help > Check for updates: 9.9 is available, offered"
 expect "grep -q \"\[update\] failed: .*SHA-256 doesn't match\" $T/root/logs/boot.log && cmp -s $T/homebrew/PPSA99015/eboot.bin $T/eboot.before && [ -z \"\$(find $T/homebrew -name '*.new')\" ]" "Yes: the download isn't GitHub's file: refused, nothing changed"
+# b2: a release GitHub gives no SHA-256 for: refused (it can't be checked), nothing changed
+release v9.9 99.000.000 nodigest
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
+expect "grep -q \"\[update\] failed: GitHub gave no SHA-256\" $T/root/logs/boot.log && cmp -s $T/homebrew/PPSA99015/eboot.bin $T/eboot.before && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old' -o -name update.journal)\" ]" "no SHA-256 from GitHub: refused, nothing changed"
+# b3: a file that can't be put in place half way (param.json, after others): every old file put back
+release v9.9 99.000.000
+( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) >$T/before.sums
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=sce_sys/param.json u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
+expect "grep -q \"\[update\] failed: Couldn't replace sce_sys/param.json .*the old version was put back\" $T/root/logs/boot.log" "a rename fails half way: the install says the old version was put back"
+expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/before.sums" "... and it was: every file as before (no .new, .old or journal left)"
+# b4: an install cut off half way (the console turned off): put back when the app next starts
+cp $T/homebrew/PPSA99015/eboot.bin $T/homebrew/PPSA99015/eboot.bin.old
+echo "half-installed eboot" >$T/homebrew/PPSA99015/eboot.bin
+echo "a file the cut-off install added" >$T/homebrew/PPSA99015/sce_sys/added.bin
+echo "new param" >$T/homebrew/PPSA99015/sce_sys/param.json.new
+printf '1\teboot.bin\n0\tsce_sys/added.bin\n1\tsce_sys/param.json\n' >$T/homebrew/PPSA99015/update.journal
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:quit" "")
+expect "grep -q 'an install was cut off half way: the old version put back (2 file(s))' $T/root/logs/boot.log" "at the next start: the interrupted install found"
+expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/before.sums" "... and the old version put back (the old eboot.bin, the added file gone, no journal)"
 # c: the right file: the daily check (a day later) offers it, Yes installs it, Yes restarts into it
 release v9.9 99.000.000
 echo 0 >"$T/root/update-check.txt"
@@ -443,7 +467,7 @@ rc=$(u16run "$T" "0:0" "200:key enter;450:key enter;520:key enter;560:quit" "300
 expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/logs/boot.log" "the daily check offers 9.9"
 expect "grep -q '\[update\] 9.9 installed: offering the restart' $T/root/logs/boot.log" "Yes: downloaded, every file checked, installed"
 expect "grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $T/homebrew/PPSA99015/sce_sys/param.json" "the new eboot.bin and param.json in place"
-expect "[ -f $T/homebrew/PPSA99015/sce_sys/extra.bin ] && [ ! -e $T/homebrew/PPSA99015/sce_sys/old.bin ] && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png && [ -z \"\$(find $T/homebrew -name '*.new')\" ]" "a new file added, a gone one removed, the home screen's art refreshed"
+expect "[ -f $T/homebrew/PPSA99015/sce_sys/extra.bin ] && [ ! -e $T/homebrew/PPSA99015/sce_sys/old.bin ] && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old' -o -name update.journal)\" ]" "a new file added, a gone one removed, the home screen's art refreshed (no .new, .old or journal left)"
 expect "grep -q 'sceSystemServiceLoadExec($T/homebrew/PPSA99015/eboot.bin)' $T/out.txt" "Yes again: the app restarts into the new eboot.bin"
 expect "grep -q 'is available: Help, Check for updates' $T/out.txt" "a notification says a new version is out"
 nosan "$T"
@@ -518,6 +542,74 @@ rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "30:quit" "")
 expect "[ $rc = 0 ] && grep -q 'Media Player Classic PS5 $(sed -n 's/^VERSION ?= //p' Makefile), FFmpeg' $T/root/logs/boot.log" "debug_logs=1: boot.log written"
 expect "grep -q '^debug_logs=1$' $T/root/mpc-hc.ini" "and kept when the settings are saved"
 nosan "$T"
+fi
+
+if want 19; then
+echo "== 19. 1.2: the audio boost clips (no wrap-around), HDR workers kept, the decoder's pictures checked, SMB passwords kept out of mpc-hc.ini and the logs"
+# a: a full-scale tone with the boost at its most (+300%: 4x): held at the 16-bit limits, never wrapped to the other sign
+T=$(newroot t19)
+cp "$MEDIA/loud.mkv" "$T/root/media/"
+ini "$T" "AudioBoost=300"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/a run "$T" "0:0" "100:quit" "" "$T/root/media/loud.mkv")
+expect "[ $rc = 0 ] && python3 -c \"
+import array, sys
+a = array.array('h'); a.frombytes(open('$T/a.2ch', 'rb').read())
+l = a[0::2]
+flips = sum(1 for i in range(1, len(l)) if (l[i - 1] > 16000 and l[i] < -16000) or (l[i - 1] < -16000 and l[i] > 16000))
+sys.exit(0 if max(l) == 32767 and min(l) == -32768 and flips == 0 else 1)\"" "boost 4x on a full-scale tone: clipped at 32767 / -32768, never wrapped to the other sign"
+nosan "$T"
+# b: HDR: the tone mapping's workers made once and kept, over two films
+T=$(newroot t19b)
+cp "$MEDIA/hdr_pq.mkv" "$MEDIA/hdr_hlg.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "60:open $T/root/media/hdr_hlg.mkv;110:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "[ $rc = 0 ] && [ \$(grep -c '\[tonemap\] 5 worker threads started (kept for the run)' $T/root/logs/boot.log) = 1 ]" "five workers started once for two HDR films"
+expect "grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "the picture as before (100 nits ~174, the peak white)"
+nosan "$T"
+# c: the console decoder's pictures checked before they are read: an odd layout or a too-small buffer goes to FFmpeg
+for odd in pitch size; do
+	T=$(newroot t19c$odd)
+	cp "$MEDIA/red.mp4" "$T/root/media/"
+	rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_HWDEC_ODD=$odd run "$T" "0:0" "80:state;90:quit" "75" "$T/root/media/red.mp4")
+	want_why="a picture layout the player doesn't know"
+	[ $odd = size ] && want_why="a picture bigger than its buffer"
+	expect "[ $rc = 0 ] && grep -q \"handing the video to FFmpeg: $want_why\" $T/root/logs/boot.log" "decoder output with an odd $odd: not read, the video handed to FFmpeg"
+	expect "state $T 1 | grep -q ' hw 0$' && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "... and it plays on: red"
+	nosan "$T"
+done
+# d: an SMB share with a password
+SPORT=$((40000 + RANDOM % 10000))
+python3 - "$SPORT" "$MEDIA" >"$WORK/smb19.txt" 2>&1 <<'PY' &
+import sys
+from impacket import smbserver
+from impacket.ntlm import compute_lmhash, compute_nthash
+s = smbserver.SimpleSMBServer(listenAddress='127.0.0.1', listenPort=int(sys.argv[1]))
+s.addShare('VIDEOS', sys.argv[2], 'test media')
+s.setSMB2Support(True)
+s.setSMBChallenge('')
+s.addCredential('bob', 1000, compute_lmhash('s3cret'), compute_nthash('s3cret'))
+s.start()
+PY
+SPID=$!
+sleep 2
+T=$(newroot t19d)
+rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS/red.mp4")
+expect "[ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "smb://bob:s3cret@... plays"
+expect "grep -q 'smb://bob:\*\*\*@127.0.0.1' $T/root/logs/boot.log && ! grep -rq s3cret $T/root/logs $T/out.txt" "the password is *** in the log; nowhere in the logs or the output"
+expect "! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^File1=smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4$' $T/root/mpc-hc.ini" "mpc-hc.ini keeps the address without the password"
+expect "grep -q \"smb://bob@127.0.0.1:$SPORT	s3cret\" $T/root/credentials.ini && [ \$(stat -c %a $T/root/credentials.ini) = 600 ]" "the password in credentials.ini, readable by its owner only"
+rm -f $T/root/logs/boot.log
+rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
+expect "[ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "smb://bob@... typed without the password: the kept one is used, it plays"
+nosan "$T"
+# an mpc-hc.ini of 1.1.1, the password in its addresses: moved out at the first start
+T=$(newroot t19e)
+ini "$T" "Volume=100
+[Network]
+Server0=Home|smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS"
+rc=$(run "$T" "0:0" "30:quit" "")
+expect "[ $rc = 0 ] && grep -q 'passwords moved from mpc-hc.ini to credentials.ini' $T/root/logs/boot.log && ! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^Server0=Home|smb://bob@127.0.0.1:$SPORT/VIDEOS$' $T/root/mpc-hc.ini && grep -q s3cret $T/root/credentials.ini" "an older mpc-hc.ini: its passwords moved to credentials.ini at once"
+nosan "$T"
+kill $SPID 2>/dev/null
 fi
 
 echo

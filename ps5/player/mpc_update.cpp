@@ -59,12 +59,26 @@ int AvioGet(const std::string& url, std::vector<uint8_t>& out, size_t max, std::
 	av_dict_set(&opts, "user_agent", "MediaPlayerClassicPS5/" MPCPS5_PS5_VERSION, 0);
 	av_dict_set(&opts, "headers", "Accept: application/vnd.github+json, */*\r\n", 0);
 	av_dict_set(&opts, "rw_timeout", "20000000", 0);
+	// GitHub only over https, its certificate checked against the CA list the app writes at start: without that
+	// list nothing is fetched (an update must not come from a server that couldn't be checked)
 	const std::string ca = OrbisRoot() + "/cacert.pem";
-	if (OrbisIsFile(ca))
+#ifdef __PROSPERO__
+	const bool test_server = false;
+#else
+	const bool test_server = getenv("MPCPS5_UPDATE_API") != nullptr; // the host tests' local server (http://)
+#endif
+	if (url.compare(0, 8, "https://") != 0 && !test_server)
 	{
-		av_dict_set(&opts, "ca_file", ca.c_str(), 0);
-		av_dict_set(&opts, "tls_verify", "1", 0);
+		OrbisLog("[update] GET %s: not https, refused", url.c_str());
+		return -1;
 	}
+	if (!OrbisIsFile(ca))
+	{
+		OrbisLog("[update] GET %s: no CA list (%s), refused", url.c_str(), ca.c_str());
+		return -1;
+	}
+	av_dict_set(&opts, "ca_file", ca.c_str(), 0);
+	av_dict_set(&opts, "tls_verify", "1", 0);
 	AVIOContext* io = nullptr;
 	const int r = avio_open2(&io, url.c_str(), AVIO_FLAG_READ, nullptr, &opts);
 	av_dict_free(&opts);

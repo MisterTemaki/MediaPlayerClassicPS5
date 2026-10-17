@@ -39,6 +39,8 @@ bool OrbisMkdirs(const std::string& path);
 // (before the jailbreak shows /data to the app) are kept and written first.
 void OrbisLogOpen(const char* name = "boot");
 void OrbisLog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+// scheme://user:password@host -> scheme://user:***@host, in place (OrbisLog does it to every line)
+void OrbisHidePasswords(char* line);
 void OrbisLogClose();
 // Debug logs on or off: the "Debug logs" setting (debug_logs= in mpc-hc.ini, off unless it says 1).
 // OrbisLogOpen reads it, so the app, the installer and the helper all follow it; while off, OrbisLog writes

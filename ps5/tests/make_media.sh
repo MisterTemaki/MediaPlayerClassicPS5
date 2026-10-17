@@ -102,6 +102,9 @@ $FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i sine=frequency=10
 $FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i sine=frequency=500:sample_rate=48000 -t 4 \
 	-filter_complex "[1:a]pan=7.1|SL=c0[a]" -map 0:v -map "[a]" -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
 	-c:a pcm_s16le -shortest "$D/surround71.mkv"
+# loud.mkv: a 440 Hz tone at full scale (peaks at 32700), 4 s: with the audio boost it must clip, not wrap around
+$FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i "aevalsrc=0.998*sin(2*PI*440*t):s=48000:c=stereo" -t 4 \
+	-c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a pcm_s16le -shortest "$D/loud.mkv"
 # a playlist of two files
 printf '#EXTM3U\nred.mp4\nchapters.mkv\n' >"$D/list.m3u"
 echo "media in $D"

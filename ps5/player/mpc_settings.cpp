@@ -10,6 +10,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
+#include <map>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace mpc
@@ -79,6 +82,139 @@ Settings& AppSettings()
 std::string SettingsPath()
 {
 	return OrbisRoot() + "/mpc-hc.ini";
+}
+
+// ---- passwords kept out of mpc-hc.ini ----------------------------------------------------------------------------
+// An address with a password (smb://user:secret@server/share..., as the Add network location dialog makes it) is
+// written to mpc-hc.ini without it: smb://user@server/share... The password goes to credentials.ini beside it
+// (owner-only permissions), one line per "scheme://user@server", and comes back into the addresses when the
+// settings are read. So mpc-hc.ini, the file people send when asking for help, carries no password, and a server
+// removed from the list takes its password with it (credentials.ini holds only what the saved addresses use).
+// It isn't encryption: on a jailbroken console anything that can read /data can read credentials.ini.
+namespace
+{
+std::string CredentialsPath()
+{
+	return OrbisRoot() + "/credentials.ini";
+}
+
+// url = scheme://[auth@]host...: the key (scheme://user@host), the password as written (still %-encoded), and the
+// address without it. False when there's no user:password in it.
+bool SplitPassword(const std::string& url, std::string& key, std::string& secret, std::string& bare)
+{
+	const size_t sch = url.find("://");
+	if (sch == std::string::npos)
+		return false;
+	const size_t auth = sch + 3;
+	size_t end = url.find('/', auth);
+	if (end == std::string::npos)
+		end = url.size();
+	const size_t at = url.rfind('@', end);
+	if (at == std::string::npos || at < auth)
+		return false;
+	const size_t colon = url.find(':', auth);
+	if (colon == std::string::npos || colon > at)
+		return false;
+	secret = url.substr(colon + 1, at - colon - 1);
+	bare = url.substr(0, colon) + url.substr(at);
+	size_t host_end = url.find('/', at);
+	key = url.substr(0, colon) + url.substr(at, (host_end == std::string::npos ? url.size() : host_end) - at);
+	return true;
+}
+
+// the key of an address without a password (scheme://user@host), "" when it has no user or has a password
+std::string KeyOf(const std::string& url)
+{
+	const size_t sch = url.find("://");
+	if (sch == std::string::npos)
+		return "";
+	const size_t auth = sch + 3;
+	size_t end = url.find('/', auth);
+	if (end == std::string::npos)
+		end = url.size();
+	const size_t at = url.rfind('@', end);
+	if (at == std::string::npos || at < auth || url.find(':', auth) < at)
+		return "";
+	return url.substr(0, end);
+}
+
+std::string Bare(const std::string& url, std::map<std::string, std::string>* store)
+{
+	std::string key, secret, bare;
+	if (!SplitPassword(url, key, secret, bare))
+		return url;
+	if (store && !secret.empty())
+		(*store)[key] = secret;
+	return bare;
+}
+
+std::string WithPassword(const std::string& url, const std::map<std::string, std::string>& store)
+{
+	const std::string key = KeyOf(url);
+	if (key.empty())
+		return url;
+	auto it = store.find(key);
+	if (it == store.end())
+		return url;
+	const size_t at = url.rfind('@', key.size());
+	return url.substr(0, at) + ":" + it->second + url.substr(at);
+}
+
+std::map<std::string, std::string> ReadCredentials()
+{
+	std::map<std::string, std::string> m;
+	FILE* f = fopen(CredentialsPath().c_str(), "r");
+	if (!f)
+		return m;
+	char line[4096];
+	while (fgets(line, sizeof(line), f))
+	{
+		std::string l = line;
+		while (!l.empty() && (l.back() == '\n' || l.back() == '\r'))
+			l.pop_back();
+		const size_t tab = l.find('\t');
+		if (tab != std::string::npos && l[0] != ';')
+			m[l.substr(0, tab)] = l.substr(tab + 1);
+	}
+	fclose(f);
+	return m;
+}
+
+void WriteCredentials(const std::map<std::string, std::string>& m)
+{
+	const std::string path = CredentialsPath();
+	if (m.empty())
+	{
+		unlink(path.c_str());
+		return;
+	}
+	const std::string tmp = path + ".tmp";
+	const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0)
+		return;
+	fchmod(fd, 0600);
+	FILE* f = fdopen(fd, "w");
+	if (!f)
+	{
+		close(fd);
+		return;
+	}
+	fprintf(f, "; Media Player Classic PS5: the passwords of the network addresses in mpc-hc.ini (address<TAB>password)\n");
+	for (const auto& kv : m)
+		fprintf(f, "%s\t%s\n", kv.first.c_str(), kv.second.c_str());
+	fflush(f);
+	fsync(fileno(f));
+	fclose(f);
+	rename(tmp.c_str(), path.c_str());
+}
+} // namespace
+
+std::string WithStoredPassword(const std::string& url)
+{
+	std::string key, secret, bare;
+	if (SplitPassword(url, key, secret, bare))
+		return url; // it has its own
+	return WithPassword(url, ReadCredentials());
 }
 
 void Settings::Load()
@@ -205,6 +341,33 @@ void Settings::Load()
 	fclose(f);
 	if (recent.size() > 20)
 		recent.resize(20);
+	// the passwords: back into the addresses from credentials.ini; an mpc-hc.ini of 1.1.1 or before still has them
+	// in the addresses, so it's written again at once without them
+	bool inline_secret = false;
+	auto seen = [&inline_secret](const std::string& u) {
+		std::string k, sec, b;
+		if (SplitPassword(u, k, sec, b) && !sec.empty())
+			inline_secret = true;
+	};
+	const auto store = ReadCredentials();
+	auto fix = [&](std::string& u) {
+		seen(u);
+		u = WithPassword(u, store);
+	};
+	for (std::string& u : recent)
+		fix(u);
+	for (FilePosition& p : positions)
+		fix(p.url);
+	for (Favorite& fv : favorites)
+		fix(fv.url);
+	for (NetServer& sv : servers)
+		fix(sv.url);
+	fix(last_dir);
+	if (inline_secret)
+	{
+		OrbisLog("[settings] passwords moved from mpc-hc.ini to credentials.ini");
+		Save();
+	}
 }
 
 void Settings::Save() const
@@ -214,6 +377,8 @@ void Settings::Save() const
 	FILE* f = fopen(tmp.c_str(), "w");
 	if (!f)
 		return;
+	std::map<std::string, std::string> store; // the passwords the addresses below carry
+	auto bare = [&store](const std::string& u) { return Escape(Bare(u, &store)); };
 	fprintf(f, "; Media Player Classic PS5 settings (MPC-HC's names where it has one)\n[Settings]\n");
 	fprintf(f, "RememberFilePos=%d\nTitleBarTextStyle=%d\nShowOSD=%d\nKeepHistory=%d\n", remember_file_pos, title_bar,
 		show_osd, keep_history);
@@ -229,21 +394,23 @@ void Settings::Save() const
 	fprintf(f, "SubFontSize=%d\nSubBold=%d\nSubOutline=%d\nSubMargin=%d\nSubPosition=%d\nSubDelay=%d\n", sub_font_size,
 		sub_bold, sub_outline, sub_margin, sub_position, sub_delay_ms);
 	fprintf(f, "Dpi=%d\nCursorSpeed=%d\nLanguage=%d\ndebug_logs=%d\nLastDir=%s\n", dpi, cursor_speed, language,
-		debug_logs ? 1 : 0, Escape(last_dir).c_str());
+		debug_logs ? 1 : 0, bare(last_dir).c_str());
 	fprintf(f, "[Recent File List]\n");
 	for (size_t i = 0; i < recent.size(); i++)
-		fprintf(f, "File%zu=%s\n", i + 1, Escape(recent[i]).c_str());
+		fprintf(f, "File%zu=%s\n", i + 1, bare(recent[i]).c_str());
 	fprintf(f, "[Positions]\n");
 	for (size_t i = 0; i < positions.size(); i++)
-		fprintf(f, "FilePos%zu=%s|%.3f\n", i, Escape(positions[i].url).c_str(), positions[i].pos);
+		fprintf(f, "FilePos%zu=%s|%.3f\n", i, bare(positions[i].url).c_str(), positions[i].pos);
 	fprintf(f, "[Favorites]\n");
 	for (size_t i = 0; i < favorites.size(); i++)
-		fprintf(f, "Favorite%zu=%s|%s|%.3f\n", i, Escape(favorites[i].name).c_str(), Escape(favorites[i].url).c_str(),
+		fprintf(f, "Favorite%zu=%s|%s|%.3f\n", i, Escape(favorites[i].name).c_str(), bare(favorites[i].url).c_str(),
 			favorites[i].pos);
 	fprintf(f, "[Network]\n");
 	for (size_t i = 0; i < servers.size(); i++)
-		fprintf(f, "Server%zu=%s|%s\n", i, Escape(servers[i].name).c_str(), Escape(servers[i].url).c_str());
+		fprintf(f, "Server%zu=%s|%s\n", i, Escape(servers[i].name).c_str(), bare(servers[i].url).c_str());
 	fclose(f);
+	// the passwords first: the new mpc-hc.ini, without them, mustn't land before they are kept elsewhere
+	WriteCredentials(store);
 	rename(tmp.c_str(), path.c_str());
 }
 

@@ -612,15 +612,49 @@ bool ParseRelease(const std::string& json, const std::string& title_id, Release&
 	return false;
 }
 
+// The install's journal (see InstallZip, step 3) and what puts an interrupted install back.
+static const char* const kJournal = "update.journal";
+
+static bool Exists(const std::string& path)
+{
+	struct stat st;
+	return lstat(path.c_str(), &st) == 0;
+}
+
+static void SyncDir(const std::string& dir)
+{
+	const int fd = open(dir.c_str(), O_RDONLY);
+	if (fd >= 0)
+	{
+		fsync(fd);
+		close(fd);
+	}
+}
+
+// host tests: MPCPS5_HOST_UPDATE_FAIL_RENAME=<file> makes putting that file in place fail (errno EIO)
+static bool FailRenameForTest(const std::string& rel)
+{
+#ifndef __PROSPERO__
+	const char* f = getenv("MPCPS5_HOST_UPDATE_FAIL_RENAME");
+	if (f && rel == f)
+	{
+		errno = EIO;
+		return true;
+	}
+#else
+	(void)rel;
+#endif
+	return false;
+}
+
 std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expect_sha256, const Config& c,
 	std::atomic<size_t>* files_done, std::atomic<size_t>* files_total)
 {
-	if (!expect_sha256.empty())
-	{
-		const std::string got = Sha256Hex(zip.data(), zip.size());
-		if (got != expect_sha256)
-			return "The download's SHA-256 doesn't match GitHub's: nothing was changed.";
-	}
+	// GitHub gives every release file's SHA-256 ("digest"); a download it can't be checked against isn't installed
+	if (expect_sha256.size() != 64)
+		return "GitHub gave no SHA-256 for the download, so it can't be checked: nothing was changed.";
+	if (Sha256Hex(zip.data(), zip.size()) != expect_sha256)
+		return "The download's SHA-256 doesn't match GitHub's: nothing was changed.";
 	std::vector<ZipEntry> entries;
 	std::string why = ReadZip(zip, entries);
 	if (!why.empty())
@@ -691,11 +725,57 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 	written.push_back("manifest.sha256");
 	// 2. the old manifest, for the files that are gone
 	const auto old_manifest = ParseManifest(ReadText(c.app_dir + "/manifest.sha256"));
-	// 3. renamed over the old ones, eboot.bin then the manifest last
+	// 3. into place, eboot.bin then the manifest last, each old file kept as <name>.old until every new one is in.
+	// A rename that fails puts the old ones back; update.journal lists the files while this goes on, so an install
+	// cut off half way (the console turned off) is put back the next time the app starts (RecoverInterrupted).
+	const std::string journal = c.app_dir + "/" + kJournal;
+	{
+		std::string j;
+		for (const std::string& rel : written)
+			j += std::string(Exists(c.app_dir + "/" + rel) ? "1\t" : "0\t") + rel + "\n";
+		if (!WriteFile(journal, reinterpret_cast<const uint8_t*>(j.data()), j.size()))
+		{
+			undo();
+			return "Couldn't write " + journal + " (disk full?): nothing was changed.";
+		}
+		SyncDir(c.app_dir);
+	}
+	std::vector<std::pair<std::string, bool>> moved; // the files in place, and whether they replaced one
+	auto put_back = [&] {
+		for (auto it = moved.rbegin(); it != moved.rend(); ++it)
+		{
+			const std::string f = c.app_dir + "/" + it->first;
+			if (it->second)
+				rename((f + ".old").c_str(), f.c_str());
+			else
+				unlink(f.c_str());
+		}
+		undo(); // the .new files not moved yet
+		SyncDir(c.app_dir);
+		unlink(journal.c_str());
+	};
 	for (const std::string& rel : written)
-		if (rename((c.app_dir + "/" + rel + ".new").c_str(), (c.app_dir + "/" + rel).c_str()) != 0)
-			return "Couldn't replace " + rel + " (errno " + std::to_string(errno) +
-				   "): the app may be half updated; send the payload to repair it.";
+	{
+		const std::string f = c.app_dir + "/" + rel;
+		const bool had = Exists(f);
+		if ((had && rename(f.c_str(), (f + ".old").c_str()) != 0) || FailRenameForTest(rel) ||
+			rename((f + ".new").c_str(), f.c_str()) != 0)
+		{
+			const int err = errno;
+			if (had && !Exists(f))
+				rename((f + ".old").c_str(), f.c_str());
+			put_back();
+			return "Couldn't replace " + rel + " (errno " + std::to_string(err) + "): the old version was put back.";
+		}
+		moved.push_back({rel, had});
+		if (files_done)
+			(*files_done)++;
+	}
+	SyncDir(c.app_dir);
+	unlink(journal.c_str());
+	for (const auto& m : moved)
+		if (m.second)
+			unlink((c.app_dir + "/" + m.first + ".old").c_str());
 	for (const auto& kv : old_manifest)
 		if (!manifest.count(kv.first) && kv.first != "manifest.sha256")
 		{
@@ -716,11 +796,50 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 }
 
 // ---- the worker's face -------------------------------------------------------------------------------------------
+int RecoverInterrupted(const std::string& app_dir)
+{
+	const std::string journal = app_dir + "/" + kJournal;
+	const std::string text = ReadText(journal);
+	if (text.empty() && !Exists(journal))
+		return 0;
+	int restored = 0;
+	size_t pos = 0;
+	while (pos < text.size())
+	{
+		size_t nl = text.find('\n', pos);
+		if (nl == std::string::npos)
+			nl = text.size();
+		const std::string line = text.substr(pos, nl - pos);
+		pos = nl + 1;
+		if (line.size() < 3 || line[1] != '\t' || !SafeRel(line.substr(2)))
+			continue;
+		const bool had = line[0] == '1';
+		const std::string f = app_dir + "/" + line.substr(2);
+		if (had)
+		{
+			if (Exists(f + ".old") && rename((f + ".old").c_str(), f.c_str()) == 0)
+				restored++;
+		}
+		else if (!Exists(f + ".new"))
+		{
+			unlink(f.c_str()); // put in place by the cut-off install, and new in it
+			restored++;
+		}
+		unlink((f + ".new").c_str());
+	}
+	SyncDir(app_dir);
+	unlink(journal.c_str());
+	OrbisLog("[update] an install was cut off half way: the old version put back (%d file(s))", restored);
+	return restored;
+}
+
 void Init(const Config& config, Fetch fetch)
 {
 	std::lock_guard<std::mutex> l(g_mu);
 	g_config = config;
 	g_fetch = std::move(fetch);
+	if (!config.app_dir.empty())
+		RecoverInterrupted(config.app_dir);
 }
 
 void SetCurrentVersion(const std::string& version)

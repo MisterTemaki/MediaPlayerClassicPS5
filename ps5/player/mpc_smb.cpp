@@ -4,6 +4,8 @@
 
 #include "mpc_smb.h"
 
+#include "mpc_settings.h"
+
 #include "mpc_i18n.h"
 
 #include "OrbisPaths.h"
@@ -52,10 +54,12 @@ std::string Decode(const std::string& s)
 	return out;
 }
 
-bool Parse(const std::string& url, Url& u)
+bool Parse(const std::string& in, Url& u)
 {
-	if (url.compare(0, 6, "smb://") != 0)
+	if (in.compare(0, 6, "smb://") != 0)
 		return false;
+	// smb://user@server/... typed without the password: the one kept for that user and server, if any
+	const std::string url = WithStoredPassword(in);
 	std::string rest = url.substr(6);
 	const size_t slash = rest.find('/');
 	std::string auth_host = rest.substr(0, slash);

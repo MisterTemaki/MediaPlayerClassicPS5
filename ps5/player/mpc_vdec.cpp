@@ -485,15 +485,44 @@ void Output(Decoder* d, const VdecOutput& o)
 		return;
 	}
 	const double t0 = av_gettime_relative() / 1e6;
-	const bool ten = o.frame_pitch_in_bytes >= 2 * o.frame_pitch;
+	// The sample size comes from the picture's own row: frame_pitch is in samples, frame_pitch_in_bytes in bytes,
+	// so their ratio is the bytes per sample (1: NV12, 2: 16-bit samples, 10 bits used) whatever the alignment.
+	// Anything else, or a picture that doesn't fit the buffer the player handed in, isn't read: the video goes to
+	// FFmpeg (from the next keyframe) rather than copying from outside the picture.
+	const uint32_t pitch_px = o.frame_pitch, pitch_b = o.frame_pitch_in_bytes;
+	const unsigned bps = pitch_px ? pitch_b / pitch_px : 0;
+	const uint8_t* buf = static_cast<const uint8_t*>(o.frame_buffer);
+	const uint8_t* mem = static_cast<const uint8_t*>(d->frames.addr);
+	const uint64_t need = uint64_t(pitch_b) * (uint64_t(o.frame_height) + (uint64_t(o.frame_height) + 1) / 2);
+	const char* bad = nullptr;
+	if (!pitch_px || pitch_b % pitch_px != 0 || (bps != 1 && bps != 2))
+		bad = "a picture layout the player doesn't know";
+	else if (!o.frame_width || !o.frame_height || o.frame_width > pitch_px)
+		bad = "a picture wider than its rows";
+	else if (!mem || !d->frame_size || buf < mem || buf + d->frame_size > mem + d->frame_size * d->frame_count ||
+			 size_t(buf - mem) % d->frame_size != 0)
+		bad = "a picture outside the player's buffers";
+	else if (need > o.frame_buffer_size || need > d->frame_size)
+		bad = "a picture bigger than its buffer";
+	if (bad)
+	{
+		OrbisLog("[hwdec] %s: %ux%u, pitch %u samples / %u bytes, format %u, buffer %llu of %zu bytes", bad,
+			o.frame_width, o.frame_height, pitch_px, pitch_b, o.frame_format, (unsigned long long)o.frame_buffer_size,
+			d->frame_size);
+		d->errors++;
+		FrameBack(d, o.frame_buffer);
+		GiveUp(d, bad);
+		return;
+	}
+	const bool ten = bps == 2;
 	// only the picture's real size, not the decoder's padding (1088 rows for 1080)
 	int w = d->vis_w > 0 && d->vis_w <= int(o.frame_width) ? d->vis_w : int(o.frame_width);
 	int h = d->vis_h > 0 && d->vis_h <= int(o.frame_height) ? d->vis_h : int(o.frame_height);
 	if (ten != d->ten || d->shown == 0)
 	{
 		d->ten = ten;
-		OrbisLog("[hwdec] pictures %ux%u (shown %dx%d) %s, pitch %u bytes, buffer %llu bytes", o.frame_width,
-			o.frame_height, w, h, ten ? "10-bit" : "NV12", o.frame_pitch_in_bytes,
+		OrbisLog("[hwdec] pictures %ux%u (shown %dx%d) %s, pitch %u bytes, format %u, buffer %llu bytes", o.frame_width,
+			o.frame_height, w, h, ten ? "10-bit" : "NV12", pitch_b, o.frame_format,
 			(unsigned long long)o.frame_buffer_size);
 	}
 	AVFrame* f = av_frame_alloc();

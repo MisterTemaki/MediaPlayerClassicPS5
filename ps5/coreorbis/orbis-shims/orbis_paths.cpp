@@ -168,6 +168,45 @@ int OrbisLogFd()
 	return s_log ? fileno(s_log) : -1;
 }
 
+// A password in an address (scheme://user:password@host/...) as "***", in place: an smb:// share's password, or an
+// http:// one, never reaches a log or the console's output, whoever logs the address.
+void OrbisHidePasswords(char* line)
+{
+	for (char* p = strstr(line, "://"); p; p = strstr(p, "://"))
+	{
+		char* auth = p + 3;
+		char* end = auth;
+		while (*end && *end != '/' && *end != ' ' && *end != '\t' && *end != '"' && *end != '\'' && *end != ')' &&
+			   *end != ',')
+			end++;
+		char* at = nullptr;
+		for (char* q = auth; q < end; q++)
+			if (*q == '@')
+				at = q; // the last @: the host follows it
+		char* colon = nullptr;
+		if (at)
+			for (char* q = auth; q < at; q++)
+				if (*q == ':')
+				{
+					colon = q;
+					break;
+				}
+		if (colon && at > colon + 1)
+		{
+			// user:secret@ -> user:***@ (the line only gets shorter or keeps its length)
+			const size_t secret = size_t(at - colon - 1);
+			if (secret >= 3)
+			{
+				memcpy(colon + 1, "***", 3);
+				memmove(colon + 4, at, strlen(at) + 1);
+			}
+			else
+				memset(colon + 1, '*', secret);
+		}
+		p = auth;
+	}
+}
+
 void OrbisLog(const char* fmt, ...)
 {
 	char line[1024];
@@ -175,6 +214,7 @@ void OrbisLog(const char* fmt, ...)
 	va_start(ap, fmt);
 	vsnprintf(line, sizeof(line), fmt, ap);
 	va_end(ap);
+	OrbisHidePasswords(line);
 
 	timespec ts = {};
 	clock_gettime(CLOCK_MONOTONIC, &ts);

@@ -7,6 +7,9 @@
 //   MPCPS5_HOST_HWDEC_FAIL=n     from the n-th access unit on every decode fails with a stream error (the player
 //                                resets it a few times, then hands the video back to FFmpeg)
 //   MPCPS5_HOST_HWDEC_REFUSE=1   creating a decoder fails (FFmpeg from the start)
+//   MPCPS5_HOST_HWDEC_ODD=pitch  from the 10th picture on, the output says a pitch in bytes that isn't 1 or 2 bytes
+//                                a sample ("pitch": 3x the samples); =size: a buffer size too small for the
+//                                picture (the player must not read it, and hands the video to FFmpeg)
 //
 // SPDX-License-Identifier: MIT
 
@@ -158,6 +161,15 @@ bool Give(HostDecoder* d, HostVdecFrameBuffer* fb, HostVdecOutput* out)
 	out->frame_buffer = fb->frame_buffer;
 	out->frame_buffer_size = fb->frame_buffer_size;
 	out->frame_format = ten ? 2 : 1;
+	static int given = 0;
+	if (const char* odd = getenv("MPCPS5_HOST_HWDEC_ODD"))
+		if (++given >= 10)
+		{
+			if (strcmp(odd, "pitch") == 0)
+				out->frame_pitch_in_bytes = out->frame_pitch * 3;
+			else
+				out->frame_buffer_size = uint64_t(pitch_bytes) * ph / 2;
+		}
 	fb->is_accepted = true;
 	av_frame_free(&f);
 	return true;

@@ -46,6 +46,10 @@ struct FilePosition
 	double pos = 0;
 };
 
+// An address with a user and no password (smb://user@server/...): the one kept in credentials.ini for that user
+// and server put back in; else the address as it is.
+std::string WithStoredPassword(const std::string& url);
+
 struct Settings
 {
 	// Player
