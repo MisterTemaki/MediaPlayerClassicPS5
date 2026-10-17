@@ -31,6 +31,7 @@ struct State
 	// the 8-channel port (S16, L R C LFE Ls Rs Lb Rb), opened on first use by SetChannels (the player's thread)
 	// and read by the output thread: atomic, and stored before `channels` says 8 (release/acquire)
 	std::atomic<int> handle8{-1};
+	bool tried8 = false; // the 8-channel port asked for once per Init (SetChannels' thread only)
 	std::atomic<int> channels{2}; // what the ring holds: 2 or 8
 	std::thread thread;
 	std::atomic<bool> quit{false};
@@ -170,10 +171,9 @@ bool SetChannels(int channels)
 	const int want = channels > 2 ? 8 : 2;
 	if (want == 8 && g->handle8.load(std::memory_order_acquire) <= 0)
 	{
-		static bool tried = false;
-		if (!tried)
+		if (!g->tried8)
 		{
-			tried = true;
+			g->tried8 = true;
 			const int h = sceAudioOutOpen(SCE_USER_SERVICE_USER_ID_SYSTEM, SCE_AUDIO_OUT_PORT_TYPE_MAIN, 0, kGrain, kRate,
 				SCE_AUDIO_OUT_PARAM_FORMAT_S16_8CH);
 			OrbisLog("[audio] sceAudioOutOpen(48 kHz, S16 8 channels, %d) -> %d", kGrain, h);

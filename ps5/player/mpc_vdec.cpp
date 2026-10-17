@@ -425,6 +425,10 @@ struct Decoder
 	bool failed = false, wait_keyframe = false, skip_rasl = true;
 	int vis_w = 0, vis_h = 0;
 	bool ten = false;
+	// the bytes per sample the stream's pictures should come in: 1 (8-bit: H.264, HEVC Main), 2 (HEVC Main 10),
+	// 0 when the stream doesn't say; and the first picture's layout, which the later ones must keep
+	unsigned expect_bps = 0, seen_bps = 0;
+	uint32_t seen_format = 0;
 	// colour, from the stream
 	AVColorPrimaries prim = AVCOL_PRI_UNSPECIFIED;
 	AVColorTransferCharacteristic trc = AVCOL_TRC_UNSPECIFIED;
@@ -504,6 +508,12 @@ void Output(Decoder* d, const VdecOutput& o)
 		bad = "a picture outside the player's buffers";
 	else if (need > o.frame_buffer_size || need > d->frame_size)
 		bad = "a picture bigger than its buffer";
+	else if (uint64_t((o.frame_width + 1) / 2) * 2 * bps > pitch_b)
+		bad = "a chroma row wider than its pitch";
+	else if (d->expect_bps && bps != d->expect_bps)
+		bad = d->expect_bps == 1 ? "16-bit samples for an 8-bit stream" : "8-bit samples for a 10-bit stream";
+	else if (d->seen_bps && (bps != d->seen_bps || o.frame_format != d->seen_format))
+		bad = "the pictures' layout changed in the middle of the stream";
 	if (bad)
 	{
 		OrbisLog("[hwdec] %s: %ux%u, pitch %u samples / %u bytes, format %u, buffer %llu of %zu bytes", bad,
@@ -513,6 +523,11 @@ void Output(Decoder* d, const VdecOutput& o)
 		FrameBack(d, o.frame_buffer);
 		GiveUp(d, bad);
 		return;
+	}
+	if (!d->seen_bps)
+	{
+		d->seen_bps = bps;
+		d->seen_format = o.frame_format;
 	}
 	const bool ten = bps == 2;
 	// only the picture's real size, not the decoder's padding (1088 rows for 1080)
@@ -856,6 +871,11 @@ Decoder* Open(const AVCodecParameters* par, std::string* why)
 	ReadHeaders(d, par->extradata, size_t(par->extradata_size));
 	d->vis_w = w;
 	d->vis_h = h;
+	if (codec == kCodecAvc || par->format == AV_PIX_FMT_YUV420P || par->format == AV_PIX_FMT_YUVJ420P ||
+		(par->format == AV_PIX_FMT_NONE && par->profile == AV_PROFILE_HEVC_MAIN))
+		d->expect_bps = 1;
+	else if (par->format == AV_PIX_FMT_YUV420P10LE || par->profile == AV_PROFILE_HEVC_MAIN_10)
+		d->expect_bps = 2;
 	d->prim = par->color_primaries;
 	d->trc = par->color_trc;
 	d->space = par->color_space;

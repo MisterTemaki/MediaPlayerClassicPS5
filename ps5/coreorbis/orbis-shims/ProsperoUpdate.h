@@ -11,7 +11,8 @@
 //      then is anything written: each file beside the old one as <name>.new; then, with update.journal listing
 //      them, each old file renamed to <name>.old and the new one into its place, eboot.bin and the manifest last;
 //      a rename that fails puts every old file back, and an install cut off half way (the console turned off) is
-//      put back when the app next starts. Then the .old files go, files the old manifest had and the new one hasn't
+//      put back when the app next starts; what can't be put back stays in the journal for the next try, and the
+//      error (or StartupProblem) says so. Then the .old files go, files the old manifest had and the new one hasn't
 //      are removed, and the home screen's copy of the art (/user/appmeta/<ID>) is brought up to date.
 //   3. The running app is the old build: it has to be opened again.
 //
@@ -70,8 +71,11 @@ struct Status
 // Also puts back an install that was cut off half way (RecoverInterrupted on config.app_dir).
 void Init(const Config& config, Fetch fetch);
 // An install interrupted while its files were going into place (update.journal still there): the old files back
-// (<name>.old), the new ones removed. The files put back; 0 when there was nothing to do.
+// (<name>.old), the new ones removed. The journal is removed only when every file is back; what couldn't be put
+// back stays in it for the next start. Returns the files put back; 0 when there was nothing to do.
 int RecoverInterrupted(const std::string& app_dir);
+// Set when RecoverInterrupted couldn't put everything back (a sentence for the user); "" otherwise.
+std::string StartupProblem();
 // The version installed (the app says which when it asks: a helper of an older build may be the one running).
 void SetCurrentVersion(const std::string& version);
 const Config& CurrentConfig();

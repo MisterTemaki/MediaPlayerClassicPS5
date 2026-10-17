@@ -28,6 +28,11 @@ struct Entry
 };
 
 const Entry kTable[] = {
+	{"An update was cut off and the app couldn't be fully put back as it was. If something doesn't work, send the payload again to repair it.",
+		"Una actualización se interrumpió y la app no pudo volver del todo a como estaba. Si algo no funciona, vuelve a enviar el payload para repararla.",
+		"Uma atualização foi interrompida e o app não pôde voltar totalmente ao que era. Se algo não funcionar, envie o payload de novo para repará-lo.",
+		"Une mise à jour a été interrompue et l'app n'a pas pu être entièrement remise comme avant. Si quelque chose ne marche pas, renvoyez le payload pour la réparer.",
+		"Ein Update wurde unterbrochen und die App konnte nicht vollständig wiederhergestellt werden. Falls etwas nicht funktioniert, den Payload erneut senden, um sie zu reparieren."},
 	// ---- the menu bar and the menus (IDR_MAINFRAME, IDR_POPUP); & marks the underlined letter
 	{"&File", "&Archivo", "&Arquivo", "&Fichier", "&Datei"},
 	{"&View", "&Ver", "&Visualizar", "&Affichage", "&Ansicht"},

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <map>
@@ -93,6 +94,18 @@ std::string SettingsPath()
 // It isn't encryption: on a jailbroken console anything that can read /data can read credentials.ini.
 namespace
 {
+// host tests: MPCPS5_HOST_SETTINGS_FAIL=credentials|settings makes writing that file fail
+bool FailForTest(const char* what)
+{
+#ifndef __PROSPERO__
+	const char* f = getenv("MPCPS5_HOST_SETTINGS_FAIL");
+	return f && strcmp(f, what) == 0;
+#else
+	(void)what;
+	return false;
+#endif
+}
+
 std::string CredentialsPath()
 {
 	return OrbisRoot() + "/credentials.ini";
@@ -180,32 +193,35 @@ std::map<std::string, std::string> ReadCredentials()
 	return m;
 }
 
-void WriteCredentials(const std::map<std::string, std::string>& m)
+// credentials.ini replaced as a whole (a temporary file, synced, then renamed over it), or removed when there is
+// nothing to keep. False, and the old file left as it was, when any step fails.
+bool WriteCredentials(const std::map<std::string, std::string>& m)
 {
 	const std::string path = CredentialsPath();
 	if (m.empty())
-	{
-		unlink(path.c_str());
-		return;
-	}
+		return unlink(path.c_str()) == 0 || errno == ENOENT;
 	const std::string tmp = path + ".tmp";
 	const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
 	if (fd < 0)
-		return;
+		return false;
 	fchmod(fd, 0600);
 	FILE* f = fdopen(fd, "w");
 	if (!f)
 	{
 		close(fd);
-		return;
+		unlink(tmp.c_str());
+		return false;
 	}
-	fprintf(f, "; Media Player Classic PS5: the passwords of the network addresses in mpc-hc.ini (address<TAB>password)\n");
+	bool ok = fprintf(f, "; Media Player Classic PS5: the passwords of the network addresses in mpc-hc.ini "
+						 "(address<TAB>password)\n") > 0;
 	for (const auto& kv : m)
-		fprintf(f, "%s\t%s\n", kv.first.c_str(), kv.second.c_str());
-	fflush(f);
-	fsync(fileno(f));
-	fclose(f);
-	rename(tmp.c_str(), path.c_str());
+		ok = ok && fprintf(f, "%s\t%s\n", kv.first.c_str(), kv.second.c_str()) > 0;
+	ok = ok && fflush(f) == 0 && fsync(fileno(f)) == 0;
+	ok = fclose(f) == 0 && ok;
+	ok = ok && !FailForTest("credentials") && rename(tmp.c_str(), path.c_str()) == 0;
+	if (!ok)
+		unlink(tmp.c_str());
+	return ok;
 }
 } // namespace
 
@@ -408,10 +424,40 @@ void Settings::Save() const
 	fprintf(f, "[Network]\n");
 	for (size_t i = 0; i < servers.size(); i++)
 		fprintf(f, "Server%zu=%s|%s\n", i, Escape(servers[i].name).c_str(), bare(servers[i].url).c_str());
-	fclose(f);
-	// the passwords first: the new mpc-hc.ini, without them, mustn't land before they are kept elsewhere
-	WriteCredentials(store);
-	rename(tmp.c_str(), path.c_str());
+	// (not fsync'd: Save runs on the window's thread, when a file opens; a cut-off write leaves the old file, as
+	// the rename comes last)
+	bool ok = fflush(f) == 0 && !ferror(f);
+	ok = fclose(f) == 0 && ok;
+	if (!ok)
+	{
+		unlink(tmp.c_str());
+		OrbisLog("[settings] couldn't write %s: the settings on the disk are left as they were", tmp.c_str());
+		return;
+	}
+	// The two files change together without a password ever being only in memory:
+	// 1. credentials.ini gets the passwords the new mpc-hc.ini needs, plus the ones it has now (the old mpc-hc.ini
+	//    may still need those); if that fails, mpc-hc.ini isn't replaced (the old one, and the old passwords, stay);
+	// 2. mpc-hc.ini is replaced;
+	// 3. credentials.ini is cut down to what the new mpc-hc.ini needs (if that fails, a few spare passwords stay).
+	// (credentials.ini is only written when its passwords change: most saves don't touch it)
+	const std::map<std::string, std::string> had = ReadCredentials();
+	std::map<std::string, std::string> both = had;
+	for (const auto& kv : store)
+		both[kv.first] = kv.second;
+	if (both != had && !WriteCredentials(both))
+	{
+		unlink(tmp.c_str());
+		OrbisLog("[settings] couldn't write credentials.ini: mpc-hc.ini left as it was (no password lost)");
+		return;
+	}
+	if (FailForTest("settings") || rename(tmp.c_str(), path.c_str()) != 0)
+	{
+		unlink(tmp.c_str());
+		OrbisLog("[settings] couldn't replace %s (errno %d): left as it was", path.c_str(), errno);
+		return;
+	}
+	if (both != store && !WriteCredentials(store))
+		OrbisLog("[settings] couldn't trim credentials.ini: it keeps passwords no longer used");
 }
 
 void Settings::AddRecent(const std::string& url)

@@ -14,7 +14,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.2):** builds with the ps5-payload-dev SDK into a signed native app and passes 172 host tests
+> **Status (1.2.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 187 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
@@ -25,6 +25,17 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.2.1:** fixes from a second review:
+- **Updates**: when an old file can't be put back after a failed install, the error says so, `update.journal` keeps
+  that file and the app tries again at its next start (telling you, if it still can't, to send the payload again);
+  the journal goes only once everything is back. Every folder touched (`sce_sys` too) is synced to the disk.
+- **Network passwords**: `credentials.ini` is written first and checked (write, flush, sync, rename); if that fails
+  `mpc-hc.ini` isn't replaced, so a password is never lost. It is only rewritten when its passwords change.
+- **The PS5's video decoder**: the pictures must keep the first picture's layout and format number, and an 8-bit
+  stream must come as 8-bit samples (a 10-bit one as 16-bit); anything else hands the video to FFmpeg.
+- The HDR workers are stopped and joined when the app closes; the 8-channel audio port is asked for again after
+  the sound is restarted.
 
 **1.2:** fixes from a code review, nothing new to learn:
 - **Audio boost** (up to +300%): a loud passage now clips at the 16-bit limits instead of wrapping around to the
@@ -61,8 +72,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.2.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.elf`).
+1. Send `MediaPlayerClassicPS5-v1.2.1.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.1.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -250,7 +261,8 @@ Honest limits:
   (`PPSA99015/manifest.sha256`). Each file is written beside the old one; then, with `update.journal` listing them,
   each old file becomes `<name>.old` and the new one takes its place, `eboot.bin` and the manifest last. If a file
   can't be put in place, every old one is put back; if the install is cut off half way (the console turned off),
-  the app puts the old version back when it next starts. Then the `.old` files go, files the new version no longer
+  the app puts the old version back when it next starts. A file that can't be put back stays in the journal and
+  is tried again at the next start (the app says so; sending the payload again repairs everything). Then the `.old` files go, files the new version no longer
   has are removed, and the home screen's copy of the art is refreshed. Settings and media aren't touched.
 - The trust is GitHub's: HTTPS to `api.github.com` and the SHA-256 GitHub gives. Releases aren't signed with a key
   of their own.
@@ -291,7 +303,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.2.elf, the release zip, mpc-ps5-v1.2-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.2.1.elf, the release zip, mpc-ps5-v1.2.1-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 

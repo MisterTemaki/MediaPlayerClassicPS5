@@ -96,7 +96,7 @@ T=$(newroot t3)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
 # R1 at 60 (chapter 2: green), R1 at 140 (chapter 3: blue), L1 at 220 (back to green)
 rc=$(run "$T" "0:0;60:$R1;62:0;140:$R1;142:0;220:$L1;222:0" "40:state;120:state;200:state;280:state;290:cmd 2001;330:state;340:quit" \
-	"30,120,200,280" "$T/root/media/chapters.mkv")
+	"30,50,120,200,280" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
 expect "[ \"\$(field $T 1 5)\" = 2 ]" "the default audio track (Portuguese, stream 2)"
 expect "[ \"\$(field $T 1 6)\" = 3 ]" "the default subtitle track (ASS, stream 3)"
@@ -104,7 +104,7 @@ expect "$CHECK $T/dump/flip00030.ppm 960 300 red >/dev/null" "chapter 1: red"
 expect "$CHECK $T/dump/flip00120.ppm 960 300 green >/dev/null" "R1: chapter 2, green"
 expect "$CHECK $T/dump/flip00200.ppm 960 300 blue >/dev/null" "R1: chapter 3, blue"
 expect "$CHECK $T/dump/flip00280.ppm 960 300 green >/dev/null" "L1: back to chapter 2, green"
-expect "$REGION $T/dump/flip00030.ppm 500 700 1420 960 255 255 255 30 3000 >/dev/null" "the embedded subtitle drawn (white text at the bottom)"
+expect "$REGION $T/dump/flip00050.ppm 500 700 1420 960 255 255 255 30 3000 >/dev/null" "the embedded subtitle drawn (white text at the bottom; it starts at 0.5 s: frame 50)"
 expect "[ \"\$(field $T 5 5)\" = 1 ]" "Play > Audio Track > English: audio stream 1"
 nosan "$T"
 fi
@@ -425,10 +425,10 @@ release() { # tag contentVersion [bad]
 u16run() { MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.2 01.020.000
+release v1.2.1 01.021.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.2)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.2.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -457,8 +457,21 @@ echo "new param" >$T/homebrew/PPSA99015/sce_sys/param.json.new
 printf '1\teboot.bin\n0\tsce_sys/added.bin\n1\tsce_sys/param.json\n' >$T/homebrew/PPSA99015/update.journal
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:quit" "")
-expect "grep -q 'an install was cut off half way: the old version put back (2 file(s))' $T/root/logs/boot.log" "at the next start: the interrupted install found"
+expect "grep -q 'an install was cut off half way: the old version put back (3 file(s))' $T/root/logs/boot.log" "at the next start: the interrupted install found"
 expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/before.sums" "... and the old version put back (the old eboot.bin, the added file gone, no journal)"
+# b5: a rename fails and one old file can't be put back either: the error says so, the journal keeps that file,
+# the next start puts it back (and the start after a failed put-back tells the user)
+release v9.9 99.000.000
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=sce_sys/param.json MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;450:quit" "")
+expect "grep -q \"\[update\] failed: Couldn't replace sce_sys/param.json .*couldn't be put back completely (1 file(s))\" $T/root/logs/boot.log" "a put-back that fails too: the error says the old version isn't completely back"
+expect "grep -qx '1	sce_sys/icon0.png' $T/homebrew/PPSA99015/update.journal && [ \$(wc -l <$T/homebrew/PPSA99015/update.journal) = 1 ] && [ -f $T/homebrew/PPSA99015/sce_sys/icon0.png.old ]" "... the journal kept, with only that file, and its old copy kept"
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "60:quit" "")
+expect "grep -q '0 file(s) put back, 1 not (journal kept for the next start)' $T/root/logs/boot.log && grep -q 'send the payload again to repair it' $T/out.txt && [ -f $T/homebrew/PPSA99015/update.journal ]" "a start that can't put it back either: journal kept, the user told"
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:quit" "")
+expect "grep -q 'the old version put back (1 file(s))' $T/root/logs/boot.log && ( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/before.sums" "the next start puts it back: every file as before, no journal"
 # c: the right file: the daily check (a day later) offers it, Yes installs it, Yes restarts into it
 release v9.9 99.000.000
 echo 0 >"$T/root/update-check.txt"
@@ -564,14 +577,17 @@ cp "$MEDIA/hdr_pq.mkv" "$MEDIA/hdr_hlg.mkv" "$T/root/media/"
 rc=$(run "$T" "0:0" "60:open $T/root/media/hdr_hlg.mkv;110:quit" "45" "$T/root/media/hdr_pq.mkv")
 expect "[ $rc = 0 ] && [ \$(grep -c '\[tonemap\] 5 worker threads started (kept for the run)' $T/root/logs/boot.log) = 1 ]" "five workers started once for two HDR films"
 expect "grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "the picture as before (100 nits ~174, the peak white)"
+expect "grep -q '\[tonemap\] 5 worker threads stopped' $T/root/logs/boot.log" "at the end the workers are stopped and joined"
 nosan "$T"
 # c: the console decoder's pictures checked before they are read: an odd layout or a too-small buffer goes to FFmpeg
-for odd in pitch size; do
+for odd in pitch size format depth; do
 	T=$(newroot t19c$odd)
 	cp "$MEDIA/red.mp4" "$T/root/media/"
 	rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_HWDEC_ODD=$odd run "$T" "0:0" "80:state;90:quit" "75" "$T/root/media/red.mp4")
 	want_why="a picture layout the player doesn't know"
 	[ $odd = size ] && want_why="a picture bigger than its buffer"
+	[ $odd = format ] && want_why="the pictures' layout changed in the middle of the stream"
+	[ $odd = depth ] && want_why="16-bit samples for an 8-bit stream"
 	expect "[ $rc = 0 ] && grep -q \"handing the video to FFmpeg: $want_why\" $T/root/logs/boot.log" "decoder output with an odd $odd: not read, the video handed to FFmpeg"
 	expect "state $T 1 | grep -q ' hw 0$' && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "... and it plays on: red"
 	nosan "$T"
@@ -608,6 +624,20 @@ ini "$T" "Volume=100
 Server0=Home|smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS"
 rc=$(run "$T" "0:0" "30:quit" "")
 expect "[ $rc = 0 ] && grep -q 'passwords moved from mpc-hc.ini to credentials.ini' $T/root/logs/boot.log && ! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^Server0=Home|smb://bob@127.0.0.1:$SPORT/VIDEOS$' $T/root/mpc-hc.ini && grep -q s3cret $T/root/credentials.ini" "an older mpc-hc.ini: its passwords moved to credentials.ini at once"
+nosan "$T"
+# credentials.ini can't be written: mpc-hc.ini is left as it was, so no password is lost; the next start moves it
+T=$(newroot t19f)
+ini "$T" "Volume=100
+[Network]
+Server0=Home|smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS"
+rc=$(MPCPS5_HOST_SETTINGS_FAIL=credentials run "$T" "0:0" "30:quit" "")
+expect "[ $rc = 0 ] && grep -q \"couldn't write credentials.ini: mpc-hc.ini left as it was\" $T/root/logs/boot.log && grep -q '^Server0=Home|smb://bob:s3cret@' $T/root/mpc-hc.ini && [ ! -e $T/root/credentials.ini ] && [ ! -e $T/root/credentials.ini.tmp ] && [ ! -e $T/root/mpc-hc.ini.tmp ]" "credentials.ini can't be written: mpc-hc.ini untouched, the password still there"
+rc=$(run "$T" "0:0" "30:quit" "")
+expect "! grep -q s3cret $T/root/mpc-hc.ini && grep -q s3cret $T/root/credentials.ini" "the next start: moved to credentials.ini"
+# mpc-hc.ini can't be replaced: credentials.ini keeps the old passwords too (the old mpc-hc.ini still needs them)
+cp $T/root/mpc-hc.ini $T/ini.before
+rc=$(MPCPS5_HOST_SETTINGS_FAIL=settings run "$T" "0:0" "20:quit" "smb://alice:pw2@127.0.0.1:$SPORT/VIDEOS/red.mp4")
+expect "cmp -s $T/root/mpc-hc.ini $T/ini.before && grep -q s3cret $T/root/credentials.ini" "mpc-hc.ini can't be replaced: left as it was, its passwords kept"
 nosan "$T"
 kill $SPID 2>/dev/null
 fi

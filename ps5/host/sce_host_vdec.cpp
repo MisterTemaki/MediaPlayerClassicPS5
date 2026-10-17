@@ -9,7 +9,8 @@
 //   MPCPS5_HOST_HWDEC_REFUSE=1   creating a decoder fails (FFmpeg from the start)
 //   MPCPS5_HOST_HWDEC_ODD=pitch  from the 10th picture on, the output says a pitch in bytes that isn't 1 or 2 bytes
 //                                a sample ("pitch": 3x the samples); =size: a buffer size too small for the
-//                                picture (the player must not read it, and hands the video to FFmpeg)
+//                                picture; =format: another frame_format number; =depth: 16-bit samples for an
+//                                8-bit stream (the player must not read any of these, and hands the video to FFmpeg)
 //
 // SPDX-License-Identifier: MIT
 
@@ -18,6 +19,7 @@ extern "C" {
 #include <libavutil/imgutils.h>
 }
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -167,6 +169,14 @@ bool Give(HostDecoder* d, HostVdecFrameBuffer* fb, HostVdecOutput* out)
 		{
 			if (strcmp(odd, "pitch") == 0)
 				out->frame_pitch_in_bytes = out->frame_pitch * 3;
+			else if (strcmp(odd, "format") == 0)
+				out->frame_format += 7; // the same layout under another format number
+			else if (strcmp(odd, "depth") == 0 && !ten)
+			{
+				// an 8-bit stream's picture said to be 16-bit samples (half the samples per row)
+				out->frame_pitch = uint32_t(pitch_bytes / 2);
+				out->frame_width = std::min(out->frame_width, out->frame_pitch);
+			}
 			else
 				out->frame_buffer_size = uint64_t(pitch_bytes) * ph / 2;
 		}

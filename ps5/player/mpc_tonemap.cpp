@@ -15,6 +15,7 @@ extern "C" {
 #include <atomic>
 #include <cmath>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -237,9 +238,22 @@ public:
 	Pool()
 	{
 		for (int i = 1; i < kBands; i++)
-			std::thread([this, i] { Work(i); }).detach(); // kept until the app exits
-		started_.store(kBands - 1);
+			threads_.emplace_back([this, i] { Work(i); });
+		started_ += kBands - 1;
 		OrbisLog("[tonemap] %d worker threads started (kept for the run)", kBands - 1);
+	}
+
+	// Stops the workers and waits for them (none is in a picture then: Convert holds g_mu around Run).
+	~Pool()
+	{
+		{
+			std::lock_guard<std::mutex> l(m_);
+			stop_ = true;
+		}
+		cv_.notify_all();
+		for (std::thread& t : threads_)
+			t.join();
+		OrbisLog("[tonemap] %d worker threads stopped", int(threads_.size()));
 	}
 
 	void Run(const Job& job)
@@ -260,12 +274,14 @@ public:
 private:
 	void Work(int band)
 	{
-		crashlog::ArmThread(); // a crash here is reported too (the thread never ends: nothing to disarm)
+		void* alt = crashlog::ArmThread(); // a crash here is reported too
 		uint64_t seen = 0;
 		for (;;)
 		{
 			std::unique_lock<std::mutex> l(m_);
-			cv_.wait(l, [&] { return gen_ != seen; });
+			cv_.wait(l, [&] { return stop_ || gen_ != seen; });
+			if (stop_)
+				break;
 			seen = gen_;
 			const Job job = job_;
 			l.unlock();
@@ -275,16 +291,20 @@ private:
 			if (--left_ == 0)
 				done_cv_.notify_one();
 		}
+		crashlog::DisarmThread(alt);
 	}
 
 	std::mutex m_;
 	std::condition_variable cv_, done_cv_;
+	std::vector<std::thread> threads_;
 	Job job_;
 	uint64_t gen_ = 0;
 	int left_ = 0;
+	bool stop_ = false;
 	static std::atomic<int> started_;
 };
 std::atomic<int> Pool::started_{0};
+std::unique_ptr<Pool> g_pool; // under g_mu
 } // namespace
 
 void Convert(const uint16_t* src, int src_pitch, uint32_t* dst, int dst_pitch, int w, int h, const Params& p)
@@ -298,7 +318,8 @@ void Convert(const uint16_t* src, int src_pitch, uint32_t* dst, int dst_pitch, i
 		Rows(g_t, src, src_pitch, dst, dst_pitch, w, 0, h);
 		return;
 	}
-	static Pool* pool = new Pool(); // never deleted: its threads wait for pictures until the app exits
+	if (!g_pool)
+		g_pool.reset(new Pool()); // kept until Shutdown(): its threads wait for the next picture
 	Job job;
 	job.t = &g_t;
 	job.src = src;
@@ -307,12 +328,18 @@ void Convert(const uint16_t* src, int src_pitch, uint32_t* dst, int dst_pitch, i
 	job.dst_pitch = dst_pitch;
 	job.w = w;
 	job.h = h;
-	pool->Run(job);
+	g_pool->Run(job);
 }
 
 int WorkerThreads()
 {
 	return Pool::Started();
+}
+
+void Shutdown()
+{
+	std::lock_guard<std::mutex> l(g_mu);
+	g_pool.reset();
 }
 } // namespace tonemap
 } // namespace mpc

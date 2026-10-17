@@ -7,6 +7,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "mpc_app.h"
+#include "mpc_tonemap.h"
 
 #include "mpc_dialogs.h"
 #include "mpc_font.h"
@@ -2931,6 +2932,7 @@ int MainFrame::Run(const std::string& first)
 	}
 	SavePosition();
 	player_.Close();
+	tonemap::Shutdown(); // the HDR workers stopped and joined (the player's threads are gone)
 	s_.Save();
 	return 0;
 }

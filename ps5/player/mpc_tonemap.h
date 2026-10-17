@@ -52,8 +52,10 @@ struct Params
 // src: R, G, B, A 16-bit (AV_PIX_FMT_RGBA64LE, full range), w x h, src_pitch in pixels.
 // dst: RGBA 8-bit (AV_PIX_FMT_RGBA), dst_pitch in pixels.
 // Pictures 360 rows high or more are shared between the caller and five worker threads made at the first one and
-// kept (WorkerThreads() says how many were started: 0 or 5, never more).
+// kept until Shutdown() (WorkerThreads() says how many were started in all: 5 per pool).
 void Convert(const uint16_t* src, int src_pitch, uint32_t* dst, int dst_pitch, int w, int h, const Params& p);
 int WorkerThreads();
+// The workers stopped and joined (the app's end); a later picture would start them again.
+void Shutdown();
 } // namespace tonemap
 } // namespace mpc

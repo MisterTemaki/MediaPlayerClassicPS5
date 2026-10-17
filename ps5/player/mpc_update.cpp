@@ -136,7 +136,12 @@ void Init()
 	c.app_dir = EnvOr("MPCPS5_PS5_HOMEBREW", "/data/homebrew") + "/" MPCPS5_TITLE_ID;
 	c.appmeta_dir = EnvOr("MPCPS5_PS5_APPMETA", "/user/appmeta") + "/" MPCPS5_TITLE_ID;
 	c.api_url = EnvOr("MPCPS5_UPDATE_API", "");
-	update::Init(c, AvioGet);
+	update::Init(c, AvioGet); // also puts back an update cut off half way
+	if (!update::StartupProblem().empty())
+	{
+		ProsperoNotify("%s", mpc::T(update::StartupProblem().c_str()));
+		ProsperoNotifyFlush();
+	}
 	update::SetOnNewer([](const std::string& v) {
 		ProsperoNotify(mpc::T("Media Player Classic PS5 %s is available: Help, Check for updates."), v.c_str());
 		ProsperoNotifyFlush();
