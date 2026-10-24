@@ -3,7 +3,8 @@
 // stb_truetype trusts every offset in the file; the fonts folder is the user's, and a file copied half way over FTP or
 // damaged is read as it is. So a font is only used once its table directory, the tables stb_truetype and the player
 // read (cmap and its subtables, head, hhea, hmtx, maxp, loca and glyf or CFF, name, OS/2, kern) and every loca entry lie
-// inside the file. (The owner of the data also pads it with zeros, kPad bytes, so the 16-bit offsets inside a table
+// inside the file, every glyph's data fits (a simple glyph's contours, flags and coordinates; a composite's components,
+// without loops), and GPOS kerning is only used when its pair adjustments fit in their table. (The owner of the data also pads it with zeros, kPad bytes, so the 16-bit offsets inside a table
 // can't reach past the buffer either.)
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,6 +26,9 @@ constexpr size_t kPad = 1 << 20;
 int CountFaces(const uint8_t* data, size_t size, std::string* why);
 // face index of the file checked: its tables inside the file; offset gets where it starts
 bool CheckFace(const uint8_t* data, size_t size, int index, uint32_t* offset, std::string* why);
+// whether stb_truetype's GPOS kerning (pair adjustment, formats 1 and 2) reads only inside the GPOS table of the face
+// at off; when not, the caller sets stbtt_fontinfo::gpos to 0 (the kern table is used, or no kerning)
+bool GposKerningFits(const uint8_t* data, size_t size, uint32_t off);
 // a table of the face at off: its offset and length (both inside the file once CheckFace said yes), false if absent
 bool FindTable(const uint8_t* data, size_t size, uint32_t off, const char* tag, uint32_t* at, uint32_t* len);
 } // namespace sfnt

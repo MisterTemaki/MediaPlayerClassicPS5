@@ -35,6 +35,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 		stbtt_fontinfo info;
 		if (!stbtt_InitFont(&info, buf.data(), int(off)))
 			continue;
+		if (!mpc::sfnt::GposKerningFits(buf.data(), size, off))
+			info.gpos = 0; // as mpc_font.cpp does
 		const float scale = stbtt_ScaleForMappingEmToPixels(&info, 24);
 		int prev = 0;
 		for (int cp : {0x41, 0x67, 0x57, 0xe9, 0x416, 0x65e5, 0x2603, 0x1f600})

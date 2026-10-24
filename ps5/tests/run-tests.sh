@@ -948,6 +948,20 @@ expect "grep -q '\[log\] debug logs turned on' $T/root/logs/boot.log && grep -q 
 rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "20:quit" "")
 expect "grep -q 'Media Player Classic PS5 .*FFmpeg' $T/root/logs/boot.log" "the next start: logged from the start"
 nosan "$T"
+# i: well-formed files with bad insides: a composite 'A' of 8 bytes made of itself, a simple 'A' whose points run past
+# its data (both refused), a GPOS pair adjustment whose class records don't fit (the font kept, its GPOS kerning not)
+for pick in bb-shortcomp.ttf ba-gpos2.ttf; do
+	T=$(newroot t23i_${pick%%.*})
+	mkdir -p $T/root/fonts
+	python3 tests/make_test_fonts.py crafted $T/root/fonts $SANS
+	srt23 $T "AVATAR WAVE To"
+	ini "$T" "SubFont=$pick"
+	rc=$(run "$T" "0:0" "60:state;70:cmd options;80:key escape;100:quit" "60" "$T/root/media/movie.mp4")
+	expect "[ $rc = 0 ] && $REGION $T/dump/flip00060.ppm 400 750 1520 977 255 255 255 30 1000 >/dev/null" "SubFont=$pick: no crash, the line drawn"
+	nosan "$T"
+done
+expect "grep -q 'bb-shortcomp.ttf: face 0 refused: a glyph shorter than its header' $T/root/logs/boot.log && grep -q 'bc-points.ttf: face 0 refused: a glyph whose points run past its data' $T/root/logs/boot.log" "the 8-byte composite and the simple glyph past its data: refused"
+expect "grep -q 'ba-gpos2.ttf: face 0: its GPOS kerning left out' $T/root/logs/boot.log && grep -q 'Default Style font: DejaVu Sans (ba-gpos2.ttf)' $T/root/logs/boot.log" "the GPOS that doesn't fit: kerning from it left out, the font used"
 fi
 
 echo

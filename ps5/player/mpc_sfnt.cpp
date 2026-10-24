@@ -4,6 +4,7 @@
 
 #include "mpc_sfnt.h"
 
+#include <algorithm>
 #include <vector>
 
 namespace mpc
@@ -66,7 +67,135 @@ bool Components(const uint8_t* g, uint32_t len, Fn fn)
 	}
 	return false;
 }
+// a simple glyph (numberOfContours >= 0): endPtsOfContours increasing, the instructions, the flags (with their repeats)
+// and the x and y coordinates all inside its len bytes
+bool SimpleGlyphFits(const uint8_t* g, uint32_t len)
+{
+	const uint32_t contours = U16(g);
+	uint64_t p = 10 + 2ull * contours;
+	if (p + 2 > len)
+		return false;
+	uint32_t points = 0;
+	for (uint32_t c = 0; c < contours; c++)
+	{
+		const uint32_t end = U16(g + 10 + 2 * c);
+		if (c && end < points) // points: the previous end + 1
+			return false;
+		points = end + 1;
+	}
+	p += 2 + U16(g + 10 + 2 * contours); // the instructions
+	uint64_t xbytes = 0, ybytes = 0;
+	for (uint32_t i = 0; i < points;)
+	{
+		if (p >= len)
+			return false;
+		const uint8_t flag = g[p++];
+		uint32_t times = 1;
+		if (flag & 8) // REPEAT_FLAG
+		{
+			if (p >= len)
+				return false;
+			times += g[p++];
+		}
+		if (times > points - i)
+			times = points - i;
+		xbytes += uint64_t(times) * ((flag & 2) ? 1 : (flag & 16) ? 0 : 2);
+		ybytes += uint64_t(times) * ((flag & 4) ? 1 : (flag & 32) ? 0 : 2);
+		i += times;
+	}
+	return p + xbytes + ybytes <= len;
+}
 } // namespace
+
+bool GposKerningFits(const uint8_t* data, size_t size, uint32_t off)
+{
+	uint32_t gp, len;
+	if (!FindTable(data, size, off, "GPOS", &gp, &len))
+		return true; // none: the kern table is used
+	const uint8_t* d = data + gp;
+	auto in = [len](uint64_t o, uint64_t n) { return o + n <= len; };
+	if (!in(0, 10))
+		return false;
+	if (U16(d) != 1 || U16(d + 2) != 0)
+		return true; // a version stb_truetype leaves alone
+	const uint32_t ll = U16(d + 8);
+	if (!in(ll, 2) || !in(ll + 2, 2ull * U16(d + ll)))
+		return false;
+	const uint32_t lookups = U16(d + ll);
+	for (uint32_t i = 0; i < lookups; i++)
+	{
+		const uint32_t lo = ll + U16(d + ll + 2 + 2 * i);
+		if (!in(lo, 6))
+			return false;
+		if (U16(d + lo) != 2) // only pair adjustment is read
+			continue;
+		const uint32_t subs = U16(d + lo + 4);
+		if (!in(lo + 6, 2ull * subs))
+			return false;
+		for (uint32_t k = 0; k < subs; k++)
+		{
+			const uint32_t st = lo + U16(d + lo + 6 + 2 * k);
+			if (!in(st, 8))
+				return false;
+			const uint32_t format = U16(d + st), cov = st + U16(d + st + 2);
+			// the coverage table and the largest coverage index it can give
+			if (!in(cov, 4))
+				return false;
+			const uint32_t cformat = U16(d + cov), count = U16(d + cov + 2);
+			int64_t max_index = -1;
+			if (cformat == 1)
+			{
+				if (!in(cov + 4, 2ull * count))
+					return false;
+				max_index = int64_t(count) - 1;
+			}
+			else if (cformat == 2)
+			{
+				if (!in(cov + 4, 6ull * count))
+					return false;
+				for (uint32_t r = 0; r < count; r++)
+				{
+					const uint8_t* rr = d + cov + 4 + 6 * r;
+					if (U16(rr + 2) >= U16(rr))
+						max_index = std::max<int64_t>(max_index, int64_t(U16(rr + 4)) + U16(rr + 2) - U16(rr));
+				}
+			}
+			if (max_index < 0 || U16(d + st + 4) != 4 || U16(d + st + 6) != 0)
+				continue; // nothing covered, or value formats stb_truetype doesn't read
+			if (format == 1)
+			{
+				// stb_truetype reads the pair set's offset and its count for any coverage index, then the pairs
+				const uint32_t sets = in(st, 10) ? U16(d + st + 8) : 0;
+				if (!in(st + 10, 2ull * uint64_t(max_index + 1)))
+					return false;
+				for (int64_t c = 0; c <= max_index; c++)
+				{
+					const uint32_t pv = st + U16(d + st + 10 + 2 * c);
+					if (!in(pv, 2) || (c < sets && !in(pv + 2, 4ull * U16(d + pv))))
+						return false;
+				}
+			}
+			else if (format == 2)
+			{
+				if (!in(st, 16))
+					return false;
+				for (uint32_t cd : {st + U16(d + st + 8), st + U16(d + st + 10)})
+				{
+					if (!in(cd, 4))
+						return false;
+					if (U16(d + cd) == 1 && !(in(cd, 6) && in(cd + 6, 2ull * U16(d + cd + 4))))
+						return false;
+					if (U16(d + cd) == 2 && !in(cd + 4, 6ull * U16(d + cd + 2)))
+						return false;
+				}
+				// every class pair's record inside the subtable
+				if (!in(st + 16, 2ull * U16(d + st + 12) * U16(d + st + 14)))
+					return false;
+			}
+		}
+	}
+	return true;
+}
 
 bool FindTable(const uint8_t* data, size_t size, uint32_t off, const char* tag, uint32_t* at, uint32_t* len)
 {
@@ -178,34 +307,43 @@ bool CheckFace(const uint8_t* data, size_t size, int index, uint32_t* offset, st
 			if (at[g] > t_len || (g && at[g] < at[g - 1]))
 				return Fail(why, "a glyph outside the glyf table");
 		}
-		// composites: each component a glyph of the font, nested at most 16 deep, never itself (stb_truetype recurses)
+		// every glyph: a simple one's contours, instructions, flags and coordinates inside its data (stb_truetype sizes
+		// its buffers from them); a composite's components inside its data, each a glyph of the font, nested at most 16
+		// deep, never itself (stb_truetype recurses)
 		std::vector<uint8_t> state(glyphs, 0); // 0 not seen, 1 being walked, 2 fine
-		for (uint32_t g0 = 0; g0 < glyphs; g0++)
+		const char* what = nullptr;
+		for (uint32_t g0 = 0; g0 < glyphs && !what; g0++)
 		{
 			if (state[g0])
 				continue;
-			bool bad = false;
 			auto walk = [&](uint32_t g, int depth, auto& self) -> void {
-				if (bad)
+				if (what)
 					return;
 				if (g >= glyphs || depth > 16 || state[g] == 1)
 				{
-					bad = true;
+					what = "a composite glyph that is too deep, made of itself or of a glyph the font hasn't got";
 					return;
 				}
 				if (state[g] == 2)
 					return;
 				state[g] = 1;
 				const uint32_t len = at[g + 1] - at[g];
-				if (len >= 10 && int16_t(U16(data + t + at[g])) < 0)
-					if (!Components(data + t + at[g], len, [&](uint32_t c) { self(c, depth + 1, self); }))
-						bad = true;
+				const uint8_t* gd = data + t + at[g];
+				if (len > 0 && len < 10)
+					what = "a glyph shorter than its header";
+				else if (len > 0 && int16_t(U16(gd)) < 0)
+				{
+					if (!Components(gd, len, [&](uint32_t c) { self(c, depth + 1, self); }))
+						what = what ? what : "a composite glyph whose components are cut off";
+				}
+				else if (len > 0 && !SimpleGlyphFits(gd, len))
+					what = "a glyph whose points run past its data";
 				state[g] = 2;
 			};
 			walk(g0, 0, walk);
-			if (bad)
-				return Fail(why, "a composite glyph that is cut off, too deep or made of itself");
 		}
+		if (what)
+			return Fail(why, what);
 	}
 	else if (!FindTable(data, size, off, "CFF ", &t, &t_len) || t_len < 4)
 		return Fail(why, "no outlines (glyf or CFF)");

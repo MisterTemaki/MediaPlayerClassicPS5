@@ -62,6 +62,13 @@ struct Face
 		}
 		if (!stbtt_InitFont(&info, data, int(off)))
 			return false;
+		if (!sfnt::GposKerningFits(data, size, off))
+		{
+			// stb_truetype would read its pair adjustments past the table: the kern table only (or none)
+			info.gpos = 0;
+			OrbisLog("[fonts] %s: face %d: its GPOS kerning left out (it doesn't fit in its table)",
+				file.empty() ? "(built in)" : file.c_str(), index);
+		}
 		// Windows' text cell: OS/2 usWinAscent + usWinDescent
 		int a = 0, d = 0, g = 0;
 		stbtt_GetFontVMetrics(&info, &a, &d, &g);
