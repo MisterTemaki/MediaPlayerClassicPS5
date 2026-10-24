@@ -127,6 +127,18 @@ def crafted(d, src):
     n = struct.unpack('>h', data[g0:g0 + 2])[0]
     b[g0 + 10 + 2 * (n - 1):g0 + 12 + 2 * (n - 1)] = struct.pack('>H', 65000)
     open(os.path.join(d, 'bc-points.ttf'), 'wb').write(b)
+    # 'A': a composite whose first component is point matched (flags without ARGS_ARE_XY_VALUES: no argument bytes
+    # follow) and whose second component is 'A' itself; a walk that skips argument bytes anyway sees other components
+    b = bytearray(data)
+    bglyph = glyph_of(data, 0x42)
+    comp = struct.pack('>h4h', -1, 0, 0, 0, 0) + struct.pack('>HH', 0x0020, bglyph) + struct.pack('>HHhh', 0x0003, a, 0, 0)
+    b[g0:g0 + len(comp)] = comp
+    open(os.path.join(d, 'bd-pointmatch.ttf'), 'wb').write(b)
+    # 'A': one contour of one off-curve point (stb_truetype reads the point after it, one past its array)
+    b = bytearray(data)
+    simple = struct.pack('>h4h', 1, 0, 0, 100, 100) + struct.pack('>HH', 0, 0) + bytes([0x00]) + struct.pack('>hh', 50, 50)
+    b[g0:g0 + len(simple)] = simple
+    open(os.path.join(d, 'be-lastoff.ttf'), 'wb').write(b)
 
 
 {'bad': bad, 'weights': weights, 'crafted': crafted}[sys.argv[1]](sys.argv[2], sys.argv[3])

@@ -1794,7 +1794,12 @@ static int stbtt__GetGlyphShapeTT(const stbtt_fontinfo *info, int glyph_index, s
                // where we can start, and we need to save some state for when we wraparound.
                scx = x;
                scy = y;
-               if (!(vertices[off+i+1].type & 1)) {
+               // Media Player Classic PS5: a last contour of one off-curve point has no next point to read (read
+               // one element past the array upstream): it starts on itself
+               if (i + 1 >= n) {
+                  sx = x;
+                  sy = y;
+               } else if (!(vertices[off+i+1].type & 1)) {
                   // next point is also a curve point, so interpolate an on-point curve
                   sx = (x + (stbtt_int32) vertices[off+i+1].x) >> 1;
                   sy = (y + (stbtt_int32) vertices[off+i+1].y) >> 1;

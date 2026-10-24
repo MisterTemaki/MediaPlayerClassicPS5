@@ -950,7 +950,7 @@ expect "grep -q 'Media Player Classic PS5 .*FFmpeg' $T/root/logs/boot.log" "the 
 nosan "$T"
 # i: well-formed files with bad insides: a composite 'A' of 8 bytes made of itself, a simple 'A' whose points run past
 # its data (both refused), a GPOS pair adjustment whose class records don't fit (the font kept, its GPOS kerning not)
-for pick in bb-shortcomp.ttf ba-gpos2.ttf; do
+for pick in bb-shortcomp.ttf bd-pointmatch.ttf be-lastoff.ttf ba-gpos2.ttf; do
 	T=$(newroot t23i_${pick%%.*})
 	mkdir -p $T/root/fonts
 	python3 tests/make_test_fonts.py crafted $T/root/fonts $SANS
@@ -961,6 +961,8 @@ for pick in bb-shortcomp.ttf ba-gpos2.ttf; do
 	nosan "$T"
 done
 expect "grep -q 'bb-shortcomp.ttf: face 0 refused: a glyph shorter than its header' $T/root/logs/boot.log && grep -q 'bc-points.ttf: face 0 refused: a glyph whose points run past its data' $T/root/logs/boot.log" "the 8-byte composite and the simple glyph past its data: refused"
+expect "grep -q 'bd-pointmatch.ttf: face 0 refused: a composite glyph that is too deep, made of itself' $T/root/logs/boot.log" "a point-matched component (no argument bytes) followed by 'A' itself: the walk reads what stb_truetype reads, refused"
+expect "grep -q 'Default Style font: DejaVu Sans (be-lastoff.ttf)' $WORK/t23i_be-lastoff/root/logs/boot.log" "an 'A' of one off-curve point: the font used, drawn without reading past its points (no sanitizer report above)"
 expect "grep -q 'ba-gpos2.ttf: face 0: its GPOS kerning left out' $T/root/logs/boot.log && grep -q 'Default Style font: DejaVu Sans (ba-gpos2.ttf)' $T/root/logs/boot.log" "the GPOS that doesn't fit: kerning from it left out, the font used"
 fi
 

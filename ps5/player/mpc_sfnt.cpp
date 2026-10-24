@@ -52,7 +52,11 @@ bool Components(const uint8_t* g, uint32_t len, Fn fn)
 		if (p + 4 > len)
 			return false;
 		const uint32_t flags = U16(g + p), glyph = U16(g + p + 2);
-		p += 4 + ((flags & 1) ? 4 : 2); // ARG_1_AND_2_ARE_WORDS
+		// the arguments are read only for ARGS_ARE_XY_VALUES (stb_truetype reads none for point matching, so the
+		// walk follows the same bytes): words with ARG_1_AND_2_ARE_WORDS, else bytes
+		p += 4;
+		if (flags & 2)
+			p += (flags & 1) ? 4 : 2;
 		if (flags & 8)
 			p += 2; // WE_HAVE_A_SCALE
 		else if (flags & 0x40)
@@ -72,6 +76,8 @@ bool Components(const uint8_t* g, uint32_t len, Fn fn)
 bool SimpleGlyphFits(const uint8_t* g, uint32_t len)
 {
 	const uint32_t contours = U16(g);
+	if (contours == 0)
+		return true; // no outline: stb_truetype reads nothing past the header
 	uint64_t p = 10 + 2ull * contours;
 	if (p + 2 > len)
 		return false;
