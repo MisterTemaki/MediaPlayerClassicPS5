@@ -4,6 +4,8 @@
 
 #include "mpc_settings.h"
 
+#include "mpc_i18n.h"
+
 #include "OrbisPaths.h"
 
 #include <algorithm>
@@ -258,6 +260,158 @@ std::string WithStoredPassword(const std::string& url)
 	return WithPassword(url, ReadCredentials());
 }
 
+namespace
+{
+struct PadButtonInfo
+{
+	const char* name; // the Keys page
+	const char* short_name; // beside a menu item
+	const char* ini; // mpc-hc.ini: Key<ini>=
+	PadAction def;
+};
+const PadButtonInfo kPadButtons[int(PadButton::Count)] = {
+	{"Cross", "Cross", "Cross", PadAction::PlayPause},
+	{"Circle", "Circle", "Circle", PadAction::LeaveFullScreen},
+	{"Triangle", "Triangle", "Triangle", PadAction::FullScreen},
+	{"Square", "Square", "Square", PadAction::ContextMenu},
+	{"D-pad Left", "Left", "Left", PadAction::JumpBackMedium},
+	{"D-pad Right", "Right", "Right", PadAction::JumpForwardMedium},
+	{"D-pad Up", "Up", "Up", PadAction::VolumeUp},
+	{"D-pad Down", "Down", "Down", PadAction::VolumeDown},
+	{"L1", "L1", "L1", PadAction::Previous},
+	{"R1", "R1", "R1", PadAction::Next},
+	{"L2", "L2", "L2", PadAction::JumpBackLarge},
+	{"R2", "R2", "R2", PadAction::JumpForwardLarge},
+	{"L3", "L3", "L3", PadAction::GoTo},
+	{"R3", "R3", "R3", PadAction::Mute},
+	{"Right stick up", "Right stick up", "StickUp", PadAction::VolumeUp},
+	{"Right stick down", "Right stick down", "StickDown", PadAction::VolumeDown},
+};
+const char* const kPadActionKeys[int(PadAction::Count)] = {"None", "PlayPause", "Stop", "JumpBack", "JumpForward",
+	"JumpBackLarge", "JumpForwardLarge", "JumpBackSmall", "JumpForwardSmall", "Previous", "Next", "VolumeUp", "VolumeDown",
+	"Mute", "FullScreen", "LeaveFullScreen", "GoTo", "ContextMenu", "MenuBar", "SubDelayDown", "SubDelayUp",
+	"NextSubtitle", "NextAudio", "AudioDelayDown", "AudioDelayUp", "Statistics"};
+
+uint32_t ParseColor(const std::string& v, uint32_t def)
+{
+	char* end = nullptr;
+	const unsigned long n = strtoul(v.c_str(), &end, 16);
+	return end && end != v.c_str() && *end == 0 && v.size() <= 6 ? uint32_t(n) : def;
+}
+} // namespace
+
+PadAction DefaultPadAction(PadButton b)
+{
+	return int(b) >= 0 && b < PadButton::Count ? kPadButtons[int(b)].def : PadAction::None;
+}
+
+const char* PadButtonName(PadButton b)
+{
+	return int(b) >= 0 && b < PadButton::Count ? kPadButtons[int(b)].name : "";
+}
+
+const char* PadButtonShortName(PadButton b)
+{
+	return int(b) >= 0 && b < PadButton::Count ? kPadButtons[int(b)].short_name : "";
+}
+
+const char* PadActionKey(PadAction a)
+{
+	return int(a) >= 0 && a < PadAction::Count ? kPadActionKeys[int(a)] : "None";
+}
+
+std::string PadActionText(PadAction a)
+{
+	const Settings& s = AppSettings();
+	switch (a)
+	{
+		case PadAction::None:
+			return T("(none)");
+		case PadAction::PlayPause:
+			return T("Play/Pause");
+		case PadAction::Stop:
+			return T("Stop");
+		case PadAction::JumpBackMedium:
+			return Fmt(T("Jump back %d s"), s.jump_medium);
+		case PadAction::JumpForwardMedium:
+			return Fmt(T("Jump forward %d s"), s.jump_medium);
+		case PadAction::JumpBackLarge:
+			return Fmt(T("Jump back %d s"), s.jump_large);
+		case PadAction::JumpForwardLarge:
+			return Fmt(T("Jump forward %d s"), s.jump_large);
+		case PadAction::JumpBackSmall:
+			return Fmt(T("Jump back %d s"), s.jump_small);
+		case PadAction::JumpForwardSmall:
+			return Fmt(T("Jump forward %d s"), s.jump_small);
+		case PadAction::Previous:
+			return T("Previous chapter or file");
+		case PadAction::Next:
+			return T("Next chapter or file");
+		case PadAction::VolumeUp:
+			return T("Volume up");
+		case PadAction::VolumeDown:
+			return T("Volume down");
+		case PadAction::Mute:
+			return T("Mute");
+		case PadAction::FullScreen:
+			return T("Full screen on/off");
+		case PadAction::LeaveFullScreen:
+			return T("Leave full screen");
+		case PadAction::GoTo:
+			return T("Go To...");
+		case PadAction::ContextMenu:
+			return T("The context menu");
+		case PadAction::MenuBar:
+			return T("The menu bar");
+		case PadAction::SubDelayDown:
+			return Fmt(T("Subtitle delay -%d ms"), s.sub_delay_step);
+		case PadAction::SubDelayUp:
+			return Fmt(T("Subtitle delay +%d ms"), s.sub_delay_step);
+		case PadAction::NextSubtitle:
+			return T("Next subtitle track (and off)");
+		case PadAction::NextAudio:
+			return T("Next audio track");
+		case PadAction::AudioDelayDown:
+			return T("Audio delay -10 ms");
+		case PadAction::AudioDelayUp:
+			return T("Audio delay +10 ms");
+		case PadAction::Statistics:
+			return T("Display statistics");
+		default:
+			return "";
+	}
+}
+
+bool PadActionRepeats(PadAction a)
+{
+	switch (a)
+	{
+		case PadAction::JumpBackMedium:
+		case PadAction::JumpForwardMedium:
+		case PadAction::JumpBackLarge:
+		case PadAction::JumpForwardLarge:
+		case PadAction::JumpBackSmall:
+		case PadAction::JumpForwardSmall:
+		case PadAction::Previous:
+		case PadAction::Next:
+		case PadAction::VolumeUp:
+		case PadAction::VolumeDown:
+		case PadAction::SubDelayDown:
+		case PadAction::SubDelayUp:
+		case PadAction::AudioDelayDown:
+		case PadAction::AudioDelayUp:
+			return true;
+		default:
+			return false;
+	}
+}
+
+Settings::Settings()
+{
+	for (int i = 0; i < int(PadButton::Count); i++)
+		pad[i] = DefaultPadAction(PadButton(i));
+}
+
 void Settings::Load()
 {
 	// off by default; the host tests turn the default on (orbis_paths.cpp reads the same variable)
@@ -343,8 +497,30 @@ void Settings::Load()
 			sub_bold = b;
 		else if (k == "SubOutline")
 			sub_outline = Clamp(n, 0, 8);
-		else if (k == "SubMargin")
+		else if (k == "SubMarginBottom") // (1.2.3's SubMargin did nothing: left alone)
 			sub_margin = Clamp(n, 0, 200);
+		else if (k == "SubFont")
+			sub_font = Unescape(v);
+		else if (k == "SubBorderStyle")
+			sub_border = Clamp(n, 0, 1);
+		else if (k == "SubShadow")
+			sub_shadow = Clamp(n, 0, 8);
+		else if (k == "SubColor")
+			sub_color = ParseColor(v, sub_color);
+		else if (k == "SubOutlineColor")
+			sub_outline_color = ParseColor(v, sub_outline_color);
+		else if (k == "SubBoxOpacity")
+			sub_box_opacity = Clamp(n, 10, 100);
+		else if (k == "SubDelayInterval")
+			sub_delay_step = Clamp(n, 10, 10000);
+		else if (k.compare(0, 3, "Key") == 0 && k.size() > 3)
+		{
+			for (int i = 0; i < int(PadButton::Count); i++)
+				if (k.compare(3, std::string::npos, kPadButtons[i].ini) == 0)
+					for (int a = 0; a < int(PadAction::Count); a++)
+						if (v == kPadActionKeys[a])
+							pad[i] = PadAction(a);
+		}
 		else if (k == "SubPosition")
 			sub_position = Clamp(n, 0, 1);
 		else if (k == "SubDelay")
@@ -466,10 +642,17 @@ void Settings::Save() const
 	fprintf(f, "AutoloadSubtitles=%d\nAudioBoost=%d\nAudioDelay=%d\nAudioOutput=%d\n", auto_load_subtitles, audio_boost,
 		audio_delay_ms, audio_output);
 	fprintf(f, "HardwareDecoding=%d\nHdrToneMapping=%d\nHdrPeak=%d\n", hw_decoding, hdr_tonemap, hdr_peak);
-	fprintf(f, "SubFontSize=%d\nSubBold=%d\nSubOutline=%d\nSubMargin=%d\nSubPosition=%d\nSubDelay=%d\n", sub_font_size,
-		sub_bold, sub_outline, sub_margin, sub_position, sub_delay_ms);
+	fprintf(f, "SubFont=%s\nSubFontSize=%d\nSubBold=%d\nSubBorderStyle=%d\nSubOutline=%d\nSubShadow=%d\n",
+		Escape(sub_font).c_str(), sub_font_size, sub_bold, sub_border, sub_outline, sub_shadow);
+	fprintf(f, "SubColor=%06X\nSubOutlineColor=%06X\nSubBoxOpacity=%d\nSubMarginBottom=%d\nSubPosition=%d\nSubDelay=%d\n",
+		unsigned(sub_color & 0xffffff), unsigned(sub_outline_color & 0xffffff), sub_box_opacity, sub_margin, sub_position,
+		sub_delay_ms);
+	fprintf(f, "SubDelayInterval=%d\n", sub_delay_step);
 	fprintf(f, "Dpi=%d\nCursorSpeed=%d\nLanguage=%d\ndebug_logs=%d\nLastDir=%s\n", dpi, cursor_speed, language,
 		debug_logs ? 1 : 0, bare(last_dir).c_str());
+	fprintf(f, "[Keys]\n");
+	for (int i = 0; i < int(PadButton::Count); i++)
+		fprintf(f, "Key%s=%s\n", kPadButtons[i].ini, PadActionKey(pad[i]));
 	fprintf(f, "[Recent File List]\n");
 	for (size_t i = 0; i < recent.size(); i++)
 		fprintf(f, "File%zu=%s\n", i + 1, bare(recent[i]).c_str());

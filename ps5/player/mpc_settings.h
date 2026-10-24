@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,74 @@ struct FilePosition
 	double pos = 0;
 };
 
+// Options > Player > Keys: the controller's buttons in the window (no pointer showing, no menu or dialog open) and
+// the action each one does. Options (the menu bar), the pointer's Cross / Square clicks and the menus' and dialogs'
+// buttons stay as they are.
+enum class PadButton : int
+{
+	Cross,
+	Circle,
+	Triangle,
+	Square,
+	Left, // the D-pad
+	Right,
+	Up,
+	Down,
+	L1,
+	R1,
+	L2,
+	R2,
+	L3,
+	R3,
+	StickUp, // the right stick (the mouse wheel)
+	StickDown,
+	Count
+};
+
+enum class PadAction : int
+{
+	None,
+	PlayPause,
+	Stop,
+	JumpBackMedium, // Settings::jump_medium (5 s)
+	JumpForwardMedium,
+	JumpBackLarge, // jump_large (20 s)
+	JumpForwardLarge,
+	JumpBackSmall, // jump_small (1 s)
+	JumpForwardSmall,
+	Previous, // Navigate > Previous: the chapter, then the file
+	Next,
+	VolumeUp,
+	VolumeDown,
+	Mute,
+	FullScreen, // on/off
+	LeaveFullScreen,
+	GoTo,
+	ContextMenu,
+	MenuBar,
+	SubDelayDown, // by Options > Subtitles' delay interval
+	SubDelayUp,
+	NextSubtitle, // the next track, then off, then the first
+	NextAudio,
+	AudioDelayDown, // 10 ms
+	AudioDelayUp,
+	Statistics, // View > Renderer Settings > Display Statistics
+	Count
+};
+
+// today's mapping (the README's table)
+PadAction DefaultPadAction(PadButton b);
+// the names in Options > Player > Keys ("D-pad Left"), in English (T() them)
+const char* PadButtonName(PadButton b);
+// the short name beside a menu item ("Left")
+const char* PadButtonShortName(PadButton b);
+// the action's name in mpc-hc.ini ("PlayPause")
+const char* PadActionKey(PadAction a);
+// the action as the Keys page shows it, in the current language ("Jump back 5 s")
+std::string PadActionText(PadAction a);
+// whether holding the button repeats it (jumps, volume, chapters, delays)
+bool PadActionRepeats(PadAction a);
+
 // An address with a user and no password (smb://user@server/...): the one kept in credentials.ini for that user
 // and server put back in; else the address as it is.
 std::string WithStoredPassword(const std::string& url);
@@ -87,13 +156,23 @@ struct Settings
 	bool hw_decoding = true; // H.264 / HEVC on the console's video decoder (mpc_vdec.h)
 	int hdr_tonemap = 1;     // HDR10 / HLG on an SDR picture: 0 off (as it comes), 1 BT.2390, 2 Hable, 3 Reinhard
 	int hdr_peak = 250;      // the picture's white after tone mapping, in nits (100..400)
-	// Subtitles (Default Style)
+	// Subtitles (Default Style): the text formats other than ASS/SSA; sizes in a 288-line script's pixels, as
+	// VSFilter scales SRT text with the picture
+	std::string sub_font; // a file in <data>/fonts ("name.ttf", "name.ttc#1"); "" Selawik, "Roboto" the app's own
 	int sub_font_size = 18; // points at the video's height of 1080 / 1.5 (MPC-HC's default text style: Arial 18)
 	bool sub_bold = true;
-	int sub_outline = 2;
-	int sub_margin = 16; // bottom margin, pixels at 96 dpi
+	int sub_border = 0; // Border Style: 0 outline, 1 opaque box
+	int sub_outline = 2; // the outline's width (the box's border)
+	int sub_shadow = 3; // the shadow's depth (half a script pixel per step; 0: none)
+	uint32_t sub_color = 0xffffff; // the text's colour, 0xRRGGBB
+	uint32_t sub_outline_color = 0x000000; // the outline's, or the box's
+	int sub_box_opacity = 75; // percent
+	int sub_margin = 20; // the bottom (or top) margin (VSFilter's default: 20)
 	int sub_position = 0; // 0 in the video, 1 at the bottom of the window
 	int sub_delay_ms = 0;
+	int sub_delay_step = 100; // Options > Subtitles "Delay interval": Play > Subtitle Track's and the keys' step
+	// Options > Player > Keys
+	PadAction pad[int(PadButton::Count)];
 	// Interface
 	int dpi = 144; // 96 / 120 / 144 / 192 (100 % .. 200 %)
 	int cursor_speed = 3; // 1..5
@@ -108,6 +187,7 @@ struct Settings
 	std::vector<NetServer> servers;
 	std::string last_dir;
 
+	Settings();
 	void Load();
 	void Save() const;
 	void AddRecent(const std::string& url);

@@ -14,7 +14,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.2.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 229 host tests
+> **Status (1.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 254 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
@@ -25,6 +25,22 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.3:** what Sulfurico-One64 asked for ([MediaPlayerClassicPS5#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1)):
+- **The subtitle font**: Options > Subtitles > Default Style's Font lists Selawik (Segoe UI), Roboto and every
+  `.ttf`/`.otf`/`.ttc` in `/data/mpcps5/fonts` by the font's own name; SRT, WebVTT, MicroDVD and the other text formats
+  are drawn in the one chosen (ASS/SSA keep their own styles, as in MPC-HC). The folder is read when Options opens, so
+  a font copied in while the app runs is there without a restart. Bold uses the family's bold file when the folder has
+  one, else the letters are thickened (a synthetic bold); a character the font hasn't got still comes from the others.
+- **More Default Style options**, as MPC-HC's page: the text and outline colours, the shadow, **Opaque box** (a box
+  behind each line, in the outline colour, with its opacity), and a preview; the bottom margin now does something.
+  The defaults are MPC-HC's look, as before.
+- **The controller's keys**: **Options > Player > Keys** gives each button in the window an action from a list --
+  jumps, chapters, volume, full screen, Go To, the menus, **subtitle delay -/+**, **next subtitle track**, **next
+  audio track**, audio delay -/+, statistics... -- with MPC-HC's OSD message ("Subtitle delay: 200 ms", "Audio:
+  English..."); Default puts back the mapping below. See [Controls](#controls).
+- Options > Subtitles' **Delay interval** is now the step of the subtitle delay (Play > Subtitle Track and the keys;
+  100 ms by default), as in MPC-HC; the delay itself is in "Current delay" beside it.
 
 **1.2.3:**
 - **Subtitles**: a character the chosen font hasn't got (Japanese, Chinese, Korean, symbols) comes from any loaded
@@ -103,8 +119,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.2.3.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.2.3.elf`).
+1. Send `MediaPlayerClassicPS5-v1.3.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.3.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -129,7 +145,7 @@ MPC-HC 1.7.13 maximized on Windows 10, at 150 % scale (Options > Miscellaneous c
   under the pointer in a tooltip, the stereo/mono picture in the status bar.
 - **View > Information / Statistics / Playlist** -- the information bar, the statistics (frame rate, dropped
   frames, decode and scale times, buffers), the playlist docked at the bottom (the file playing in red).
-- **Dialogs** -- Open, Go To, Properties (Details, MediaInfo), Options (Player, Playback, Output, Fullscreen,
+- **Dialogs** -- Open, Go To, Properties (Details, MediaInfo), Options (Player, Keys, Playback, Output, Fullscreen,
   Subtitles, Default Style, Audio Switcher, Miscellaneous), About, Add Favorite, Organize Favorites, and the
   Windows "Open" dialog behind every Browse... button.
 
@@ -146,7 +162,7 @@ The DualSense is MPC-HC's mouse and keyboard. Move the **left stick** and the po
 clicks and **Square** right-clicks (the context menu), as with a mouse; it hides after 3 seconds still. Without
 the pointer the buttons are keys:
 
-| Button | In the window | In a menu / dialog |
+| Button | In the window (by default: Options > Player > Keys) | In a menu / dialog |
 |---|---|---|
 | Cross | Play / Pause (click, with the pointer) | Activate / OK (on an edit box: the keyboard) |
 | Circle | Leave full screen | Cancel / close |
@@ -160,6 +176,19 @@ the pointer the buttons are keys:
 | L3 | Go To... | -- |
 | R3 | Mute (R3 + Square: renderer statistics) | -- |
 | Right stick | Volume (the mouse wheel) | Scroll lists |
+
+That is the default mapping. **View > Options > Player > Keys** (MPC-HC's Keys page, for the controller) changes
+what each button does in the window: choose a button, Cross, and pick its action -- Play/Pause, Stop, jump back /
+forward 5 s, 20 s or 1 s, previous / next chapter or file, volume up / down, mute, full screen on/off, leave full
+screen, Go To..., the context menu, the menu bar, subtitle delay - / + (by Options > Subtitles' Delay interval), next
+subtitle track (after the last one: off), next audio track, audio delay - / + (10 ms), display statistics, or
+nothing. **Default** puts the table above back; the choice is kept in `mpc-hc.ini` (`[Keys]`). The menus show the
+button doing each command, and each action shows MPC-HC's OSD message. For example L2 / R2 as subtitle delay - / +
+instead of the 20 s jumps. What stays fixed: **Options** always opens the menu bar, the pointer's Cross / Square
+clicks, and the buttons in menus, dialogs and the keyboard. The combinations work while their buttons keep their
+default actions: L2 or R2 held with Left / Right jumps 20 s / 1 s, R3 held with Square shows the statistics; an L2,
+R2 or R3 given another action does that action instead. Holding a button repeats the jumps, volume, chapters and
+delays only.
 
 The menus work as Windows' keyboard menus: Up/Down choose, Right opens a submenu (or the next menu bar menu),
 Left goes back, Cross runs the command. The playlist, when it has the focus (a click on it): Up/Down, Cross
@@ -214,19 +243,28 @@ Previous/Next goes by chapter, then by playlist item, then to the neighbouring f
   a font the script names and nobody has is drawn in Selawik, and a character the font in use hasn't got comes
   from any of those fonts that has it (the closest in weight and slant; there is no system font lookup on the
   console, so the port patches libass to look through the fonts it has).
-- Play > Subtitle Track: the tracks, on/off, the delay (+/- 100 ms; ASS/SSA too). Options > Subtitles / Default
-  Style: size, bold, outline, the bottom margin, relative to the video or the window -- for the other formats
-  (SRT, WebVTT, MicroDVD...): ASS/SSA keeps its own styles.
-- Those other text formats get MPC-HC's default style: bold white text with a black outline and shadow, sized to
-  the picture, with line breaks, italics (slanted) and top alignment. PGS, VobSub and DVB pictures are scaled
+- Play > Subtitle Track: the tracks, on/off, the delay (+/- Options > Subtitles' Delay interval, 100 ms by default;
+  ASS/SSA too). Options > Subtitles > **Default Style**, for the other formats (SRT, WebVTT, MicroDVD...; ASS/SSA
+  keeps its own styles): the **font** (Selawik, Roboto or any font in `/data/mpcps5/fonts`, by its name), size, bold,
+  the **text and outline colours**, the outline's width or an **opaque box** behind the lines (in the outline colour,
+  its opacity from 10 to 100 %), the **shadow**, the bottom margin, relative to the video or the window, with a
+  preview. A font saved in the settings that is no longer in the folder is drawn as Selawik (the log says so).
+- Those other text formats get MPC-HC's default style unless it is changed: bold white text with a black outline and
+  shadow, sized to the picture, with line breaks, italics (slanted) and top alignment. Bold in a font from the folder
+  uses the family's bold file when there is one (`Arial.ttf` + `Arial Bold.ttf`), else a synthetic bold. PGS, VobSub and DVB pictures are scaled
   with the video.
-- Chinese, Japanese, Korean and other scripts: put a font (`.ttf`/`.otf`, for example Noto Sans CJK) in
-  `/data/mpcps5/fonts` and start the player again; Selawik and Roboto cover Latin, Greek and Cyrillic (for
-  ASS/SSA any of them fills in what the script's font lacks).
+- Chinese, Japanese, Korean and other scripts: put a font (`.ttf`/`.otf`/`.ttc`, for example Noto Sans CJK) in
+  `/data/mpcps5/fonts`: the Default Style reads the folder when Options opens (choose it there, or it fills in the
+  characters the chosen font lacks); ASS/SSA reads it when the player starts. Selawik and Roboto cover Latin, Greek
+  and Cyrillic (for ASS/SSA any of them fills in what the script's font lacks).
 
 ## Audio
 
-- Play > Audio Track: the tracks (language and format), as MPC-HC's menu; the stream marked default first.
+- **Play > Audio Track**: the tracks (language and format), as MPC-HC's menu, the stream marked default first; and
+  the audio delay (+/- 10 ms) there too. **Options > Audio Switcher**: the boost and the **audio time shift** (the
+  delay, in ms).
+- From the controller: give buttons **Next audio track** and **Audio delay - / +** in Options > Player > Keys (the
+  OSD says "Audio: English [eng] (AAC...)" or "Audio delay: 20 ms").
 - Stereo by default: 5.1 and 7.1 are mixed down (libswresample's matrix, centre and surrounds at -3 dB). With
   Options > Output > Audio Renderer on **surround**, they go to the console's 8-channel output instead (see
   below). No bitstream (passthrough) of Dolby/DTS to an AV receiver: they are decoded to PCM.
@@ -327,12 +365,12 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 ## Settings and files
 
 ```
-/data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback...),
+/data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback...), the keys,
                              Recent Files, file positions, Favorites, network locations (without passwords)
 /data/mpcps5/credentials.ini the passwords of those network addresses (smb://user@server<TAB>password), with the
                              generation of mpc-hc.ini it goes with (credentials.ini.new while a save is half done)
 /data/mpcps5/media           a place for media on the console's storage
-/data/mpcps5/fonts           extra subtitle fonts
+/data/mpcps5/fonts           subtitle fonts: the Default Style's font, ASS/SSA's fonts, the characters others lack
 /data/mpcps5/screenshots     File > Save Image
 /data/mpcps5/logs/boot.log   the log, only with debug_logs=1 in mpc-hc.ini (boot.prev.log: the run before;
                              installer.log, helper.log)
@@ -355,7 +393,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.2.3.elf, the release zip, mpc-ps5-v1.2.3-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.3.elf, the release zip, mpc-ps5-v1.3-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 

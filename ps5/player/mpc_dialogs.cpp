@@ -1321,6 +1321,53 @@ void ShowOptionsDialog(std::function<void()> applied)
 		s.remember_file_pos = fpos->checked;
 	});
 
+	// ---- Player > Keys (IDD_PPAGEACCELTBL): the controller's buttons in the window ----
+	p = d->NewPage("Keys", 1);
+	d->Text(p, "The controller's buttons in the window, without the pointer. Cross on a button: choose its action.", 5, 5, 286, 16);
+	ListView* keys = d->P(p, new ListView, 5, 23, 286, 150);
+	keys->columns = {{T("Button"), keys->rect.Width() * 38 / 100}, {T("Action"), keys->rect.Width() * 58 / 100}};
+	auto pad = std::make_shared<std::vector<PadAction>>(s.pad, s.pad + int(PadButton::Count));
+	auto fill_keys = [keys, pad] {
+		keys->rows.clear();
+		for (int i = 0; i < int(PadButton::Count); i++)
+			keys->rows.push_back({T(PadButtonName(PadButton(i))), PadActionText((*pad)[i])});
+	};
+	fill_keys();
+	keys->sel = 0;
+	d->Text(p, "Action:", 5, 180, 40, 8);
+	ComboBox* act = d->Combo(p, 45, 178, 170, 13, {}, int((*pad)[0]));
+	for (int a = 0; a < int(PadAction::Count); a++)
+		act->items.push_back(PadActionText(PadAction(a)));
+	Button* kdef = d->P(p, new Button, 225, 177, 66, 14);
+	kdef->text = T("Default");
+	keys->on_select = [keys, act, pad] {
+		if (keys->sel >= 0 && keys->sel < int(pad->size()))
+			act->sel = int((*pad)[keys->sel]);
+	};
+	keys->on_open = [act] { act->Activate(); };
+	act->on_change = [keys, act, pad, fill_keys] {
+		if (keys->sel >= 0 && keys->sel < int(pad->size()) && act->sel >= 0)
+		{
+			(*pad)[keys->sel] = PadAction(act->sel);
+			fill_keys();
+		}
+	};
+	kdef->on_click = [keys, act, pad, fill_keys] {
+		for (int i = 0; i < int(pad->size()); i++)
+			(*pad)[i] = DefaultPadAction(PadButton(i));
+		fill_keys();
+		if (keys->sel >= 0)
+			act->sel = int((*pad)[keys->sel]);
+	};
+	d->Text(p, "Options always opens the menu bar; the pointer's Cross / Square clicks and the buttons in menus and dialogs "
+			   "stay as they are. While L2, R2 and R3 keep their default actions, L2 or R2 held with Left / Right jumps "
+			   "20 s / 1 s, and R3 held with Square shows the statistics.",
+		5, 197, 286, 40);
+	d->apply_fns.push_back([&s, pad] {
+		for (int i = 0; i < int(PadButton::Count); i++)
+			s.pad[i] = (*pad)[i];
+	});
+
 	// ---- Playback (IDD_PPAGEPLAYBACK) ----
 	p = d->NewPage("Playback");
 	d->Group(p, "Audio", 5, 5, 286, 47);
@@ -1410,36 +1457,155 @@ void ShowOptionsDialog(std::function<void()> applied)
 		s.hide_controls_fullscreen = hide->checked;
 	});
 
-	// ---- Subtitles > Default Style (IDD_PPAGESUBSTYLE) ----
+	// ---- Subtitles > Default Style (IDD_PPAGESUBTITLES, IDD_PPAGESUBSTYLE) ----
 	p = d->NewPage("Subtitles");
-	d->Group(p, "Delay", 5, 5, 286, 30);
-	d->Text(p, "Delay interval:", 10, 18, 80, 8);
-	NumberBox* sdel = d->Number(p, 95, 15, 60, 14, s.sub_delay_ms, -60000, 60000, 100, " ms");
-	d->Group(p, "Position", 5, 40, 286, 40);
-	CheckBox* pvid = d->Radio(p, "Position subtitles relative to the video frame", 10, 52, 270, 8, s.sub_position == 0, 4);
-	d->Radio(p, "Position subtitles relative to the window", 10, 64, 270, 8, s.sub_position == 1, 4);
+	d->Group(p, "Delay", 5, 5, 286, 46);
+	d->Text(p, "Delay interval:", 10, 18, 92, 8);
+	NumberBox* sstep = d->Number(p, 104, 15, 58, 14, s.sub_delay_step, 10, 10000, 10, " ms");
+	d->Text(p, "the step of Play > Subtitle Track's delay and of the keys", 167, 15, 121, 24);
+	d->Text(p, "Current delay:", 10, 34, 92, 8);
+	NumberBox* sdel = d->Number(p, 104, 31, 58, 14, s.sub_delay_ms, -60000, 60000, 100, " ms");
+	d->Group(p, "Position", 5, 56, 286, 40);
+	CheckBox* pvid = d->Radio(p, "Position subtitles relative to the video frame", 10, 68, 270, 8, s.sub_position == 0, 4);
+	d->Radio(p, "Position subtitles relative to the window", 10, 80, 270, 8, s.sub_position == 1, 4);
 	int sp = d->NewPage("Default Style", 1);
-	d->Group(sp, "Font", 5, 5, 105, 112);
-	d->Combo(sp, 10, 17, 95, 13, {"Selawik (Segoe UI)"}, 0)->enabled = false;
-	d->Text(sp, "Size", 10, 36, 56, 8);
+	d->Group(sp, "Font", 5, 5, 105, 64);
+	// the fonts: Selawik, Roboto and the fonts folder's, read now (a font copied in while the app runs is listed)
+	const std::vector<FontChoice> fonts = SubtitleFontChoices(OrbisDir("fonts"));
+	ComboBox* font = d->Combo(sp, 10, 17, 95, 13, {}, 0);
+	for (const FontChoice& fc : fonts)
+	{
+		font->items.push_back(fc.name);
+		if (fc.file == s.sub_font)
+			font->sel = int(font->items.size()) - 1;
+	}
+	d->Text(sp, "Size", 10, 36, 48, 8);
 	NumberBox* fsize = d->Number(sp, 60, 33, 45, 13, s.sub_font_size, 8, 72);
 	CheckBox* bold = d->Check(sp, "Bold", 10, 52, 95, 8, s.sub_bold);
-	d->Group(sp, "Border Style", 5, 121, 105, 68);
-	d->Radio(sp, "Outline", 10, 133, 95, 8, true, 5);
-	d->Radio(sp, "Opaque box", 10, 145, 95, 8, false, 5)->enabled = false;
-	d->Text(sp, "Width", 10, 159, 56, 8);
-	NumberBox* ow = d->Number(sp, 60, 157, 45, 13, s.sub_outline, 0, 8);
-	d->Group(sp, "Screen Alignment && Margins", 114, 5, 177, 60);
-	d->Text(sp, "Bottom", 119, 20, 40, 8);
-	NumberBox* margin = d->Number(sp, 160, 17, 50, 14, s.sub_margin, 0, 200);
-	d->Text(sp, "", 114, 72, 177, 40)->text =
-		Fmt(T("Extra fonts (Chinese, Japanese...): put .ttf/.otf files in %s and start the player again."), OrbisDir("fonts").c_str());
-	d->apply_fns.push_back([&s, sdel, pvid, fsize, bold, ow, margin] {
+	d->Group(sp, "Border Style", 5, 73, 105, 100);
+	CheckBox* boutline = d->Radio(sp, "Outline", 10, 85, 95, 8, s.sub_border == 0, 5);
+	CheckBox* bbox = d->Radio(sp, "Opaque box", 10, 97, 95, 8, s.sub_border == 1, 5);
+	d->Text(sp, "Width", 10, 112, 48, 8);
+	NumberBox* ow = d->Number(sp, 60, 110, 45, 13, s.sub_outline, 0, 8);
+	d->Text(sp, "Shadow", 10, 130, 48, 8);
+	NumberBox* shadow = d->Number(sp, 60, 128, 45, 13, s.sub_shadow, 0, 8);
+	d->Text(sp, "Box opacity", 10, 148, 48, 16);
+	NumberBox* bop = d->Number(sp, 60, 146, 45, 13, s.sub_box_opacity, 10, 100, 5, " %");
+	d->Group(sp, "Screen Alignment && Margins", 114, 5, 177, 30);
+	d->Text(sp, "Bottom", 119, 18, 40, 8);
+	NumberBox* margin = d->Number(sp, 160, 15, 50, 14, s.sub_margin, 0, 200);
+	// MPC-HC's colour buttons: a palette here
+	static const struct
+	{
+		const char* name;
+		uint32_t rgb;
+	} kPalette[] = {{"White", 0xffffff}, {"Yellow", 0xffff00}, {"Light grey", 0xc0c0c0}, {"Grey", 0x808080}, {"Black", 0x000000},
+		{"Red", 0xff0000}, {"Green", 0x00ff00}, {"Blue", 0x0000ff}, {"Cyan", 0x00ffff}, {"Magenta", 0xff00ff}};
+	auto palette = std::make_shared<std::vector<uint32_t>>();
+	std::vector<std::string> cnames;
+	for (const auto& c : kPalette)
+	{
+		palette->push_back(c.rgb);
+		cnames.push_back(c.name);
+	}
+	auto color_combo = [&](int y, uint32_t v) {
+		ComboBox* c = d->Combo(sp, 175, y, 110, 13, cnames, -1);
+		for (int i = 0; i < int(palette->size()); i++)
+			if ((*palette)[i] == (v & 0xffffff))
+				c->sel = i;
+		if (c->sel < 0)
+		{
+			// a colour from mpc-hc.ini that isn't in the palette: kept as it is
+			char b[16];
+			snprintf(b, sizeof(b), "#%06X", unsigned(v & 0xffffff));
+			c->items.push_back(b);
+			c->sel = int(c->items.size()) - 1;
+		}
+		return c;
+	};
+	d->Group(sp, "Colors", 114, 39, 177, 46);
+	d->Text(sp, "Text:", 119, 52, 54, 8);
+	ComboBox* ctext = color_combo(50, s.sub_color);
+	d->Text(sp, "Outline / box:", 119, 68, 54, 8);
+	ComboBox* cout = color_combo(66, s.sub_outline_color);
+	auto color_of = [palette](const ComboBox* c, uint32_t old) {
+		return c->sel >= 0 && c->sel < int(palette->size()) ? (*palette)[c->sel] : old;
+	};
+	auto fonts_p = std::make_shared<std::vector<FontChoice>>(fonts);
+	const std::string old_font = s.sub_font;
+	auto font_of = [fonts_p, old_font](const ComboBox* c) {
+		return c->sel >= 0 && c->sel < int(fonts_p->size()) ? (*fonts_p)[c->sel].file : old_font;
+	};
+	// the preview: the style as it would be drawn over a picture twice the preview's height
+	struct Preview : public Control
+	{
+		std::function<SubtitleStyle(int ref_h)> style;
+		Image img;
+		std::string key;
+		Preview() { tab_stop = false; }
+		void Paint(CDC& dc, bool, bool) override
+		{
+			// a picture: a sky over a field, so the outline, the shadow and a see-through box show
+			for (int y = rect.top; y < rect.bottom; y++)
+			{
+				const int t = (y - rect.top) * 255 / std::max(1, rect.Height());
+				dc.HLine(rect.left, rect.right, y, t < 150 ? RGB(70 + t / 3, 120 + t / 4, 190 - t / 5) : RGB(60 + t / 8, 140 - t / 6, 50));
+			}
+			dc.FrameRect(rect, RGB(130, 135, 144));
+			const SubtitleStyle st = style(rect.Height() * 2);
+			char k[200];
+			snprintf(k, sizeof(k), "%d|%d|%d|%d|%x|%x|%d|%d|%s|%d", st.em, st.outline, st.shadow, int(st.bold), unsigned(st.color),
+				unsigned(st.outline_color), int(st.box), st.box_alpha, st.font.c_str(), rect.Width());
+			if (key != k)
+			{
+				key = k;
+				RenderSubtitleText(st, {T("The subtitles look like this."), T("Second line")}, {false, true}, rect.Width() - 8, img);
+			}
+			const CRect old = dc.GetClip();
+			CRect clip = rect;
+			clip.DeflateRect(1, 1);
+			clip.Intersect(old);
+			dc.SetClip(clip);
+			dc.AlphaBlit(rect.left + (rect.Width() - img.Width()) / 2, rect.bottom - img.Height() - rect.Height() / 12, img.Bmp());
+			dc.SetClip(old);
+		}
+	};
+	Preview* pv = d->P(sp, new Preview, 114, 90, 177, 72);
+	const uint32_t old_color = s.sub_color, old_ocolor = s.sub_outline_color;
+	pv->style = [=](int ref_h) {
+		SubtitleStyle st;
+		st.em = std::max(8, fsize->value * ref_h / 288);
+		st.bold = bold->checked;
+		st.outline = ow->value > 0 ? std::max(1, ow->value * ref_h / 288) : 0;
+		st.shadow = shadow->value > 0 ? std::max(1, shadow->value * ref_h / 288 / 2) : 0;
+		const uint32_t c = color_of(ctext, old_color), o = color_of(cout, old_ocolor);
+		st.color = RGB(c >> 16, c >> 8, c);
+		st.outline_color = RGB(o >> 16, o >> 8, o);
+		st.box = bbox->checked;
+		st.box_alpha = bop->value * 255 / 100;
+		st.own_font = true;
+		st.font = font_of(font);
+		return st;
+	};
+	d->Text(sp, "", 114, 166, 177, 72)->text =
+		Fmt(T("For SRT, WebVTT and the other text formats; ASS/SSA keep their own styles. The fonts are the .ttf/.otf/.ttc "
+			  "files in %s, read when this page opens (ASS/SSA: when the player starts)."),
+			OrbisDir("fonts").c_str());
+	d->apply_fns.push_back([&s, sstep, sdel, pvid, fsize, bold, ow, margin, font, font_of, bbox, shadow, bop, ctext, cout,
+							   color_of, boutline] {
+		s.sub_delay_step = sstep->value;
 		s.sub_delay_ms = sdel->value;
 		s.sub_position = pvid->checked ? 0 : 1;
+		s.sub_font = font_of(font);
 		s.sub_font_size = fsize->value;
 		s.sub_bold = bold->checked;
+		s.sub_border = bbox->checked ? 1 : 0;
+		(void)boutline;
 		s.sub_outline = ow->value;
+		s.sub_shadow = shadow->value;
+		s.sub_box_opacity = bop->value;
+		s.sub_color = color_of(ctext, s.sub_color);
+		s.sub_outline_color = color_of(cout, s.sub_outline_color);
 		s.sub_margin = margin->value;
 	});
 

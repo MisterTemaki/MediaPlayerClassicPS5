@@ -291,7 +291,12 @@ private:
 	int BarRows(bool info) const;
 
 	void OnEvent(const InputEvent& ev);
-	void OnKey(Key k);
+	void OnKey(Key k, bool repeat = false);
+	// Options > Player > Keys: what a button does in the window, and the first button doing an action (menus)
+	void DoPadAction(PadAction a);
+	std::string Accel(PadAction a, const char* combination = "") const;
+	void NextTrack(TrackType t);
+	double wheel_t_[2] = {-100, -100}; // the right stick's last wheel step up / down (a held stick repeats)
 	void OnMouseMove(int x, int y);
 	void OnLButtonDown(int x, int y);
 	void OnLButtonUp(int x, int y);
@@ -377,6 +382,8 @@ void MainFrame::Osd(const std::string& text, double seconds)
 {
 	if (!s_.show_osd)
 		return;
+	if (text != osd_ || NowSeconds() >= osd_until_)
+		OrbisLog("[osd] %s", text.c_str());
 	osd_ = text;
 	osd_until_ = NowSeconds() + seconds;
 }
@@ -1106,107 +1113,31 @@ void MainFrame::PaintSubtitles(CDC& dc)
 	}
 	if (sub.lines.empty())
 		return;
-	// text: MPC-HC's default style (VSFilter's: bold, white, a black outline and shadow), sized for a
-	// 288-line script as VSFilter sizes SRT text, so it scales with the picture
+	// text: MPC-HC's default style (VSFilter's: bold, white, a black outline and shadow; Options > Subtitles > Default
+	// Style changes it), sized for a 288-line script as VSFilter sizes SRT text, so it scales with the picture
 	const int ref_h = std::min(vr.Height(), area.Height());
-	const int em = std::max(ScaleY(12), s_.sub_font_size * ref_h / 288);
-	const int outline = s_.sub_outline > 0 ? std::max(1, s_.sub_outline * ref_h / 288) : 0;
-	const int shadow = std::max(1, 3 * ref_h / 288 / 2);
-	std::string key = std::to_string(em) + "|" + std::to_string(outline) + "|" + std::to_string(vr.Width()) + (sub.top ? "T" : "B");
+	SubtitleStyle st;
+	st.em = std::max(ScaleY(12), s_.sub_font_size * ref_h / 288);
+	st.bold = s_.sub_bold;
+	st.outline = s_.sub_outline > 0 ? std::max(1, s_.sub_outline * ref_h / 288) : 0;
+	st.shadow = s_.sub_shadow > 0 ? std::max(1, s_.sub_shadow * ref_h / 288 / 2) : 0;
+	st.color = RGB(s_.sub_color >> 16, s_.sub_color >> 8, s_.sub_color);
+	st.outline_color = RGB(s_.sub_outline_color >> 16, s_.sub_outline_color >> 8, s_.sub_outline_color);
+	st.box = s_.sub_border == 1;
+	st.box_alpha = s_.sub_box_opacity * 255 / 100;
+	char style[160];
+	snprintf(style, sizeof(style), "%d|%d|%d|%d|%x|%x|%d|%d|%d|%s|", st.em, st.outline, st.shadow, int(st.bold), unsigned(st.color),
+		unsigned(st.outline_color), int(st.box), st.box_alpha, s_.sub_margin, s_.sub_font.c_str());
+	std::string key = style + std::to_string(vr.Width()) + (sub.top ? "T" : "B");
 	for (const auto& l : sub.lines)
 		key += "\n" + l;
 	if (key != sub_cache_.key)
 	{
 		sub_cache_.key = key;
-		const Font& f = FontOfSize(em, s_.sub_bold);
-		const int maxw = std::max(100, std::min(vr.Width(), area.Width()) - 2 * em);
-		std::vector<std::string> lines;
-		std::vector<bool> italic;
-		for (size_t li = 0; li < sub.lines.size(); li++)
-			for (const auto& w : WrapText(f, sub.lines[li], maxw))
-			{
-				lines.push_back(w);
-				italic.push_back(li < sub.italic.size() && sub.italic[li]);
-			}
-		int tw = 0;
-		for (const auto& l : lines)
-			tw = std::max(tw, f.Measure(l));
-		const int pad = outline + shadow + 2 + f.Height() / 5; // room for a slanted line
-		const int lh = f.Height();
-		const int iw = tw + 2 * pad, ih = int(lines.size()) * lh + 2 * pad;
-		std::vector<uint8_t> text(size_t(iw) * ih, 0);
-		for (size_t i = 0; i < lines.size(); i++)
-		{
-			const int ly = pad + int(i) * lh;
-			f.DrawMask(text.data(), iw, ih, iw, pad + (tw - f.Measure(lines[i])) / 2, ly, lines[i]);
-			if (italic[i])
-			{
-				// italics: the line slanted (there is no italic face), 0.2 px per px from its baseline
-				const int base = ly + f.Ascent();
-				for (int y = std::max(0, ly); y < std::min(ih, ly + lh); y++)
-				{
-					const int shift = int((base - y) * 0.2);
-					if (shift == 0)
-						continue;
-					uint8_t* row = text.data() + size_t(y) * iw;
-					if (shift > 0)
-					{
-						for (int x = iw - 1; x >= shift; x--)
-							row[x] = row[x - shift];
-						std::fill(row, row + std::min(shift, iw), uint8_t(0));
-					}
-					else
-					{
-						for (int x = 0; x < iw + shift; x++)
-							row[x] = row[x - shift];
-						std::fill(row + std::max(0, iw + shift), row + iw, uint8_t(0));
-					}
-				}
-			}
-		}
-		// the outline: the text grown by `outline` pixels (a disc)
-		std::vector<uint8_t> edge = text;
-		if (outline > 0)
-		{
-			std::vector<uint8_t> tmp(text.size(), 0);
-			// separable max: rows then columns (a square; close enough for these sizes)
-			for (int y = 0; y < ih; y++)
-				for (int x = 0; x < iw; x++)
-				{
-					uint8_t m = 0;
-					for (int k = std::max(0, x - outline); k <= std::min(iw - 1, x + outline); k++)
-						m = std::max(m, text[size_t(y) * iw + k]);
-					tmp[size_t(y) * iw + x] = m;
-				}
-			for (int y = 0; y < ih; y++)
-				for (int x = 0; x < iw; x++)
-				{
-					uint8_t m = 0;
-					for (int k = std::max(0, y - outline); k <= std::min(ih - 1, y + outline); k++)
-						m = std::max(m, tmp[size_t(k) * iw + x]);
-					edge[size_t(y) * iw + x] = m;
-				}
-		}
-		Image& img = sub_cache_.img;
-		img.Create(iw, ih);
-		uint32_t* px = img.Data();
-		for (int y = 0; y < ih; y++)
-			for (int x = 0; x < iw; x++)
-			{
-				const size_t i = size_t(y) * iw + x;
-				// shadow (the outline shifted, half black), outline (black), text (white), premultiplied
-				const int sxp = x - shadow, syp = y - shadow;
-				const uint32_t sh = (sxp >= 0 && syp >= 0) ? edge[size_t(syp) * iw + sxp] / 2 : 0;
-				uint32_t a = sh;
-				uint32_t c = 0; // the colour, premultiplied (grey level)
-				const uint32_t ea = edge[i];
-				a = ea + a * (255 - ea) / 255;
-				const uint32_t ta = text[i];
-				c = ta * 255 / 255 + c * (255 - ta) / 255;
-				a = ta + a * (255 - ta) / 255;
-				px[i] = c | (c << 8) | (c << 16) | (a << 24);
-			}
-		const int margin = std::max(ScaleY(8), 20 * ref_h / 288);
+		const int maxw = std::max(100, std::min(vr.Width(), area.Width()) - 2 * st.em);
+		const int pad = RenderSubtitleText(st, sub.lines, sub.italic, maxw, sub_cache_.img);
+		const int iw = sub_cache_.img.Width(), ih = sub_cache_.img.Height();
+		const int margin = std::max(ScaleY(8) * s_.sub_margin / 20, s_.sub_margin * ref_h / 288);
 		const CRect place = s_.sub_position == 1 ? area : vr;
 		sub_cache_.x = place.left + (place.Width() - iw) / 2;
 		sub_cache_.y = sub.top ? place.top + margin - pad : std::min(place.bottom, area.bottom) - margin - ih + pad;
@@ -1396,7 +1327,7 @@ std::vector<MenuItem> MainFrame::ViewMenu(bool context) const
 										  M::Cmd("Cen&ter", ID_PANSCAN_CENTER), M::Sep(), M::Cmd("Re&set", ID_VIEW_RESET)});
 	M renderer = M::Popup("R&enderer Settings",
 		{M::Cmd("&Tearing Test", ID_VIEW_TEARING_TEST).Enable(false),
-			M::Cmd("&Display Statistics", ID_VIEW_DISPLAY_RENDERER_STATS, "R3+Square").Check(show_renderer_stats_),
+			M::Cmd("&Display Statistics", ID_VIEW_DISPLAY_RENDERER_STATS, Accel(PadAction::Statistics, "R3+Square")).Check(show_renderer_stats_),
 			M::Cmd("Display Current T&ime", ID_VIEW_OSD_DISPLAY_TIME).Enable(Loaded()),
 			M::Cmd("Show &File Name", ID_VIEW_OSD_SHOW_FILENAME).Enable(Loaded()), M::Sep(),
 			M::Popup("&Output Range", {M::Cmd("&0 - 255", ID_VIEW_RENDERER_OTHER).Radio(true), M::Cmd("&16 - 235", ID_VIEW_RENDERER_OTHER).Enable(false)}),
@@ -1417,7 +1348,7 @@ std::vector<MenuItem> MainFrame::ViewMenu(bool context) const
 	}
 	std::vector<M> v = bars;
 	v.push_back(M::Sep());
-	v.push_back(M::Cmd("F&ull Screen", ID_VIEW_FULLSCREEN, "Triangle").Check(fs));
+	v.push_back(M::Cmd("F&ull Screen", ID_VIEW_FULLSCREEN, Accel(PadAction::FullScreen)).Check(fs));
 	v.push_back(zoom);
 	v.push_back(M::Sep());
 	v.push_back(renderer);
@@ -1448,8 +1379,8 @@ std::vector<MenuItem> MainFrame::TrackMenu(TrackType t) const
 		char b[64];
 		snprintf(b, sizeof(b), T("Delay: %+d ms"), int(std::lround(player_.SubtitleDelay() * 1000)));
 		v.push_back(M::Cmd(b, 0).Enable(false));
-		v.push_back(M::Cmd("Delay +100 ms", ID_SUB_DELAY_UP));
-		v.push_back(M::Cmd("Delay -100 ms", ID_SUB_DELAY_DOWN));
+		v.push_back(M::Cmd(Fmt(T("Delay +%d ms"), s_.sub_delay_step), ID_SUB_DELAY_UP));
+		v.push_back(M::Cmd(Fmt(T("Delay -%d ms"), s_.sub_delay_step), ID_SUB_DELAY_DOWN));
 		v.push_back(M::Cmd("Reset delay", ID_SUB_DELAY_RESET));
 	}
 	if (t == TrackType::Audio)
@@ -1478,7 +1409,7 @@ std::vector<MenuItem> MainFrame::PlayMenu() const
 		M::Cmd("&Stand By", ID_AFTERPLAYBACK_STANDBY).Enable(false), M::Cmd("&Hibernate", ID_AFTERPLAYBACK_HIBERNATE).Enable(false),
 		M::Cmd("Shut&down", ID_AFTERPLAYBACK_SHUTDOWN).Enable(false), M::Cmd("Log &Off", ID_AFTERPLAYBACK_LOGOFF).Enable(false),
 		M::Cmd("&Lock", ID_AFTERPLAYBACK_LOCK).Enable(false)};
-	return {M::Cmd("&Play/Pause", ID_PLAY_PLAYPAUSE, "Cross").Enable(loaded).Check(st == PlayState::Playing),
+	return {M::Cmd("&Play/Pause", ID_PLAY_PLAYPAUSE, Accel(PadAction::PlayPause)).Enable(loaded).Check(st == PlayState::Playing),
 		M::Cmd("&Stop", ID_PLAY_STOP).Enable(loaded), M::Cmd("Fra&me Step", ID_PLAY_FRAMESTEP).Enable(loaded && player_.HasVideo()),
 		M::Popup("&Repeat", {M::Cmd("F&orever", ID_PLAY_REPEAT_FOREVER).Check(s_.repeat != 0), M::Sep(),
 								M::Cmd("&File", ID_PLAY_REPEAT_ONEFILE).Radio(s_.repeat == 1),
@@ -1489,8 +1420,8 @@ std::vector<MenuItem> MainFrame::PlayMenu() const
 		M::Popup("&Audio Track", TrackMenu(TrackType::Audio)).Enable(loaded),
 		M::Popup("Su&btitle Track", TrackMenu(TrackType::Subtitle)).Enable(loaded),
 		M::Popup("Vide&o Track", TrackMenu(TrackType::Video)).Enable(loaded), M::Sep(),
-		M::Popup("&Volume", {M::Cmd("&Up", ID_VOLUME_UP, "Up"), M::Cmd("&Down", ID_VOLUME_DOWN, "Down"),
-								M::Cmd("&Mute", ID_VOLUME_MUTE, "R3").Check(s_.mute)}),
+		M::Popup("&Volume", {M::Cmd("&Up", ID_VOLUME_UP, Accel(PadAction::VolumeUp)), M::Cmd("&Down", ID_VOLUME_DOWN, Accel(PadAction::VolumeDown)),
+								M::Cmd("&Mute", ID_VOLUME_MUTE, Accel(PadAction::Mute)).Check(s_.mute)}),
 		M::Popup("Af&ter Playback", after)};
 }
 
@@ -1498,9 +1429,9 @@ std::vector<MenuItem> MainFrame::NavigateMenu() const
 {
 	using M = MenuItem;
 	const bool loaded = Loaded();
-	std::vector<M> v = {M::Cmd("&Previous", ID_NAVIGATE_SKIPBACK, "L1").Enable(loaded),
-		M::Cmd("&Next", ID_NAVIGATE_SKIPFORWARD, "R1").Enable(loaded),
-		M::Cmd("&Go To...", ID_NAVIGATE_GOTO, "L3").Enable(loaded && player_.Seekable()), M::Sep(),
+	std::vector<M> v = {M::Cmd("&Previous", ID_NAVIGATE_SKIPBACK, Accel(PadAction::Previous)).Enable(loaded),
+		M::Cmd("&Next", ID_NAVIGATE_SKIPFORWARD, Accel(PadAction::Next)).Enable(loaded),
+		M::Cmd("&Go To...", ID_NAVIGATE_GOTO, Accel(PadAction::GoTo)).Enable(loaded && player_.Seekable()), M::Sep(),
 		M::Cmd("&Title Menu", ID_NAVIGATE_TITLEMENU).Enable(false), M::Cmd("&Root Menu", ID_NAVIGATE_ROOTMENU).Enable(false),
 		M::Cmd("&Subtitle Menu", ID_NAVIGATE_SUBPICTUREMENU).Enable(false), M::Cmd("&Audio Menu", ID_NAVIGATE_AUDIOMENU).Enable(false),
 		M::Cmd("An&gle Menu", ID_NAVIGATE_ANGLEMENU).Enable(false), M::Cmd("&Chapter Menu", ID_NAVIGATE_CHAPTERMENU).Enable(false)};
@@ -1577,11 +1508,11 @@ std::vector<MenuItem> MainFrame::BuildMenu(int which) const
 	std::vector<M> v;
 	v.push_back(M::Popup("&File", FileMenu()));
 	v.push_back(M::Sep());
-	v.push_back(M::Cmd("&Play/Pause", ID_PLAY_PLAYPAUSE, "Cross").Enable(loaded));
+	v.push_back(M::Cmd("&Play/Pause", ID_PLAY_PLAYPAUSE, Accel(PadAction::PlayPause)).Enable(loaded));
 	v.push_back(M::Cmd("&Stop", ID_PLAY_STOP).Enable(loaded));
 	v.push_back(play[3]); // Repeat
 	v.push_back(M::Sep());
-	v.push_back(M::Cmd("F&ull Screen", ID_VIEW_FULLSCREEN, "Triangle").Check(Fullscreen()));
+	v.push_back(M::Cmd("F&ull Screen", ID_VIEW_FULLSCREEN, Accel(PadAction::FullScreen)).Check(Fullscreen()));
 	v.push_back(view[14]); // Zoom
 	v.push_back(M::Sep());
 	v.push_back(view[17]); // Video Frame
@@ -2015,6 +1946,8 @@ void MainFrame::Command(int id)
 				player_.SetSubtitleDelay(s_.sub_delay_ms / 1000.0);
 				player_.SetAudioDelay(s_.audio_delay_ms / 1000.0);
 				input_.SetSpeed(s_.cursor_speed);
+				SetSubtitleFont(s_.sub_font);
+				sub_cache_.key.clear();
 				if (g_dpi != s_.dpi)
 				{
 					g_dpi = s_.dpi;
@@ -2123,7 +2056,8 @@ void MainFrame::Command(int id)
 		case ID_SUB_DELAY_DOWN:
 		case ID_SUB_DELAY_RESET:
 		{
-			s.sub_delay_ms = id == ID_SUB_DELAY_RESET ? 0 : s.sub_delay_ms + (id == ID_SUB_DELAY_UP ? 100 : -100);
+			s.sub_delay_ms = id == ID_SUB_DELAY_RESET ? 0 : s.sub_delay_ms + (id == ID_SUB_DELAY_UP ? s.sub_delay_step : -s.sub_delay_step);
+			s.sub_delay_ms = std::max(-60000, std::min(60000, s.sub_delay_ms));
 			player_.SetSubtitleDelay(s.sub_delay_ms / 1000.0);
 			Osd(Fmt(T("Subtitle delay: %d ms"), s.sub_delay_ms));
 			break;
@@ -2663,7 +2597,193 @@ void MainFrame::OnRButtonDown(int x, int y)
 	});
 }
 
-void MainFrame::OnKey(Key k)
+namespace
+{
+// the window's keys and the buttons they come from (mpc_ui.cpp's InputMapper: Cross is Enter, Circle Escape)
+PadButton ButtonOf(Key k)
+{
+	switch (k)
+	{
+		case Key::Enter:
+			return PadButton::Cross;
+		case Key::Escape:
+			return PadButton::Circle;
+		case Key::Triangle:
+			return PadButton::Triangle;
+		case Key::Square:
+			return PadButton::Square;
+		case Key::Left:
+			return PadButton::Left;
+		case Key::Right:
+			return PadButton::Right;
+		case Key::Up:
+			return PadButton::Up;
+		case Key::Down:
+			return PadButton::Down;
+		case Key::L1:
+			return PadButton::L1;
+		case Key::R1:
+			return PadButton::R1;
+		case Key::L2:
+			return PadButton::L2;
+		case Key::R2:
+			return PadButton::R2;
+		case Key::L3:
+			return PadButton::L3;
+		case Key::R3:
+			return PadButton::R3;
+		default:
+			return PadButton::Count;
+	}
+}
+
+bool IsJump(PadAction a)
+{
+	return a >= PadAction::JumpBackMedium && a <= PadAction::JumpForwardSmall;
+}
+
+bool IsJumpBack(PadAction a)
+{
+	return a == PadAction::JumpBackMedium || a == PadAction::JumpBackLarge || a == PadAction::JumpBackSmall;
+}
+} // namespace
+
+std::string MainFrame::Accel(PadAction a, const char* combination) const
+{
+	for (int i = 0; i < int(PadButton::Count); i++)
+		if (s_.pad[i] == a)
+			return PadButtonShortName(PadButton(i));
+	// R3 + Square: while R3 keeps its default action
+	if (*combination && s_.pad[int(PadButton::R3)] == DefaultPadAction(PadButton::R3))
+		return combination;
+	return "";
+}
+
+void MainFrame::NextTrack(TrackType t)
+{
+	if (!Loaded())
+		return;
+	const std::vector<Track> tracks = player_.Tracks(t);
+	const int cur = t == TrackType::Subtitle && !subs_enabled_ ? -1 : player_.CurrentTrack(t);
+	int at = -1;
+	for (int i = 0; i < int(tracks.size()); i++)
+		if (tracks[i].id == cur)
+			at = i;
+	if (t == TrackType::Subtitle)
+	{
+		// MPC-HC's Next Subtitle with On/Off: the next track; after the last one, off; then the first again
+		if (tracks.empty() || (cur >= 0 && at + 1 >= int(tracks.size())))
+		{
+			subs_enabled_ = false;
+			Osd(T("Subtitle: off"));
+			OrbisLog("[ui] next subtitle: off");
+			return;
+		}
+		const Track& n = tracks[at + 1];
+		player_.SelectTrack(TrackType::Subtitle, n.id);
+		subs_enabled_ = true;
+		Osd(Fmt(T("Subtitle: %s"), n.name.c_str()));
+		OrbisLog("[ui] next subtitle: %d", n.id);
+		return;
+	}
+	if (tracks.empty())
+		return;
+	const Track& n = tracks[(at + 1) % int(tracks.size())];
+	if (n.id != cur)
+		player_.SelectTrack(t, n.id);
+	Osd(Fmt(T("Audio: %s"), n.name.c_str()));
+	OrbisLog("[ui] next audio track: %d", n.id);
+}
+
+void MainFrame::DoPadAction(PadAction a)
+{
+	switch (a)
+	{
+		case PadAction::PlayPause:
+			Command(ID_PLAY_PLAYPAUSE);
+			break;
+		case PadAction::Stop:
+			Command(ID_PLAY_STOP);
+			break;
+		case PadAction::JumpBackMedium:
+			Jump(-s_.jump_medium);
+			break;
+		case PadAction::JumpForwardMedium:
+			Jump(s_.jump_medium);
+			break;
+		case PadAction::JumpBackLarge:
+			Jump(-s_.jump_large);
+			break;
+		case PadAction::JumpForwardLarge:
+			Jump(s_.jump_large);
+			break;
+		case PadAction::JumpBackSmall:
+			Jump(-s_.jump_small);
+			break;
+		case PadAction::JumpForwardSmall:
+			Jump(s_.jump_small);
+			break;
+		case PadAction::Previous:
+			Command(ID_NAVIGATE_SKIPBACK);
+			break;
+		case PadAction::Next:
+			Command(ID_NAVIGATE_SKIPFORWARD);
+			break;
+		case PadAction::VolumeUp:
+			Command(ID_VOLUME_UP);
+			break;
+		case PadAction::VolumeDown:
+			Command(ID_VOLUME_DOWN);
+			break;
+		case PadAction::Mute:
+			Command(ID_VOLUME_MUTE);
+			break;
+		case PadAction::FullScreen:
+			Command(ID_VIEW_FULLSCREEN);
+			break;
+		case PadAction::LeaveFullScreen:
+			if (Fullscreen())
+				Command(ID_VIEW_FULLSCREEN);
+			break;
+		case PadAction::GoTo:
+			Command(ID_NAVIGATE_GOTO);
+			break;
+		case PadAction::ContextMenu:
+			TrackPopupMenu(BuildMenu(-1), kW / 2 - ScaleX(120), kH / 4, [this](int id) {
+				if (id)
+					Command(id);
+			}, nullptr, true);
+			break;
+		case PadAction::MenuBar:
+			OpenMenuBar(0, true);
+			break;
+		case PadAction::SubDelayDown:
+			Command(ID_SUB_DELAY_DOWN);
+			break;
+		case PadAction::SubDelayUp:
+			Command(ID_SUB_DELAY_UP);
+			break;
+		case PadAction::NextSubtitle:
+			NextTrack(TrackType::Subtitle);
+			break;
+		case PadAction::NextAudio:
+			NextTrack(TrackType::Audio);
+			break;
+		case PadAction::AudioDelayDown:
+			Command(ID_AUDIO_DELAY_DOWN);
+			break;
+		case PadAction::AudioDelayUp:
+			Command(ID_AUDIO_DELAY_UP);
+			break;
+		case PadAction::Statistics:
+			Command(ID_VIEW_DISPLAY_RENDERER_STATS);
+			break;
+		default:
+			break;
+	}
+}
+
+void MainFrame::OnKey(Key k, bool repeat)
 {
 	// the playlist, when it has the focus: Up/Down choose, Cross plays, Circle gives the focus back
 	if (pl_focus_ && s_.show_playlist && !playlist_.empty())
@@ -2677,7 +2797,8 @@ void MainFrame::OnKey(Key k)
 				pl_sel_ = std::min(int(playlist_.size()) - 1, pl_sel_ + 1);
 				return;
 			case Key::Enter:
-				OpenPlaylistItem(pl_sel_);
+				if (!repeat)
+					OpenPlaylistItem(pl_sel_);
 				return;
 			case Key::Escape:
 				pl_focus_ = false;
@@ -2686,66 +2807,34 @@ void MainFrame::OnKey(Key k)
 				break;
 		}
 	}
-	const bool l2 = input_.Held(Key::L2), r2 = input_.Held(Key::R2);
-	switch (k)
+	// Options: the menu bar, always
+	if (k == Key::Menu)
 	{
-		case Key::Enter:
-			Command(ID_PLAY_PLAYPAUSE);
-			break;
-		case Key::Escape:
-			if (Fullscreen())
-				Command(ID_VIEW_FULLSCREEN);
-			break;
-		case Key::Menu:
+		if (!repeat)
 			OpenMenuBar(0, true);
-			break;
-		case Key::Square:
-			if (input_.Held(Key::R3))
-			{
-				Command(ID_VIEW_DISPLAY_RENDERER_STATS);
-				break;
-			}
-			TrackPopupMenu(BuildMenu(-1), kW / 2 - ScaleX(120), kH / 4, [this](int id) {
-				if (id)
-					Command(id);
-			}, nullptr, true);
-			break;
-		case Key::Triangle:
-			Command(ID_VIEW_FULLSCREEN);
-			break;
-		case Key::Left:
-			Jump(-(l2 ? s_.jump_large : r2 ? s_.jump_small : s_.jump_medium));
-			break;
-		case Key::Right:
-			Jump(l2 ? s_.jump_large : r2 ? s_.jump_small : s_.jump_medium);
-			break;
-		case Key::Up:
-			Command(ID_VOLUME_UP);
-			break;
-		case Key::Down:
-			Command(ID_VOLUME_DOWN);
-			break;
-		case Key::L1:
-			Command(ID_NAVIGATE_SKIPBACK);
-			break;
-		case Key::R1:
-			Command(ID_NAVIGATE_SKIPFORWARD);
-			break;
-		case Key::L2:
-			Jump(-s_.jump_large);
-			break;
-		case Key::R2:
-			Jump(s_.jump_large);
-			break;
-		case Key::L3:
-			Command(ID_NAVIGATE_GOTO);
-			break;
-		case Key::R3:
-			Command(ID_VOLUME_MUTE);
-			break;
-		default:
-			break;
+		return;
 	}
+	const PadButton b = ButtonOf(k);
+	if (b == PadButton::Count)
+		return;
+	PadAction a = s_.pad[int(b)];
+	// the combinations (as before the Keys page), while L2 / R2 / R3 keep their default actions: L2 or R2 held with
+	// Left / Right (when they jump) jumps 20 s / 1 s that way; R3 held with Square: the statistics
+	if ((b == PadButton::Left || b == PadButton::Right) && IsJump(a))
+	{
+		const bool back = IsJumpBack(a);
+		if (input_.Held(Key::L2) && s_.pad[int(PadButton::L2)] == DefaultPadAction(PadButton::L2))
+			a = back ? PadAction::JumpBackLarge : PadAction::JumpForwardLarge;
+		else if (input_.Held(Key::R2) && s_.pad[int(PadButton::R2)] == DefaultPadAction(PadButton::R2))
+			a = back ? PadAction::JumpBackSmall : PadAction::JumpForwardSmall;
+	}
+	if (b == PadButton::Square && input_.Held(Key::R3) && s_.pad[int(PadButton::R3)] == DefaultPadAction(PadButton::R3))
+		a = PadAction::Statistics;
+	if (repeat && !PadActionRepeats(a))
+		return;
+	if (a != PadAction::None && !repeat)
+		OrbisLog("[ui] %s: %s", PadButtonName(b), PadActionKey(a));
+	DoPadAction(a);
 }
 
 void MainFrame::OnEvent(const InputEvent& ev)
@@ -2765,19 +2854,33 @@ void MainFrame::OnEvent(const InputEvent& ev)
 			OnRButtonDown(ev.x, ev.y);
 			break;
 		case InputEvent::Wheel:
-			// the wheel: the volume (MPC-HC's default), or the playlist under the pointer
+		{
+			// the wheel (the right stick): the playlist under the pointer, else the stick's keys (the volume, MPC-HC's
+			// default); a stick held keeps stepping, which only the actions that repeat follow
 			if (!r_playlist_.IsRectEmpty() && r_playlist_.PtInRect(ev.x, ev.y))
+			{
 				pl_top_ = std::max(0, std::min(pl_top_ - ev.wheel * 3, std::max(0, int(playlist_.size()) - 1)));
-			else
-				Command(ev.wheel > 0 ? ID_VOLUME_UP : ID_VOLUME_DOWN);
-			break;
-		case InputEvent::KeyDown:
-			// L2/R2 held change Left/Right: they act on release-free repeats only as modifiers
-			if ((ev.key == Key::L2 || ev.key == Key::R2) && (input_.Held(Key::Left) || input_.Held(Key::Right)))
 				break;
+			}
+			const int dir = ev.wheel > 0 ? 0 : 1;
+			const double now = NowSeconds();
+			const bool held = now - wheel_t_[dir] < 0.35;
+			wheel_t_[dir] = now;
+			const PadAction a = s_.pad[int(dir == 0 ? PadButton::StickUp : PadButton::StickDown)];
+			if (!held || PadActionRepeats(a))
+				DoPadAction(a);
+			break;
+		}
+		case InputEvent::KeyDown:
+			// L2/R2 held change Left/Right (while they keep their default actions): then they don't act themselves
+			if (((ev.key == Key::L2 && s_.pad[int(PadButton::L2)] == DefaultPadAction(PadButton::L2)) ||
+					(ev.key == Key::R2 && s_.pad[int(PadButton::R2)] == DefaultPadAction(PadButton::R2))) &&
+				(input_.Held(Key::Left) || input_.Held(Key::Right)))
+				break;
+			// the triggers don't repeat in the window (in lists they are Page Up / Down)
 			if ((ev.key == Key::L2 || ev.key == Key::R2) && ev.repeat)
 				break;
-			OnKey(ev.key);
+			OnKey(ev.key, ev.repeat);
 			break;
 		default:
 			break;
@@ -2790,7 +2893,8 @@ int MainFrame::Run(const std::string& first)
 	s_.Load();
 	g_dpi = s_.dpi;
 	input_.SetSpeed(s_.cursor_speed);
-	LoadExtraFonts(OrbisDir("fonts"));
+	OrbisLog("[ui] fonts folder: %d font(s) loaded", LoadExtraFonts(OrbisDir("fonts")));
+	SetSubtitleFont(s_.sub_font); // a file no longer there: Selawik (logged)
 	// the CA list for https:// streams
 	{
 		const std::string ca = OrbisRoot() + "/cacert.pem";

@@ -436,10 +436,10 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 u16run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.2.3 01.023.000
+release v1.3 01.030.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.2.3)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.3)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -543,7 +543,8 @@ expect "python3 $PWD/tests/check_i18n.py $PWD/player/mpc_i18n.cpp >/dev/null" "e
 # the menus (the bar, every menu and the context menu), the bars, the dialogs (About, Options, Open, the file
 # browser, Properties, Go To with the keyboard, Add Favorite), the OSD, a message box
 S="5:cmd info;6:cmd stats;20:key menu;30:key right;40:key right;50:key right;60:key right;70:key right;80:key escape"
-S="$S;82:key escape;88:mouse 960,540;90:rclick;100:key escape;110:cmd about;130:key escape;140:cmd options;170:key escape"
+S="$S;82:key escape;88:mouse 960,540;90:rclick;100:key escape;110:cmd about;130:key escape;140:cmd options;143:key down"
+S="$S;146:key down;149:key down;152:key down;155:key down;158:key down;161:key down;170:key escape"
 S="$S;180:cmd open;195:key escape;200:cmd quickopen;220:key escape;230:cmd props;245:key escape;250:cmd goto;258:key enter"
 S="$S;270:key escape;275:key escape;280:cmd addfav;290:key escape;300:cmd volup;305:cmd mute;310:cmd faster;315:cmd next"
 S="$S;320:cmd pause;325:cmd opendir;340:key escape;350:open $WORK/no-such-file.mkv;380:key enter;390:quit"
@@ -562,7 +563,7 @@ spec = re.compile(r'%(?:%|[-+ #0]*\d*(?:\.\d+)?(?:hh|h|ll|l|z)?[diouxXeEfgGcsp])
 formats = [re.compile('^' + ''.join('.*' if spec.fullmatch(part) else re.escape(part)
                                     for part in re.split('(' + spec.pattern + ')', f)) + '$', re.S)
            for f in translated if '%' in f]
-names = {'L', 'R', 'L1', 'R1', 'L3', 'R3', 'MediaInfo', 'Selawik (Segoe UI)', 'English', 'Español',
+names = {'L', 'R', 'L1', 'R1', 'L2', 'R2', 'L3', 'R3', 'Roboto', 'MediaInfo', 'Selawik (Segoe UI)', 'English', 'Español',
          'Português (Brasil)', 'Français', 'Deutsch', 'Media Player Classic Home Cinema', 'chapters.mkv',
          'No such file or directory'}  # the last one: FFmpeg's own error text
 for line in open(sys.argv[1], encoding='utf-8'):
@@ -773,6 +774,96 @@ cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
 rc=$(MPCPS5_HOST_IDLE=1 MAXFLIPS=250 run "$T" "0:0" "20:cmd pause;300:mouse 400,400;320:quit" "" "$T/root/media/movie.mp4")
 expect "[ $rc = 0 ] && grep -q '\[ui\] idle: the window drawn twice a second' $T/root/logs/boot.log" "paused, nothing pressed: idle (320 frames in under 250 flips)"
 expect "grep -q '\[ui\] active again: drawn at every refresh' $T/root/logs/boot.log" "the pointer moved: the full rate at once"
+nosan "$T"
+fi
+
+if want 22; then
+echo "== 22. 1.3: the Default Style's font from the fonts folder, colours, the opaque box; the controller's Keys page"
+MONO=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+MONOB=/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf
+srt22() { printf '1\r\n00:00:00,000 --> 00:00:09,000\r\n%s\r\n' "$2" >"$1/root/media/movie.srt"; cp "$MEDIA/grey.mp4" "$1/root/media/movie.mp4"; }
+# a: an SRT in a monospaced font from the folder (20 i's: as wide as 20 M's, about three times Selawik's), its bold face
+T=$(newroot t22)
+mkdir -p $T/root/fonts && cp $MONO $T/root/fonts/aa-mono.ttf && cp $MONOB $T/root/fonts/bb-mono-bold.ttf
+srt22 $T "iiiiiiiiiiiiiiiiiiii"
+ini "$T" "SubFont=aa-mono.ttf"
+rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'Default Style font: DejaVu Sans Mono (aa-mono.ttf); bold: bb-mono-bold.ttf' $T/root/logs/boot.log" "SubFont=aa-mono.ttf read: DejaVu Sans Mono, Bold from the folder's bold face of the family"
+expect "$REGION $T/dump/flip00060.ppm 640 750 790 977 255 255 255 30 150 >/dev/null && $REGION $T/dump/flip00060.ppm 1130 750 1280 977 255 255 255 30 150 >/dev/null" "the line drawn in it: 20 i's reach x 640..1280 (monospaced)"
+expect "grep -q '^SubFont=aa-mono.ttf$' $T/root/mpc-hc.ini" "kept in mpc-hc.ini"
+nosan "$T"
+# b: a font no longer in the folder: Selawik (logged), the same line far narrower
+T=$(newroot t22b)
+srt22 $T "iiiiiiiiiiiiiiiiiiii"
+ini "$T" "SubFont=gone.ttf"
+rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q \"the Default Style's font gone.ttf isn't in the fonts folder: Selawik\" $T/root/logs/boot.log" "a missing font file: Selawik, logged"
+expect "$REGION $T/dump/flip00060.ppm 860 750 1060 977 255 255 255 30 150 >/dev/null && ! $REGION $T/dump/flip00060.ppm 640 750 790 977 255 255 255 30 20 >/dev/null" "... the line drawn in Selawik (narrow: nothing at x 640..790)"
+nosan "$T"
+# c: a font copied into the folder while the app runs: listed when Options opens, chosen (Right x2: Selawik, Roboto,
+# DejaVu Sans Mono), OK; synthetic bold (no bold face of it in the folder)
+T=$(newroot t22c)
+mkdir -p $T/root/fonts
+srt22 $T "iiiiiiiiiiiiiiiiiiii"
+( for i in $(seq 1 100); do grep -q 'fonts folder: 0 font(s) loaded' $T/root/logs/boot.log 2>/dev/null && break; sleep 0.1; done; cp $MONO $T/root/fonts/mono.ttf ) &
+CP=$!
+P="200:cmd options"
+for f in 210 213 216 219 222 225; do P="$P;$f:key down"; done
+rc=$(run "$T" "0:0" "$P;235:key r1;240:key right;243:key right;250:key menu;290:state;300:quit" "247,290" "$T/root/media/movie.mp4")
+wait $CP
+expect "[ $rc = 0 ] && grep -q 'Default Style fonts: 1 in .*/fonts (1 new)' $T/root/logs/boot.log" "a font copied in after the start: read when Options opens"
+expect "grep -q 'Default Style font: DejaVu Sans Mono (mono.ttf); bold: synthetic' $T/root/logs/boot.log && grep -q '^SubFont=mono.ttf$' $T/root/mpc-hc.ini" "chosen in Default Style, OK: drawn in it (synthetic bold), saved"
+expect "$REGION $T/dump/flip00290.ppm 640 750 790 977 255 255 255 30 150 >/dev/null" "... the line in the new font at once"
+nosan "$T"
+# d: colours: yellow text, a thick blue outline; then an opaque red box
+T=$(newroot t22d)
+srt22 $T "Coloured line"
+ini "$T" "SubColor=FFFF00
+SubOutlineColor=0000FF
+SubOutline=4"
+rc=$(run "$T" "0:0" "60:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && $REGION $T/dump/flip00060.ppm 300 750 1620 977 255 255 0 40 1500 >/dev/null && $REGION $T/dump/flip00060.ppm 300 750 1620 977 0 0 255 40 1500 >/dev/null && ! $REGION $T/dump/flip00060.ppm 300 750 1620 977 255 255 255 30 50 >/dev/null" "SubColor / SubOutlineColor: yellow text, blue outline (no white)"
+T=$(newroot t22e)
+srt22 $T "Boxed line"
+ini "$T" "SubBorderStyle=1
+SubOutlineColor=FF0000
+SubBoxOpacity=100
+SubShadow=0"
+rc=$(run "$T" "0:0" "60:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && $REGION $T/dump/flip00060.ppm 300 750 1620 977 255 0 0 30 15000 >/dev/null && $REGION $T/dump/flip00060.ppm 300 750 1620 977 255 255 255 30 1000 >/dev/null" "Opaque box: white text on a red box behind the line"
+expect "! $REGION $T/dump/flip00060.ppm 300 750 1620 977 0 0 0 20 50 >/dev/null" "... no outline (black) around the letters"
+nosan "$T"
+# f: Keys: R2 = subtitle delay + (the interval 200 ms) chosen on the page; R2: the delay and MPC-HC's OSD; Default puts
+# R2's 20 s jump back
+T=$(newroot t22f)
+srt22 $T "Delay line"
+ini "$T" "SubDelayInterval=200"
+P="30:cmd options;40:key down;50:key r1"
+f=55; for i in $(seq 1 11); do P="$P;$f:key down"; f=$((f + 3)); done
+P="$P;95:key r1"
+f=100; for i in $(seq 1 14); do P="$P;$f:key right"; f=$((f + 3)); done
+P="$P;150:key menu;165:key r2;200:cmd options;210:key down;215:key r1;220:key r1;225:key r1;230:key enter;235:key menu;250:key r2;270:quit"
+rc=$(run "$T" "0:0" "$P" "92,170" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q '\[ui\] R2: SubDelayUp' $T/root/logs/boot.log && grep -q '\[osd\] Subtitle delay: 200 ms' $T/root/logs/boot.log" "Keys: R2 set to Subtitle delay +; R2 adds the interval (200 ms), the OSD says so"
+expect "$REGION $T/dump/flip00170.ppm 150 65 800 140 224 224 224 20 150 >/dev/null" "... the OSD on the picture"
+expect "$REGION $T/dump/flip00092.ppm 790 632 1400 656 204 232 255 4 8000 >/dev/null" "the Keys page drawn, R2's row selected (scrolled to)"
+expect "grep -q '\[ui\] R2: JumpForwardLarge' $T/root/logs/boot.log && grep -q '^KeyR2=JumpForwardLarge$' $T/root/mpc-hc.ini && grep -q '^SubDelay=200$' $T/root/mpc-hc.ini" "Default: R2 jumps 20 s again (saved); the delay kept"
+nosan "$T"
+# g: the keys from mpc-hc.ini: Triangle = next audio track (MPC-HC's OSD "Audio: ..."), Square = next subtitle (off, on);
+# L2 + Left: 20 s back while L2 keeps its default; remapped L2 acts by itself and Left jumps 5 s
+T=$(newroot t22g)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeyTriangle=NextAudio
+KeySquare=NextSubtitle"
+rc=$(run "$T" "0:0;50:$TRIANGLE;52:0;80:$SQUARE;82:0;100:$SQUARE;102:0;130:100;135:180;137:100;140:0" "40:state;70:state;120:seek 8;150:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 5)\" = 2 ] && [ \"\$(field $T 2 5)\" = 1 ] && grep -q '\[osd\] Audio: English' $T/root/logs/boot.log" "Triangle = Next audio track: stream 2 -> 1, the OSD says Audio: English..."
+expect "grep -q '\[ui\] next subtitle: off' $T/root/logs/boot.log && grep -q '\[osd\] Subtitle: off' $T/root/logs/boot.log && grep -q '\[ui\] next subtitle: 3' $T/root/logs/boot.log" "Square = Next subtitle: off, then the track again"
+expect "grep -q '\[ui\] D-pad Left: JumpBackLarge' $T/root/logs/boot.log" "L2 held + Left (L2 at its default): 20 s back, as before"
+T=$(newroot t22h)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeyL2=SubDelayDown"
+rc=$(run "$T" "0:0;50:100;55:180;57:100;60:0" "40:seek 8;80:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && grep -q '\[ui\] L2: SubDelayDown' $T/root/logs/boot.log && grep -q '\[ui\] D-pad Left: JumpBack$' $T/root/logs/boot.log && grep -q '\[osd\] Subtitle delay: -100 ms' $T/root/logs/boot.log" "L2 remapped: it does its own action (delay -100 ms), Left jumps 5 s"
 nosan "$T"
 fi
 
