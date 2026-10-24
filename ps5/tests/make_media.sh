@@ -105,6 +105,16 @@ $FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i sine=frequency=50
 # loud.mkv: a 440 Hz tone at full scale (peaks at 32700), 4 s: with the audio boost it must clip, not wrap around
 $FF -f lavfi -i color=c=black:size=320x180:rate=25 -f lavfi -i "aevalsrc=0.998*sin(2*PI*440*t):s=48000:c=stereo" -t 4 \
 	-c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a pcm_s16le -shortest "$D/loud.mkv"
+# norm.mkv (1.3.1, Normalize): a 440 Hz stereo tone, 48 kHz PCM: quiet (0.02 of full scale) for 2 s, a burst at 0.5 for
+# 0.5 s, then quiet again for 5 s
+$FF -f lavfi -i color=c=black:size=320x180:rate=25 \
+	-f lavfi -i "aevalsrc=if(between(t\,2\,2.5)\,0.5\,0.02)*sin(2*PI*440*t):s=48000:c=stereo" -t 7.5 \
+	-c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a pcm_s16le -shortest "$D/norm.mkv"
+# norm71.mkv: the same quiet tone and burst in 7.1 (the left side channel only), 4 s
+$FF -f lavfi -i color=c=black:size=320x180:rate=25 \
+	-f lavfi -i "aevalsrc=if(between(t\,2\,2.5)\,0.5\,0.02)*sin(2*PI*440*t):s=48000" -t 4 \
+	-filter_complex "[1:a]pan=7.1|SL=c0[a]" -map 0:v -map "[a]" -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+	-c:a pcm_s16le -shortest "$D/norm71.mkv"
 # a playlist of two files
 printf '#EXTM3U\nred.mp4\nchapters.mkv\n' >"$D/list.m3u"
 # libass (group 20): grey.mp4, 640x360 grey, 6 s; styled.ass beside it: (a) green text at \pos(20,20) top left,

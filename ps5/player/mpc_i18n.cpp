@@ -886,6 +886,13 @@ const Entry kTable[] = {
 	{"Enable built-in audio switcher filter", "Activar el selector de audio integrado", "Ativar o seletor de áudio interno",
 		"Activer le sélecteur audio intégré", "Integrierten Audio-Umschalter aktivieren"},
 	{"Boost:", "Amplificar:", "Amplificar:", "Amplification :", "Verstärkung:"},
+	// Normalize: MPC-HC's own translations, but "Regain volume" in Spanish shorter (MPC-HC's doesn't fit) and in German as
+	// "restore" (MPC-HC's says "reset")
+	{"Normalize", "Normalizar", "Normalizar", "Normaliser", "Ton normalisieren"},
+	{"Max amplification:", "Amplificación máxima:", "Máx amplificação:", "Amplification maximale :",
+		"Maximale Verstärkung:"},
+	{"Regain volume", "Recuperar volumen", "Restaurar volume", "Restaurer l'amplification",
+		"Lautstärke wiederherstellen"},
 	{"Down-mix: 5.1/7.1 tracks are mixed down to stereo, or go to the PS5's 8-channel output when Output > Audio "
 	 "Renderer is set to surround.",
 		"Mezcla: las pistas 5.1/7.1 se mezclan en estéreo, o van a la salida de 8 canales de PS5 si Salida > "

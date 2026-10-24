@@ -14,7 +14,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 292 host tests
+> **Status (1.3.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 321 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
@@ -26,6 +26,12 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.3.1:** what Sulfurico-One64 also asked for, in a comment on
+[#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1): adjusting the sound "like we can do on the PC
+version". **Options > Audio Switcher** now has MPC-HC's **Normalize**, **Max amplification** and **Regain volume**:
+quiet films are raised (up to the max amplification, 400 % by default) without the loud parts clipping, and with
+Regain volume the level comes back up after a loud passage. Off by default, as in MPC-HC. See [Audio](#audio).
 
 **1.3:** what Sulfurico-One64 asked for ([MediaPlayerClassicPS5#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1)):
 - **The subtitle font**: Options > Subtitles > Default Style's Font lists Selawik (Segoe UI), Roboto and every
@@ -126,8 +132,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.3.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.3.elf`).
+1. Send `MediaPlayerClassicPS5-v1.3.1.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.3.1.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -269,14 +275,23 @@ Previous/Next goes by chapter, then by playlist item, then to the neighbouring f
 ## Audio
 
 - **Play > Audio Track**: the tracks (language and format), as MPC-HC's menu, the stream marked default first; and
-  the audio delay (+/- 10 ms) there too. **Options > Audio Switcher**: the boost and the **audio time shift** (the
-  delay, in ms).
+  the audio delay (+/- 10 ms) there too. **Options > Audio Switcher**: **Normalize** (below), the boost and the
+  **audio time shift** (the delay, in ms).
 - From the controller: give buttons **Next audio track** and **Audio delay - / +** in Options > Player > Keys (the
   OSD says "Audio: English [eng] (AAC...)" or "Audio delay: 20 ms").
 - Stereo by default: 5.1 and 7.1 are mixed down (libswresample's matrix, centre and surrounds at -3 dB). With
   Options > Output > Audio Renderer on **surround**, they go to the console's 8-channel output instead (see
   below). No bitstream (passthrough) of Dolby/DTS to an AV receiver: they are decoded to PCM.
 - Volume: MPC-HC's slider and curve; Options > Audio Switcher: boost (up to +300 %) and the time shift.
+- **Normalize** (Options > Audio Switcher, off by default), MPC-HC's normalizer (its audio switcher's code, 1.7.13):
+  the sound is taken in the blocks the decoder gives (a few tens of ms) and one gain is used for all channels
+  (stereo or the 8-channel output). The gain starts at **Max amplification** (100-1000 %, 400 % by default); when a
+  block's loudest sample would go past full scale, the gain drops at once, for that block already, to what puts it
+  exactly at full scale -- so nothing clips, and there is no look-ahead (no added delay, A/V sync as before). With
+  **Regain volume** (on by default) the gain rises again by 6 % per second while the sound stays below 75 % of full
+  scale; without it the gain only goes down. It starts again at the max for each file, seek, track or format change.
+  Changing it while a file plays applies at once. **Boost** comes after it, as in MPC-HC (normalized x boost: with a
+  boost the loudest parts are held at full scale, i.e. clip), then the volume.
 - Playback rate (Play > Increase/Decrease Rate, 0.125x-8x) keeps the pitch (FFmpeg's atempo).
 
 ## Hardware decoding, HDR and surround
@@ -373,7 +388,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 ## Settings and files
 
 ```
-/data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback...), the keys,
+/data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback, AudioBoost,
+                             AudioNormalize, AudioMaxNormFactor, AudioNormalizeRecover...), the keys,
                              Recent Files, file positions, Favorites, network locations (without passwords)
 /data/mpcps5/credentials.ini the passwords of those network addresses (smb://user@server<TAB>password), with the
                              generation of mpc-hc.ini it goes with (credentials.ini.new while a save is half done)
@@ -402,7 +418,7 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.3.elf, the release zip, mpc-ps5-v1.3-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.3.1.elf, the release zip, mpc-ps5-v1.3.1-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 

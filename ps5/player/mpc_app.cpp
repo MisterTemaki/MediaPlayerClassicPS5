@@ -1583,6 +1583,7 @@ void MainFrame::ApplyAudio()
 	player_.SetVolume(s_.volume);
 	player_.SetMute(s_.mute);
 	player_.SetAmplify(1.0 + s_.audio_boost / 100.0);
+	player_.SetNormalize(s_.audio_normalize, s_.audio_max_norm, s_.audio_norm_regain);
 	// Options > Output: the next file opened uses the console's decoder or not; the rest applies at once
 	hwdec::SetEnabled(s_.hw_decoding);
 	player_.SetToneMapping(s_.hdr_tonemap, s_.hdr_peak);

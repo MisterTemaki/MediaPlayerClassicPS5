@@ -150,6 +150,10 @@ struct Settings
 	bool auto_load_subtitles = true;
 	// Audio
 	int audio_boost = 0; // percent, Options > Audio Switcher "Boost"
+	// Options > Audio Switcher "Normalize", "Max amplification" (percent, 100..1000), "Regain volume": MPC-HC's defaults
+	bool audio_normalize = false;
+	int audio_max_norm = 400;
+	bool audio_norm_regain = true;
 	int audio_delay_ms = 0;
 	int audio_output = 0; // 0 stereo (5.1/7.1 mixed down), 1 surround: the console's 8-channel output
 	// Output (video)

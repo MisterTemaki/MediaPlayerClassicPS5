@@ -556,8 +556,15 @@ void GroupBox::Paint(CDC& dc, bool, bool)
 	const Font& f = UiFont();
 	const int ty = rect.top + f.Height() / 2;
 	const COLORREF line = RGB(220, 220, 220);
-	const int tw = text.empty() ? 0 : f.Measure(StripPrefix(text)) + ScaleX(4);
-	const int tx = rect.left + ScaleX(6);
+	int tw = text.empty() ? 0 : f.Measure(StripPrefix(text)) + ScaleX(4);
+	int tx = rect.left + ScaleX(6);
+	if (title_check)
+	{
+		// the box, the gap and the text as CheckBox::Paint draws them, with a little room on each side
+		tx = title_check->rect.left - ScaleX(2);
+		tw = std::min(int(title_check->rect.right) - tx,
+			ScaleX(13) + ScaleX(5) + f.Measure(StripPrefix(title_check->text)) + ScaleX(4));
+	}
 	dc.HLine(rect.left, tx, ty, line);
 	dc.HLine(tx + tw, rect.right, ty, line);
 	dc.VLine(rect.left, ty, rect.bottom, line);

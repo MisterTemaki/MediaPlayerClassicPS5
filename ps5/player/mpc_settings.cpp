@@ -487,6 +487,12 @@ void Settings::Load()
 			auto_load_subtitles = b;
 		else if (k == "AudioBoost")
 			audio_boost = Clamp(n, 0, 300);
+		else if (k == "AudioNormalize")
+			audio_normalize = b;
+		else if (k == "AudioMaxNormFactor")
+			audio_max_norm = Clamp(n, 100, 1000);
+		else if (k == "AudioNormalizeRecover")
+			audio_norm_regain = b;
 		else if (k == "AudioDelay")
 			audio_delay_ms = Clamp(n, -10000, 10000);
 		else if (k == "AudioOutput")
@@ -647,6 +653,8 @@ void Settings::Save() const
 		repeat, int(after_playback), jump_small, jump_medium, jump_large);
 	fprintf(f, "AutoloadSubtitles=%d\nAudioBoost=%d\nAudioDelay=%d\nAudioOutput=%d\n", auto_load_subtitles, audio_boost,
 		audio_delay_ms, audio_output);
+	fprintf(f, "AudioNormalize=%d\nAudioMaxNormFactor=%d\nAudioNormalizeRecover=%d\n", audio_normalize, audio_max_norm,
+		audio_norm_regain);
 	fprintf(f, "HardwareDecoding=%d\nHdrToneMapping=%d\nHdrPeak=%d\n", hw_decoding, hdr_tonemap, hdr_peak);
 	fprintf(f, "SubFont=%s\nSubFontSize=%d\nSubBold=%d\nSubBorderStyle=%d\nSubOutline=%d\nSubShadow=%d\n",
 		Escape(sub_font).c_str(), sub_font_size, sub_bold, sub_border, sub_outline, sub_shadow);

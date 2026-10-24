@@ -436,10 +436,10 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 u16run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.3 01.030.000
+release v1.3.1 01.031.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.3)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.3.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -964,6 +964,104 @@ expect "grep -q 'bb-shortcomp.ttf: face 0 refused: a glyph shorter than its head
 expect "grep -q 'bd-pointmatch.ttf: face 0 refused: a composite glyph that is too deep, made of itself' $T/root/logs/boot.log" "a point-matched component (no argument bytes) followed by 'A' itself: the walk reads what stb_truetype reads, refused"
 expect "grep -q 'Default Style font: DejaVu Sans (be-lastoff.ttf)' $WORK/t23i_be-lastoff/root/logs/boot.log" "an 'A' of one off-curve point: the font used, drawn without reading past its points (no sanitizer report above)"
 expect "grep -q 'ba-gpos2.ttf: face 0: its GPOS kerning left out' $T/root/logs/boot.log && grep -q 'Default Style font: DejaVu Sans (ba-gpos2.ttf)' $T/root/logs/boot.log" "the GPOS that doesn't fit: kerning from it left out, the font used"
+fi
+
+if want 24; then
+echo "== 24. 1.3.1: Options > Audio Switcher > Normalize, Max amplification, Regain volume (MPC-HC's normalizer)"
+# norm.mkv: a 440 Hz tone at 0.02 of full scale (RMS 463), a 0.5 s burst at 0.5 (RMS 11585) at 2 s, quiet again to 7.5 s.
+# normstat dump channels channel -> "before burst after late rail max min": RMS 1.5..0.5 s before the burst, in it,
+# 0.2..0.7 s and 4.0..4.5 s after it; flattened tops (two neighbours both at the 16-bit limit: a 440 Hz sine at full
+# scale has none, a clipped one hundreds); the extremes
+normstat() { python3 -c "
+import array
+a = array.array('h'); a.frombytes(open('$1', 'rb').read())
+x = a[$3::$2]
+R = 48000
+loud = [i for i, v in enumerate(x) if abs(v) > 8000]
+b0, b1 = loud[0], loud[-1]
+rms = lambda s: round((sum(v * v for v in s) / max(1, len(s))) ** 0.5)
+print(rms(x[b0 - 3 * R // 2:b0 - R // 2]), rms(x[b0 + R // 10:b1 - R // 10]), rms(x[b1 + R // 5:b1 + 7 * R // 10]),
+      rms(x[b1 + 4 * R:b1 + 9 * R // 2]), sum(1 for i in range(1, len(x)) if abs(x[i]) >= 32767 and abs(x[i - 1]) >= 32767),
+      max(x), min(x))"; }
+nf() { echo "$1" | cut -d' ' -f$2; }
+# a: Normalize off (the default): the sound as it is
+T=$(newroot t24)
+cp "$MEDIA/norm.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/off run "$T" "0:0" "560:quit" "" "$T/root/media/norm.mkv")
+r=$(normstat $T/off.2ch 2 0)
+expect "[ $rc = 0 ] && near $(nf "$r" 1) 463 12 && near $(nf "$r" 2) 11585 150 && near $(nf "$r" 3) 463 12 && near $(nf "$r" 4) 463 12" "Normalize off: unchanged (quiet RMS 463, the burst 11585): $r"
+expect "grep -q '^AudioNormalize=0$' $T/root/mpc-hc.ini && grep -q '^AudioMaxNormFactor=400$' $T/root/mpc-hc.ini && grep -q '^AudioNormalizeRecover=1$' $T/root/mpc-hc.ini" "MPC-HC's defaults saved: AudioNormalize=0, AudioMaxNormFactor=400, AudioNormalizeRecover=1"
+# b: on, Max amplification 400 %, Regain on: the quiet tone 4x; the burst brought to full scale, not clipped (its block's
+# peak lowers the gain at once to 2x); after it the gain rises again (+6 %/s)
+T=$(newroot t24b)
+cp "$MEDIA/norm.mkv" "$T/root/media/"
+ini "$T" "AudioNormalize=1"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/on run "$T" "0:0" "560:quit" "" "$T/root/media/norm.mkv")
+r=$(normstat $T/on.2ch 2 0)
+expect "[ $rc = 0 ] && near $(nf "$r" 1) 1852 40" "Normalize on: the quiet tone raised to the max amplification, 4x (RMS $(nf "$r" 1), 4 x 463 = 1852)"
+expect "near $(nf "$r" 2) 23170 400 && [ $(nf "$r" 5) = 0 ] && [ $(nf "$r" 6) -le 32767 ]" "the loud burst after it: up to full scale (RMS $(nf "$r" 2), a sine at 32767: 23170), not clipped ($(nf "$r" 5) flattened tops)"
+expect "near $(nf "$r" 3) 926 30 && python3 -c 'import sys; sys.exit(0 if $(nf "$r" 4) > $(nf "$r" 3) * 1.08 else 1)'" "Regain volume on: after the burst 2x (RMS $(nf "$r" 3)), rising again 4 s later (RMS $(nf "$r" 4))"
+nosan "$T"
+# c: Regain volume off: the gain only goes down
+T=$(newroot t24c)
+cp "$MEDIA/norm.mkv" "$T/root/media/"
+ini "$T" "AudioNormalize=1
+AudioNormalizeRecover=0"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/nr run "$T" "0:0" "560:quit" "" "$T/root/media/norm.mkv")
+r=$(normstat $T/nr.2ch 2 0)
+expect "[ $rc = 0 ] && near $(nf "$r" 1) 1852 40 && near $(nf "$r" 3) 926 30 && near $(nf "$r" 4) $(nf "$r" 3) 10" "Regain volume off: 4x, then 2x after the burst and it stays there (RMS $(nf "$r" 3), then $(nf "$r" 4))"
+# d: Max amplification 200 %; and 5000 in the file is held to 1000 (MPC-HC's range 100..1000)
+T=$(newroot t24d)
+cp "$MEDIA/norm.mkv" "$T/root/media/"
+ini "$T" "AudioNormalize=1
+AudioMaxNormFactor=200"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/m2 run "$T" "0:0" "300:quit" "" "$T/root/media/norm.mkv")
+r=$(normstat $T/m2.2ch 2 0)
+expect "[ $rc = 0 ] && near $(nf "$r" 1) 926 25 && grep -q '^AudioNormalize=1$' $T/root/mpc-hc.ini && grep -q '^AudioMaxNormFactor=200$' $T/root/mpc-hc.ini" "Max amplification 200 %: the quiet tone 2x (RMS $(nf "$r" 1)); read and saved back"
+ini "$T" "AudioMaxNormFactor=5000
+AudioNormalizeRecover=0"
+rc=$(run "$T" "0:0" "20:quit" "")
+expect "grep -q '^AudioMaxNormFactor=1000$' $T/root/mpc-hc.ini && grep -q '^AudioNormalizeRecover=0$' $T/root/mpc-hc.ini" "AudioMaxNormFactor=5000 held to 1000; AudioNormalizeRecover=0 kept"
+# e: surround: the 7.1 file's left side channel on the 8-channel port, one gain for all channels
+T=$(newroot t24e)
+cp "$MEDIA/norm71.mkv" "$T/root/media/"
+ini "$T" "AudioOutput=1
+AudioNormalize=1"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/s run "$T" "0:0" "330:quit" "" "$T/root/media/norm71.mkv")
+r=$(normstat $T/s.8ch 8 4)
+expect "[ $rc = 0 ] && [ -f $T/s.8ch ] && near $(nf "$r" 1) 1852 40 && near $(nf "$r" 2) 23170 400 && [ $(nf "$r" 5) = 0 ] && near $(nf "$r" 3) 926 30" "8-channel output: Ls 4x, the burst to full scale unclipped, then 2x ($r)"
+expect "python3 -c \"import sys; r = list(map(int, '\$(rms $T/s.8ch 8)'.split())); sys.exit(0 if max(r[:4] + r[5:]) < 50 else 1)\"" "the other seven channels stay silent"
+nosan "$T"
+# f: the page in each language (English, Spanish, Portuguese (Brazil), French, German): Options, Audio Switcher (7 down
+# the tree), R1 to Normalize, Cross: on (Max amplification and Regain volume enabled); R1, Right x2: 420 %; R1, Cross:
+# Regain off; OK. Then on again with a file playing: it applies at once.
+for L in 0 1 2 3 4; do
+	T=$(newroot t24f_$L)
+	ini "$T" "Language=$L"
+	P="20:cmd options"
+	f=30; for i in $(seq 1 7); do P="$P;$f:key down"; f=$((f + 3)); done
+	P="$P;60:key r1;66:key enter;72:key r1;75:key right;78:key right;84:key r1;90:key enter;100:key menu;120:quit"
+	rc=$(MPCPS5_HOST_I18N_MISSING=$T/missing.txt run "$T" "0:0" "$P" "58,96")
+	expect "[ $rc = 0 ] && grep -q '^AudioNormalize=1$' $T/root/mpc-hc.ini && grep -q '^AudioMaxNormFactor=420$' $T/root/mpc-hc.ini && grep -q '^AudioNormalizeRecover=0$' $T/root/mpc-hc.ini" "language $L: Normalize on, 420 %, Regain volume off, OK: saved"
+	expect "! grep -q 'Normalize\|amplification\|Regain' $T/missing.txt 2>/dev/null || [ $L = 0 ]" "language $L: the three texts translated"
+	nosan "$T"
+done
+T=$(newroot t24g)
+cp "$MEDIA/norm.mkv" "$T/root/media/"
+P="10:cmd options"
+f=14; for i in $(seq 1 7); do P="$P;$f:key down"; f=$((f + 3)); done
+P="$P;36:key r1;40:key enter;44:key menu;300:quit"
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/live run "$T" "0:0" "$P" "" "$T/root/media/norm.mkv")
+# the first 0.2 s of sound as it is; the last 0.25 s before the burst 4x
+expect "[ $rc = 0 ] && python3 -c \"
+import array, sys
+a = array.array('h'); a.frombytes(open('$T/live.2ch', 'rb').read())
+x = a[0::2]
+s = [i for i, v in enumerate(x) if v != 0][0]
+b0 = [i for i, v in enumerate(x) if abs(v) > 8000][0]
+rms = lambda q: (sum(v * v for v in q) / max(1, len(q))) ** 0.5
+sys.exit(0 if abs(rms(x[s + 2400:s + 12000]) - 463) < 15 and abs(rms(x[b0 - 16800:b0 - 4800]) - 1852) < 40 else 1)\"" "turned on while a file plays: at once (as it is first, 4x before the burst)"
+nosan "$T"
 fi
 
 echo

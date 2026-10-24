@@ -507,6 +507,14 @@ struct Player::Impl
 	std::atomic<int> volume{100};
 	std::atomic<bool> mute{false};
 	std::atomic<double> amplify{1.0};
+	// Options > Audio Switcher > Normalize (MPC-HC's CAudioSwitcherFilter): set by the UI, read by the audio thread
+	std::atomic<bool> norm_on{false};
+	std::atomic<double> norm_max{4.0}; // Max amplification (400 % = 4.0)
+	std::atomic<bool> norm_regain{true}; // Regain volume
+	// the audio thread's own: the gain now (< 0: start again at the max at the next block), the setting last seen
+	double norm_factor = -1;
+	bool norm_was_on = false;
+	std::vector<int16_t> norm_buf;
 
 	// subtitles
 	mutable std::mutex smu;
@@ -1229,6 +1237,7 @@ struct Player::Impl
 		av_channel_layout_copy(&ag_layout, &f->ch_layout);
 		ag_tempo = tempo;
 		ag_surround = surr;
+		norm_factor = -1; // another format: as MPC-HC's new output media type
 		if (out_ch != ag_out_ch)
 			OrbisLog("[player] sound: %d channels -> %s", f->ch_layout.nb_channels,
 				out_ch == 8 ? "7.1 (8-channel output)" : out_ch == 6 ? "5.1 (8-channel output)" : "stereo");
@@ -1244,10 +1253,60 @@ struct Player::Impl
 		return v * v * amplify; // CPlayerToolBar::GetVolume: 40 dB over the slider, log10 -> (v/100)^2
 	}
 
+	// MPC-HC's Normalize (CAudioSwitcherFilter::Transform, MPC-HC 1.7.13), on each block the audio graph gives
+	// (s16, all channels interleaved, one gain for all of them): the block's peak first; when the gain would take that
+	// peak past full scale it drops at once to what puts the peak at full scale (so nothing clips, with no look-ahead
+	// beyond the block itself); else, with Regain volume, it rises by 6 % per second of sound while the peak stays under
+	// 75 % of full scale; never above Max amplification. It starts at the max (a file, a seek, a track or format
+	// change: MPC-HC's flush / new segment / new media type). Boost and the volume come after it, at the output.
+	// Returns where the result is: `s` itself when Normalize is off.
+	const int16_t* Normalize(const int16_t* s, int n, int ch, double dur)
+	{
+		const bool on = norm_on.load(std::memory_order_relaxed);
+		if (on && !norm_was_on)
+			norm_factor = -1; // turned on: from the max (MPC-HC's SetNormalizeBoost)
+		norm_was_on = on;
+		if (!on || n <= 0)
+			return s;
+		const double max_factor = norm_max.load(std::memory_order_relaxed);
+		if (norm_factor < 0)
+			norm_factor = max_factor;
+		const size_t count = size_t(n) * ch;
+		int peak = 0;
+		for (size_t i = 0; i < count; i++)
+		{
+			const int a = s[i] < 0 ? -int(s[i]) : int(s[i]);
+			if (a > peak)
+				peak = a;
+		}
+		const double sample_max = peak / 32767.0;
+		if (norm_factor * sample_max > 1.0) // MPC-HC: m_normalizeFactor > 1.0 / sample_max
+			norm_factor = 1.0 / sample_max;
+		else if (norm_regain.load(std::memory_order_relaxed) && sample_max * norm_factor < 0.75)
+			norm_factor += 0.06 * dur; // NORMALIZATION_REGAIN_STEP (+6 %/s), NORMALIZATION_REGAIN_THRESHOLD (0.75)
+		if (norm_factor > max_factor)
+			norm_factor = max_factor;
+		// 16.16, rounded down: the peak times it stays within 32767; held to the 16-bit range all the same
+		const int64_t g = int64_t(norm_factor * 65536.0);
+		if (g == 65536)
+			return s;
+		if (norm_buf.size() < count)
+			norm_buf.resize(count); // grows to the largest block once, then reused
+		int16_t* d = norm_buf.data();
+		for (size_t i = 0; i < count; i++)
+		{
+			const int64_t v = (int64_t(s[i]) * g) >> 16;
+			d[i] = int16_t(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+		}
+		return d;
+	}
+
 	// pushes s16 (ag_out_ch channels), waiting for room; false when the serial changed or the player stops
-	bool PushAudio(const int16_t* s, int n, int my_serial, double end_pts)
+	// dur: the block's length in the stream's time (Normalize's regain step)
+	bool PushAudio(const int16_t* s, int n, int my_serial, double end_pts, double dur)
 	{
 		int ch = ag_out_ch;
+		s = Normalize(s, n, ch, dur);
 		if (ch == 8)
 		{
 			// FFmpeg's 7.1 (FL FR FC LFE BL BR SL SR) -> the console's (L R C LFE Ls Rs Lb Rb)
@@ -1282,6 +1341,7 @@ struct Player::Impl
 		int dec_serial = -1;
 		double out_pos = 0; // stream time at the end of what has been pushed
 		bool have_pos = false;
+		norm_factor = -1; // Normalize starts again at the max (a file, another track)
 		while (!quit && !a_stop)
 		{
 			QPacket qp;
@@ -1301,6 +1361,7 @@ struct Player::Impl
 				avfilter_graph_free(&agraph);
 				dec_serial = qp.serial;
 				have_pos = false;
+				norm_factor = -1; // a seek: as MPC-HC's flush / new segment
 			}
 			const int sr = avcodec_send_packet(adec, qp.pkt);
 			av_packet_free(&qp.pkt);
@@ -1343,8 +1404,10 @@ struct Player::Impl
 				}
 				while (av_buffersink_get_frame(asink, out) >= 0)
 				{
-					out_pos += out->nb_samples / double(ps5audio::kRate) * tempo;
-					const bool ok = PushAudio(reinterpret_cast<const int16_t*>(out->data[0]), out->nb_samples, dec_serial, out_pos);
+					const double dur = out->nb_samples / double(ps5audio::kRate) * tempo;
+					out_pos += dur;
+					const bool ok =
+						PushAudio(reinterpret_cast<const int16_t*>(out->data[0]), out->nb_samples, dec_serial, out_pos, dur);
 					av_frame_unref(out);
 					if (!ok)
 						break;
@@ -1741,6 +1804,13 @@ void Player::SetAmplify(double gain)
 {
 	m->amplify = gain;
 	ps5audio::SetGain(m->Gain());
+}
+
+void Player::SetNormalize(bool on, int max_percent, bool regain)
+{
+	m->norm_max = std::max(100, std::min(1000, max_percent)) / 100.0;
+	m->norm_regain = regain;
+	m->norm_on = on; // the audio thread takes it at its next block
 }
 
 void Player::SetRate(double rate)

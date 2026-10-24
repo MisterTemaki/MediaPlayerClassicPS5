@@ -167,6 +167,8 @@ class GroupBox : public Control
 {
 public:
 	std::string text;
+	// a check box as the title (MPC-HC's Audio Switcher: "Normalize" on the group's top line): the line leaves room for it
+	const CheckBox* title_check = nullptr;
 	GroupBox() { tab_stop = false; }
 	void Paint(CDC& dc, bool focused, bool hot) override;
 };

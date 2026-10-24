@@ -1618,6 +1618,17 @@ void ShowOptionsDialog(std::function<void()> applied)
 	// ---- Audio Switcher (IDD_PPAGEAUDIOSWITCHER) ----
 	p = d->NewPage("Audio Switcher");
 	d->Check(p, "Enable built-in audio switcher filter", 5, 5, 286, 8, true, false);
+	// Normalize, Max amplification, Regain volume: MPC-HC's group (the last two only with Normalize on)
+	GroupBox* ngroup = d->Group(p, "", 5, 20, 286, 25);
+	CheckBox* norm = d->Check(p, "Normalize", 15, 21, 120, 8, s.audio_normalize); // 68 in MPC-HC: German is longer
+	ngroup->title_check = norm;
+	Static* nmax_label = d->Text(p, "Max amplification:", 12, 31, 110, 8);
+	NumberBox* nmax = d->Number(p, 124, 29, 50, 13, s.audio_max_norm, 100, 1000, 10, " %");
+	CheckBox* regain = d->Check(p, "Regain volume", 177, 31, 108, 8, s.audio_norm_regain);
+	norm->on_change = [norm, nmax_label, nmax, regain] {
+		nmax_label->enabled = nmax->enabled = regain->enabled = norm->checked;
+	};
+	norm->on_change();
 	d->Text(p, "Boost:", 5, 49, 55, 8);
 	Slider* boost = d->P(p, new Slider, 60, 46, 110, 15);
 	boost->max = 300;
@@ -1627,7 +1638,10 @@ void ShowOptionsDialog(std::function<void()> applied)
 			   "Renderer is set to surround.", 5, 65, 286, 16);
 	d->Text(p, "Audio time shift (ms):", 5, 86, 115, 8);
 	NumberBox* ashift = d->Number(p, 124, 83, 60, 13, s.audio_delay_ms, -10000, 10000, 10);
-	d->apply_fns.push_back([&s, boost, ashift] {
+	d->apply_fns.push_back([&s, boost, ashift, norm, nmax, regain] {
+		s.audio_normalize = norm->checked;
+		s.audio_max_norm = std::max(100, std::min(1000, nmax->value));
+		s.audio_norm_regain = regain->checked;
 		s.audio_boost = boost->pos;
 		s.audio_delay_ms = ashift->value;
 	});
