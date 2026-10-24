@@ -1643,10 +1643,26 @@ Player::Player() : m(new Impl)
 }
 Player::~Player() = default;
 
+// A new Impl for the next file, with the audio settings of the one before: the audio thread fills the ~340 ms ring
+// before the app sees the file playing (and calls the setters again), so a fresh default here would play that start
+// without Normalize (then jump to its level) or in stereo (then drop it when the 8-channel graph is made).
+void Player::Renew()
+{
+	std::unique_ptr<Impl> n(new Impl);
+	n->norm_on = m->norm_on.load();
+	n->norm_max = m->norm_max.load();
+	n->norm_regain = m->norm_regain.load();
+	n->surround = m->surround.load();
+	n->volume = m->volume.load();
+	n->mute = m->mute.load();
+	n->amplify = m->amplify.load();
+	m = std::move(n);
+}
+
 void Player::Open(const std::string& url, double start_s, bool start_paused)
 {
 	Close();
-	m.reset(new Impl);
+	Renew();
 	m->url = url;
 	m->start_at = start_s;
 	m->start_paused = start_paused;
@@ -1660,7 +1676,7 @@ void Player::Close()
 {
 	if (m->state != PlayState::Closed)
 		OrbisLog("[player] closed %s", m->url.c_str());
-	m.reset(new Impl);
+	Renew();
 }
 
 PlayState Player::State() const

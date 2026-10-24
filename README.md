@@ -14,7 +14,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.3.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 321 host tests
+> **Status (1.3.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 324 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
@@ -32,6 +32,8 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
 version". **Options > Audio Switcher** now has MPC-HC's **Normalize**, **Max amplification** and **Regain volume**:
 quiet films are raised (up to the max amplification, 400 % by default) without the loud parts clipping, and with
 Regain volume the level comes back up after a loud passage. Off by default, as in MPC-HC. See [Audio](#audio).
+Also fixed: with Options > Output > Audio Renderer on surround, the first ~0.3 s of each 5.1/7.1 film went to the
+stereo output and most of it was dropped when the 8-channel output took over; the film now starts on it.
 
 **1.3:** what Sulfurico-One64 asked for ([MediaPlayerClassicPS5#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1)):
 - **The subtitle font**: Options > Subtitles > Default Style's Font lists Selawik (Segoe UI), Roboto and every
@@ -289,9 +291,12 @@ Previous/Next goes by chapter, then by playlist item, then to the neighbouring f
   block's loudest sample would go past full scale, the gain drops at once, for that block already, to what puts it
   exactly at full scale -- so nothing clips, and there is no look-ahead (no added delay, A/V sync as before). With
   **Regain volume** (on by default) the gain rises again by 6 % per second while the sound stays below 75 % of full
-  scale; without it the gain only goes down. It starts again at the max for each file, seek, track or format change.
-  Changing it while a file plays applies at once. **Boost** comes after it, as in MPC-HC (normalized x boost: with a
-  boost the loudest parts are held at full scale, i.e. clip), then the volume.
+  scale; without it the gain only goes down. It starts again at the max for each file, seek, track or format change,
+  and is in effect from a file's first block. It is applied as the sound is queued for the console, so a change made
+  while a file plays is heard after what is already queued (up to ~340 ms). **Boost** and the volume come after it,
+  as one gain applied as the sound leaves (the volume curve x the boost, at most 4x), with the result held at the
+  16-bit limits: with a boost on normalized sound the loudest parts clip. (MPC-HC differs slightly: its audio switcher
+  clips normalized x boost first, then its renderer applies the volume.)
 - Playback rate (Play > Increase/Decrease Rate, 0.125x-8x) keeps the pitch (FFmpeg's atempo).
 
 ## Hardware decoding, HDR and surround

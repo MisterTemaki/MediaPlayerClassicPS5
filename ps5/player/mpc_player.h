@@ -122,7 +122,7 @@ public:
 	void SetVolume(int percent); // 0..100, MPC-HC's slider (a log curve, as CPlayerToolBar::GetVolume)
 	void SetMute(bool mute);
 	void SetAmplify(double gain); // the audio switcher's boost (1.0 = none)
-	// the audio switcher's Normalize (MPC-HC's): Max amplification in percent (100..1000), Regain volume; at once
+	// the audio switcher's Normalize (MPC-HC's): Max amplification in percent (100..1000), Regain volume; from the next block queued
 	void SetNormalize(bool on, int max_percent, bool regain);
 	// HDR10 / HLG pictures on the SDR screen (mpc_tonemap.h): 0 off, 1 BT.2390, 2 Hable, 3 Reinhard; white in nits
 	void SetToneMapping(int mode, int white_nits);
@@ -175,6 +175,7 @@ public:
 
 private:
 	std::unique_ptr<Impl> m;
+	void Renew(); // a new Impl that keeps the audio settings
 };
 
 // FFmpeg's version, for the About box

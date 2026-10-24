@@ -984,6 +984,14 @@ print(rms(x[b0 - 3 * R // 2:b0 - R // 2]), rms(x[b0 + R // 10:b1 - R // 10]), rm
       rms(x[b1 + 4 * R:b1 + 9 * R // 2]), sum(1 for i in range(1, len(x)) if abs(x[i]) >= 32767 and abs(x[i - 1]) >= 32767),
       max(x), min(x))"; }
 nf() { echo "$1" | cut -d' ' -f$2; }
+# startrms dump channels channel -> the RMS 20..350 ms after the first sound (the ring's ~340 ms filled at the start)
+startrms() { python3 -c "
+import array
+a = array.array('h'); a.frombytes(open('$1', 'rb').read())
+x = a[$3::$2]
+s = [i for i, v in enumerate(x) if v != 0][0]
+q = x[s + 960:s + 16800]
+print(round((sum(v * v for v in q) / max(1, len(q))) ** 0.5))"; }
 # a: Normalize off (the default): the sound as it is
 T=$(newroot t24)
 cp "$MEDIA/norm.mkv" "$T/root/media/"
@@ -999,6 +1007,8 @@ ini "$T" "AudioNormalize=1"
 rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/on run "$T" "0:0" "560:quit" "" "$T/root/media/norm.mkv")
 r=$(normstat $T/on.2ch 2 0)
 expect "[ $rc = 0 ] && near $(nf "$r" 1) 1852 40" "Normalize on: the quiet tone raised to the max amplification, 4x (RMS $(nf "$r" 1), 4 x 463 = 1852)"
+r0=$(startrms $T/on.2ch 2 0)
+expect "near $r0 1852 40" "... from the first block of the file: 20..350 ms after the sound starts already 4x (RMS $r0)"
 expect "near $(nf "$r" 2) 23170 400 && [ $(nf "$r" 5) = 0 ] && [ $(nf "$r" 6) -le 32767 ]" "the loud burst after it: up to full scale (RMS $(nf "$r" 2), a sine at 32767: 23170), not clipped ($(nf "$r" 5) flattened tops)"
 expect "near $(nf "$r" 3) 926 30 && python3 -c 'import sys; sys.exit(0 if $(nf "$r" 4) > $(nf "$r" 3) * 1.08 else 1)'" "Regain volume on: after the burst 2x (RMS $(nf "$r" 3)), rising again 4 s later (RMS $(nf "$r" 4))"
 nosan "$T"
@@ -1017,7 +1027,8 @@ ini "$T" "AudioNormalize=1
 AudioMaxNormFactor=200"
 rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/m2 run "$T" "0:0" "300:quit" "" "$T/root/media/norm.mkv")
 r=$(normstat $T/m2.2ch 2 0)
-expect "[ $rc = 0 ] && near $(nf "$r" 1) 926 25 && grep -q '^AudioNormalize=1$' $T/root/mpc-hc.ini && grep -q '^AudioMaxNormFactor=200$' $T/root/mpc-hc.ini" "Max amplification 200 %: the quiet tone 2x (RMS $(nf "$r" 1)); read and saved back"
+r0=$(startrms $T/m2.2ch 2 0)
+expect "[ $rc = 0 ] && near $(nf "$r" 1) 926 25 && near $r0 926 25 && grep -q '^AudioNormalize=1$' $T/root/mpc-hc.ini && grep -q '^AudioMaxNormFactor=200$' $T/root/mpc-hc.ini" "Max amplification 200 %: the quiet tone 2x from the start (RMS $r0, then $(nf "$r" 1)); read and saved back"
 ini "$T" "AudioMaxNormFactor=5000
 AudioNormalizeRecover=0"
 rc=$(run "$T" "0:0" "20:quit" "")
@@ -1029,6 +1040,9 @@ ini "$T" "AudioOutput=1
 AudioNormalize=1"
 rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/s run "$T" "0:0" "330:quit" "" "$T/root/media/norm71.mkv")
 r=$(normstat $T/s.8ch 8 4)
+r0=$(startrms $T/s.8ch 8 4)
+expect "near $r0 1852 40" "8-channel output: 4x from the first block too (RMS $r0)"
+expect "[ ! -f $T/s.2ch ] || python3 -c \"import array, sys; a = array.array('h'); a.frombytes(open('$T/s.2ch', 'rb').read()); sys.exit(0 if not any(a) else 1)\"" "the film's start not played on the stereo port first (Surround kept for the new file, nothing dropped at the switch)"
 expect "[ $rc = 0 ] && [ -f $T/s.8ch ] && near $(nf "$r" 1) 1852 40 && near $(nf "$r" 2) 23170 400 && [ $(nf "$r" 5) = 0 ] && near $(nf "$r" 3) 926 30" "8-channel output: Ls 4x, the burst to full scale unclipped, then 2x ($r)"
 expect "python3 -c \"import sys; r = list(map(int, '\$(rms $T/s.8ch 8)'.split())); sys.exit(0 if max(r[:4] + r[5:]) < 50 else 1)\"" "the other seven channels stay silent"
 nosan "$T"
@@ -1048,11 +1062,13 @@ for L in 0 1 2 3 4; do
 done
 T=$(newroot t24g)
 cp "$MEDIA/norm.mkv" "$T/root/media/"
-P="10:cmd options"
-f=14; for i in $(seq 1 7); do P="$P;$f:key down"; f=$((f + 3)); done
-P="$P;36:key r1;40:key enter;44:key menu;300:quit"
+P="5:cmd options"
+f=8; for i in $(seq 1 7); do P="$P;$f:key down"; f=$((f + 3)); done
+P="$P;29:key r1;32:key enter;35:key menu;300:quit"
 rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/live run "$T" "0:0" "$P" "" "$T/root/media/norm.mkv")
-# the first 0.2 s of sound as it is; the last 0.25 s before the burst 4x
+# in 50 ms windows up to the burst: as it is (463) for at least 0.2 s, then 4x (1852) from one window on (what was
+# already queued, up to ~340 ms, plays as it was), at least 0.1 s of it before the burst, nothing in between but the
+# window where it changes
 expect "[ $rc = 0 ] && python3 -c \"
 import array, sys
 a = array.array('h'); a.frombytes(open('$T/live.2ch', 'rb').read())
@@ -1060,7 +1076,10 @@ x = a[0::2]
 s = [i for i, v in enumerate(x) if v != 0][0]
 b0 = [i for i, v in enumerate(x) if abs(v) > 8000][0]
 rms = lambda q: (sum(v * v for v in q) / max(1, len(q))) ** 0.5
-sys.exit(0 if abs(rms(x[s + 2400:s + 12000]) - 463) < 15 and abs(rms(x[b0 - 16800:b0 - 4800]) - 1852) < 40 else 1)\"" "turned on while a file plays: at once (as it is first, 4x before the burst)"
+w = [rms(x[i:i + 2400]) for i in range(s, b0 - 7200, 2400)]  # not the last block: the burst's lowers its gain
+k = next(i for i, r in enumerate(w) if r > 1000)
+ok = k >= 4 and all(abs(r - 463) < 15 for r in w[:k]) and all(abs(r - 1852) < 40 for r in w[k + 1:]) and len(w) - k - 1 >= 2
+print([round(r) for r in w]); sys.exit(0 if ok else 1)\" >$T/live.txt" "turned on while a file plays: from then on, after what was queued (as it is first, 4x before the burst)"
 nosan "$T"
 fi
 
