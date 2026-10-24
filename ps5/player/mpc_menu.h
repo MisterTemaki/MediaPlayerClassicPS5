@@ -36,6 +36,14 @@ struct MenuItem
 		m.accel = accel.empty() ? accel : T(accel);
 		return m;
 	}
+	// a text already in the interface's language (made from a translated format): not looked up again
+	static MenuItem Shown(const std::string& shown, int id)
+	{
+		MenuItem m;
+		m.text = shown;
+		m.id = id;
+		return m;
+	}
 	static MenuItem Popup(const std::string& t, std::vector<MenuItem> items)
 	{
 		MenuItem m;

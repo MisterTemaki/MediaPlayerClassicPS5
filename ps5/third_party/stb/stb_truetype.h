@@ -1268,7 +1268,12 @@ static stbtt__buf stbtt__cff_index_get(stbtt__buf b, int i)
    stbtt__buf_skip(&b, i*offsize);
    start = stbtt__buf_get(&b, offsize);
    end = stbtt__buf_get(&b, offsize);
-   return stbtt__buf_range(&b, 2+(count+1)*offsize+start, end - start);
+   {
+      // Media Player Classic PS5: in 64 bits (a damaged font's offsets overflowed an int)
+      long long o = 2 + (long long)(count+1)*offsize + (stbtt_uint32)start, n = (long long)(stbtt_uint32)end - (stbtt_uint32)start;
+      if (o > b.size || n < 0 || n > b.size) return stbtt__new_buf(NULL, 0);
+      return stbtt__buf_range(&b, (int)o, (int)n);
+   }
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1312,6 +1317,21 @@ static stbtt_uint32 stbtt__find_table(stbtt_uint8 *data, stbtt_uint32 fontstart,
       stbtt_uint32 loc = tabledir + 16*i;
       if (stbtt_tag(data+loc+0, tag))
          return ttULONG(data+loc+8);
+   }
+   return 0;
+}
+
+// Media Player Classic PS5: a table's length from the table directory (0 when it isn't there), so the CFF buffer
+// ends where the table ends instead of 512 MB further on (fonts from the user's fonts folder may be damaged)
+static stbtt_uint32 stbtt__find_table_length(stbtt_uint8 *data, stbtt_uint32 fontstart, const char *tag)
+{
+   stbtt_int32 num_tables = ttUSHORT(data+fontstart+4);
+   stbtt_uint32 tabledir = fontstart + 12;
+   stbtt_int32 i;
+   for (i=0; i < num_tables; ++i) {
+      stbtt_uint32 loc = tabledir + 16*i;
+      if (stbtt_tag(data+loc+0, tag))
+         return ttULONG(data+loc+12);
    }
    return 0;
 }
@@ -1415,8 +1435,8 @@ static int stbtt_InitFont_internal(stbtt_fontinfo *info, unsigned char *data, in
       info->fontdicts = stbtt__new_buf(NULL, 0);
       info->fdselect = stbtt__new_buf(NULL, 0);
 
-      // @TODO this should use size from table (not 512MB)
-      info->cff = stbtt__new_buf(data+cff, 512*1024*1024);
+      // Media Player Classic PS5: the size from the table (was 512MB, a @TODO upstream)
+      info->cff = stbtt__new_buf(data+cff, stbtt__find_table_length(data, fontstart, "CFF "));
       b = info->cff;
 
       // read the header

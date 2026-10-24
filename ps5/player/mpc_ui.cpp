@@ -119,6 +119,14 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 	}
 	// the right stick: the wheel
 	const double ry = Axis(p.ry);
+	// a push of the stick: its first step is a press, the next ones (still pushed that way) repeats
+	const int wdir = ry < 0 ? 1 : ry > 0 ? -1 : 0;
+	if (wdir != wheel_dir_)
+	{
+		wheel_dir_ = wdir;
+		wheel_sent_ = false;
+		wheel_acc_ = 0;
+	}
 	if (ry != 0)
 	{
 		wheel_acc_ += -ry * dt * 12;
@@ -132,6 +140,8 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 		e.x = int(cx_);
 		e.y = int(cy_);
 		e.wheel = wheel_acc_ > 0 ? 1 : -1;
+		e.repeat = wheel_sent_;
+		wheel_sent_ = true;
 		wheel_acc_ -= e.wheel;
 		out.push_back(e);
 	}

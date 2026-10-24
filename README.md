@@ -14,11 +14,12 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 254 host tests
+> **Status (1.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 280 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
-> doesn't (with `debug_logs=1` in `/data/mpcps5/mpc-hc.ini` the log goes to `/data/mpcps5/logs/boot.log`).
+> doesn't (with **View > Options > Miscellaneous > Debug logs** on -- `debug_logs=1` in `/data/mpcps5/mpc-hc.ini` -- the
+> log goes to `/data/mpcps5/logs/boot.log`).
 
 **1.1:** what VLC for PS5 ([ZiZc3/VLC](https://github.com/ZiZc3/VLC)) showed can be done on the console:
 **hardware decoding** of H.264 and HEVC (8 and 10-bit, up to 4K) on the PS5's video decoder, **HDR10 and HLG
@@ -31,7 +32,10 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
   `.ttf`/`.otf`/`.ttc` in `/data/mpcps5/fonts` by the font's own name; SRT, WebVTT, MicroDVD and the other text formats
   are drawn in the one chosen (ASS/SSA keep their own styles, as in MPC-HC). The folder is read when Options opens, so
   a font copied in while the app runs is there without a restart. Bold uses the family's bold file when the folder has
-  one, else the letters are thickened (a synthetic bold); a character the font hasn't got still comes from the others.
+  one (the face marked bold, the weight nearest 700), else the letters are thickened (a synthetic bold); a character
+  the font hasn't got still comes from the others. Every file is checked before it is used: one that isn't a whole,
+  readable font (a copy cut off half way, a damaged file) is left out and the log says why, and it is read again
+  once the file changes (copied again).
 - **More Default Style options**, as MPC-HC's page: the text and outline colours, the shadow, **Opaque box** (a box
   behind each line, in the outline colour, with its opacity), and a preview; the bottom margin now does something.
   The defaults are MPC-HC's look, as before.
@@ -39,6 +43,9 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
   jumps, chapters, volume, full screen, Go To, the menus, **subtitle delay -/+**, **next subtitle track**, **next
   audio track**, audio delay -/+, statistics... -- with MPC-HC's OSD message ("Subtitle delay: 200 ms", "Audio:
   English..."); Default puts back the mapping below. See [Controls](#controls).
+- **Debug logs** in View > Options > Miscellaneous (off by default, as before; `debug_logs` in `mpc-hc.ini`), as the
+  emulator ports have it: turned on or off at once, no restart (the first time in a run it starts a new `boot.log`,
+  the one before kept as `boot.prev.log`).
 - Options > Subtitles' **Delay interval** is now the step of the subtitle delay (Play > Subtitle Track and the keys;
   100 ms by default), as in MPC-HC; the delay itself is in "Current delay" beside it.
 
@@ -187,8 +194,9 @@ button doing each command, and each action shows MPC-HC's OSD message. For examp
 instead of the 20 s jumps. What stays fixed: **Options** always opens the menu bar, the pointer's Cross / Square
 clicks, and the buttons in menus, dialogs and the keyboard. The combinations work while their buttons keep their
 default actions: L2 or R2 held with Left / Right jumps 20 s / 1 s, R3 held with Square shows the statistics; an L2,
-R2 or R3 given another action does that action instead. Holding a button repeats the jumps, volume, chapters and
-delays only.
+R2 or R3 given another action does that action instead. Held down, Cross, the D-pad, L1/R1, L2/R2 and the right
+stick repeat their action when it is a jump, the volume, a chapter or a delay (L2/R2 with their default 20 s jumps
+don't repeat, as before; as subtitle delay - / + they do); Circle, Triangle, Square, L3 and R3 never repeat.
 
 The menus work as Windows' keyboard menus: Up/Down choose, Right opens a submenu (or the next menu bar menu),
 Left goes back, Cross runs the command. The playlist, when it has the focus (a click on it): Up/Down, Cross
@@ -372,7 +380,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 /data/mpcps5/media           a place for media on the console's storage
 /data/mpcps5/fonts           subtitle fonts: the Default Style's font, ASS/SSA's fonts, the characters others lack
 /data/mpcps5/screenshots     File > Save Image
-/data/mpcps5/logs/boot.log   the log, only with debug_logs=1 in mpc-hc.ini (boot.prev.log: the run before;
+/data/mpcps5/logs/boot.log   the log, only with Options > Miscellaneous > Debug logs on (debug_logs=1 in mpc-hc.ini;
+                             boot.prev.log: the run before;
                              installer.log, helper.log)
 /data/mpcps5/update-check.txt  when the app last looked for an update
 ```
@@ -402,7 +411,8 @@ The layout is the emulator ports': `eboot.bin` is the player, a native title (`p
 folder inside (the eboot and the backgrounds compressed: the payload is about 12 MB). The host build runs
 the same code on Linux (`host/sce_host.cpp` fakes the PS5 calls; `MPCPS5_HOST_SCRIPT` and
 `MPCPS5_HOST_PAD` drive it, flips are saved as PPM). `tests/fuzz/fuzz_update.cpp` is a libFuzzer harness for the
-updater's parsers (GitHub's JSON, the release zip and its manifest); the command is at its top.
+updater's parsers (GitHub's JSON, the release zip and its manifest), `tests/fuzz/fuzz_font.cpp` one for the fonts
+folder's check (`player/mpc_sfnt.cpp`) with stb_truetype behind it; the commands are at their tops.
 
 Source map:
 
@@ -445,6 +455,7 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
 - **Monocypher** 4.0.2 -- Ed25519 for the release signatures; BSD-2-Clause or CC0; Loup Vaillant and contributors.
   <https://github.com/LoupVaillant/Monocypher>
 - **Selawik** (SIL OFL 1.1, Microsoft) -- the stand-in for Segoe UI; **Roboto** (Apache-2.0).
-- **NanoSVG** (zlib licence), **stb_truetype / stb_image** (public domain / MIT).
+- **NanoSVG** (zlib licence), **stb_truetype / stb_image** (public domain / MIT; stb_truetype with two small fixes for
+  damaged fonts, marked "Media Player Classic PS5" in the file).
 - **PS5SX2** -- the PS5 layer (video out, sound, pad, crash log, installer, helper, native app tooling); MIT.
 - **ps5-payload-dev SDK** -- John Tornblom.

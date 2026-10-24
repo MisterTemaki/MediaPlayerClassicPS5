@@ -25,6 +25,7 @@ std::mutex s_log_mutex;
 FILE* s_log = nullptr;
 bool s_enabled = true; // the "Debug logs" setting
 std::string s_name;    // the log OrbisLogOpen opened (or would have), to open again when logs are turned on
+bool s_rotated = false; // this run's log file was started (the one before kept as <name>.prev.log)
 
 // The "Debug logs" setting, read here (not through mpc::Settings: the installer and the helper have none): off unless
 // mpc-hc.ini says debug_logs=1. The host tests turn the default on with MPCPS5_LOGS_DEFAULT=1 (they read boot.log).
@@ -149,6 +150,7 @@ void OrbisLogOpen(const char* name)
 	const std::string prev = dir + "/" + name + ".prev.log";
 	rename(cur.c_str(), prev.c_str()); // keep the run before, like PS5SX2's logs
 	s_log = fopen(cur.c_str(), "w");
+	s_rotated = s_log != nullptr;
 	if (s_log)
 	{
 		for (const std::string& line : EarlyLines())
@@ -264,10 +266,17 @@ void OrbisLogSetEnabled(bool on)
 		return;
 	}
 	s_enabled = true;
-	// the same file again, added to (this run's lines before the switch stay in it)
+	// this run's file again, added to (its lines before the switch stay in it); the first one of the run (logs off at the
+	// start, turned on in Options) starts a new file, the last run's kept as <name>.prev.log
 	const std::string dir = OrbisDir("logs");
 	if (!s_name.empty() && OrbisIsDir(dir))
-		s_log = fopen((dir + "/" + s_name + ".log").c_str(), "a");
+	{
+		const std::string cur = dir + "/" + s_name + ".log";
+		if (!s_rotated)
+			rename(cur.c_str(), (dir + "/" + s_name + ".prev.log").c_str());
+		s_log = fopen(cur.c_str(), s_rotated ? "a" : "w");
+		s_rotated = s_rotated || s_log != nullptr;
+	}
 	printf("[mpc-ps5 %10.3f] [log] debug logs turned on\n", t);
 	fflush(stdout);
 	if (s_log)

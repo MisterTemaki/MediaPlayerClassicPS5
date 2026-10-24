@@ -5,17 +5,24 @@
 #include "mpc_font.h"
 
 #include "mpc_res.h"
+#include "mpc_sfnt.h"
 
+// stb_truetype's asserts abort on a damaged font (a CFF index, an unknown cmap format): the user's fonts are checked
+// (mpc_sfnt.h) and read through bounded buffers, so they are off, as in a release build (tests/fuzz/fuzz_font.cpp
+// runs this configuration under ASan)
+#define STBTT_assert(x) ((void)0)
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
 #include "stb_truetype.h"
 
 #include <dirent.h>
+#include <sys/stat.h>
 
 #include "OrbisPaths.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -30,69 +37,88 @@ namespace
 struct Face
 {
 	stbtt_fontinfo info;
-	std::shared_ptr<std::vector<unsigned char>> owned; // a user font read from disk (shared by a collection's faces)
+	// a user font read from disk (shared by a collection's faces), followed by sfnt::kPad zeros
+	std::shared_ptr<std::vector<unsigned char>> owned;
 	int win_ascent = 0, win_descent = 0, units = 2048;
 	bool ok = false;
-	// a font of the fonts folder: its file ("name.ttc#1" for a collection's second face) and names
-	std::string file, family, style;
+	// a font of the fonts folder: its file ("name.ttc#1" for a collection's second face), the file's own name, size
+	// and time (a file replaced or copied again is read again), its names and weight
+	std::string file, base, family, style;
+	long long fsize = 0, mtime = 0;
+	bool gone = false; // the file was removed or replaced: not listed, not used for new text
 	bool is_bold = false, is_italic = false;
+	bool sel_bold = false; // OS/2 fsSelection's BOLD bit (or macStyle's)
+	int weight = 400; // OS/2 usWeightClass
 
+	// data must stay valid; size: the file's bytes (the check reads nothing past them)
 	bool Init(const unsigned char* data, size_t size, int index = 0)
 	{
-		const int off = stbtt_GetFontOffsetForIndex(data, index);
-		if (off < 0 || !stbtt_InitFont(&info, data, off))
+		uint32_t off = 0;
+		std::string why;
+		if (!sfnt::CheckFace(data, size, index, &off, &why))
+		{
+			OrbisLog("[fonts] %s: face %d refused: %s", file.empty() ? "(built in)" : file.c_str(), index, why.c_str());
 			return false;
-		(void)size;
+		}
+		if (!stbtt_InitFont(&info, data, int(off)))
+			return false;
 		// Windows' text cell: OS/2 usWinAscent + usWinDescent
 		int a = 0, d = 0, g = 0;
 		stbtt_GetFontVMetrics(&info, &a, &d, &g);
 		win_ascent = a;
 		win_descent = -d;
-		const stbtt_uint32 os2 = stbtt__find_table(const_cast<unsigned char*>(data), off, "OS/2");
-		if (os2)
+		uint32_t os2 = 0, os2_len = 0, head = 0, head_len = 0;
+		const bool has_os2 = sfnt::FindTable(data, size, off, "OS/2", &os2, &os2_len) && os2_len >= 78;
+		if (has_os2)
 		{
 			win_ascent = (data[os2 + 74] << 8) | data[os2 + 75];
 			win_descent = (data[os2 + 76] << 8) | data[os2 + 77];
 			// usWeightClass, fsSelection (bit 0 italic, bit 5 bold)
-			const int weight = (data[os2 + 4] << 8) | data[os2 + 5];
+			weight = (data[os2 + 4] << 8) | data[os2 + 5];
 			const int sel = (data[os2 + 62] << 8) | data[os2 + 63];
-			is_bold = weight >= 600 || (sel & 0x20);
+			sel_bold = (sel & 0x20) != 0;
+			is_bold = weight >= 600 || sel_bold;
 			is_italic = (sel & 1) != 0;
 		}
-		const stbtt_uint32 headoff = stbtt__find_table(const_cast<unsigned char*>(data), off, "head");
-		const unsigned char* head = data + headoff;
-		units = headoff ? (head[18] << 8 | head[19]) : 2048;
-		if (headoff && !os2)
+		if (sfnt::FindTable(data, size, off, "head", &head, &head_len) && head_len >= 54) // CheckFace wants it
 		{
-			// macStyle: bit 0 bold, bit 1 italic
-			is_bold = head[45] & 1;
-			is_italic = (head[45] & 2) != 0;
+			units = data[head + 18] << 8 | data[head + 19];
+			if (!has_os2)
+			{
+				// macStyle: bit 0 bold, bit 1 italic
+				sel_bold = is_bold = data[head + 45] & 1;
+				is_italic = (data[head + 45] & 2) != 0;
+				weight = is_bold ? 700 : 400;
+			}
 		}
-		ReadNames(data, off);
+		ReadNames(data, size, off);
 		ok = true;
 		return true;
 	}
 	float ScaleFor(int em) const { return stbtt_ScaleForMappingEmToPixels(&info, float(em)); }
 
 private:
-	// the family and style names (the typographic ones, 16/17, when there are any), in UTF-8
-	void ReadNames(const unsigned char* data, int off)
+	// the family and style names (the typographic ones, 16/17, when there are any), in UTF-8; every record and string
+	// inside the name table
+	void ReadNames(const unsigned char* data, size_t size, uint32_t off)
 	{
-		const stbtt_uint32 nm = stbtt__find_table(const_cast<unsigned char*>(data), off, "name");
-		if (!nm)
+		uint32_t nm = 0, nm_len = 0;
+		if (!sfnt::FindTable(data, size, off, "name", &nm, &nm_len) || nm_len < 6)
 			return;
-		const int count = (data[nm + 2] << 8) | data[nm + 3];
-		const int strings = nm + ((data[nm + 4] << 8) | data[nm + 5]);
+		const uint32_t count = (data[nm + 2] << 8) | data[nm + 3];
+		const uint32_t strings = (data[nm + 4] << 8) | data[nm + 5];
 		// the best record per name id: Windows Unicode US English, then Windows Unicode, then Unicode, then Mac Roman
 		std::string best[18];
 		int rank[18] = {};
-		for (int i = 0; i < count && i < 4096; i++)
+		for (uint32_t i = 0; i < count && 6 + 12 * (i + 1) <= nm_len; i++)
 		{
 			const unsigned char* r = data + nm + 6 + 12 * i;
 			const int platform = (r[0] << 8) | r[1], enc = (r[2] << 8) | r[3], lang = (r[4] << 8) | r[5];
 			const int id = (r[6] << 8) | r[7], len = (r[8] << 8) | r[9], o = (r[10] << 8) | r[11];
 			if (id != 1 && id != 2 && id != 16 && id != 17)
 				continue;
+			if (uint64_t(strings) + o + len > nm_len)
+				continue; // a string outside the table
 			int rk = 0;
 			bool utf16 = true;
 			if (platform == 3 && (enc == 1 || enc == 10))
@@ -106,7 +132,7 @@ private:
 			}
 			if (rk <= rank[id])
 				continue;
-			const unsigned char* p = data + strings + o;
+			const unsigned char* p = data + nm + strings + o;
 			std::string out;
 			for (int k = 0; k < len;)
 			{
@@ -120,9 +146,11 @@ private:
 					if (cp >= 0xd800 && cp < 0xdc00 && k + 1 < len)
 					{
 						const uint32_t lo = (p[k] << 8) | p[k + 1];
-						cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00);
+						cp = lo >= 0xdc00 && lo < 0xe000 ? 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00) : 0xfffd;
 						k += 2;
 					}
+					else if (cp >= 0xd800 && cp < 0xe000)
+						cp = 0xfffd;
 				}
 				else
 					cp = p[k++]; // Mac Roman: its ASCII half
@@ -252,7 +280,7 @@ const Face* Pick(uint32_t cp, const Face* primary, bool bold, int* glyph)
 	if (g_faces.roboto.ok && (*glyph = stbtt_FindGlyphIndex(&g_faces.roboto.info, int(cp))) != 0)
 		return &g_faces.roboto;
 	for (const auto& f : g_faces.extra)
-		if (f.get() != primary && (*glyph = stbtt_FindGlyphIndex(&f->info, int(cp))) != 0)
+		if (f.get() != primary && !f->gone && (*glyph = stbtt_FindGlyphIndex(&f->info, int(cp))) != 0)
 			return f.get();
 	// nothing has it: the main face's .notdef box
 	*glyph = 0;
@@ -703,7 +731,9 @@ std::string Lower(std::string s)
 const Face* g_sub_face = nullptr;
 std::map<std::tuple<int, const Face*, bool, bool>, std::unique_ptr<Font>> g_sub_sized;
 
-// the face drawing bold text for sub (the family's bold face in the folder), and whether it must be thickened
+// the face drawing bold text for sub (the family's bold face in the folder), and whether it must be thickened: the
+// faces marked bold (fsSelection) first, then the weight nearest 700 (Bold rather than SemiBold or Black), then the
+// same slant
 const Face* BoldFaceFor(const Face* sub, bool* synth)
 {
 	*synth = false;
@@ -713,10 +743,11 @@ const Face* BoldFaceFor(const Face* sub, bool* synth)
 	{
 		const std::string fam = Lower(sub->family);
 		const Face* best = nullptr;
-		// the same slant first
+		auto score = [sub](const Face* f) {
+			return std::make_tuple(f->sel_bold ? 0 : 1, std::abs(f->weight - 700), f->is_italic == sub->is_italic ? 0 : 1);
+		};
 		for (const auto& f : g_faces.extra)
-			if (f->is_bold && Lower(f->family) == fam &&
-				(!best || (f->is_italic == sub->is_italic && best->is_italic != sub->is_italic)))
+			if (!f->gone && f->is_bold && Lower(f->family) == fam && (!best || score(f.get()) < score(best)))
 				best = f.get();
 		if (best)
 			return best;
@@ -732,59 +763,99 @@ std::string ChoiceName(const Face& f)
 		name += " " + f.style;
 	return name;
 }
+
+// files of the fonts folder that aren't fonts this player can read, by name: their size and time when refused (the same
+// file isn't read again each time Options opens; a new copy is)
+std::map<std::string, std::pair<long long, long long>> g_refused;
 } // namespace
 
 int LoadExtraFonts(const std::string& dir)
 {
 	g_faces.Load();
-	DIR* d = opendir(dir.c_str());
-	if (!d)
-		return 0;
-	int added = 0;
-	std::vector<std::string> names;
-	while (dirent* e = readdir(d))
+	struct File
 	{
-		const std::string n = e->d_name;
-		if (IsFontFile(n))
-			names.push_back(n);
+		std::string name;
+		long long size, mtime;
+	};
+	std::vector<File> files;
+	if (DIR* d = opendir(dir.c_str()))
+	{
+		while (dirent* e = readdir(d))
+		{
+			const std::string n = e->d_name;
+			struct stat st;
+			if (IsFontFile(n) && stat((dir + "/" + n).c_str(), &st) == 0 && S_ISREG(st.st_mode))
+				files.push_back({n, (long long)st.st_size, (long long)st.st_mtime});
+		}
+		closedir(d);
 	}
-	closedir(d);
-	std::sort(names.begin(), names.end());
-	for (const auto& n : names)
+	std::sort(files.begin(), files.end(), [](const File& a, const File& b) { return a.name < b.name; });
+	// the faces of files that are gone or changed: kept in memory (text drawn with them stays valid), not used again
+	for (const auto& f : g_faces.extra)
+	{
+		if (f->gone)
+			continue;
+		bool same = false;
+		for (const File& fl : files)
+			if (fl.name == f->base && fl.size == f->fsize && fl.mtime == f->mtime)
+				same = true;
+		if (!same)
+		{
+			f->gone = true;
+			OrbisLog("[fonts] %s: removed or changed since it was read", f->file.c_str());
+		}
+	}
+	int added = 0;
+	for (const File& fl : files)
 	{
 		bool have = false;
 		for (const auto& f : g_faces.extra)
-			if (f->file == n || f->file.compare(0, n.size() + 1, n + "#") == 0)
+			if (!f->gone && f->base == fl.name)
 				have = true;
-		if (have)
+		const auto bad = g_refused.find(fl.name);
+		if (have || (bad != g_refused.end() && bad->second == std::make_pair(fl.size, fl.mtime)))
 			continue;
-		FILE* f = fopen((dir + "/" + n).c_str(), "rb");
-		if (!f)
-			continue;
-		fseek(f, 0, SEEK_END);
-		const long size = ftell(f);
-		fseek(f, 0, SEEK_SET);
-		auto data = std::make_shared<std::vector<unsigned char>>();
-		if (size > 0 && size < (64l << 20))
+		int got = 0;
+		std::string why = "too big (64 MB at most) or empty";
+		if (fl.size > 0 && fl.size < (64ll << 20))
 		{
-			data->resize(size_t(size));
-			if (fread(data->data(), 1, data->size(), f) == data->size())
+			why = "can't be read";
+			if (FILE* f = fopen((dir + "/" + fl.name).c_str(), "rb"))
 			{
-				// a collection (.ttc): each of its faces (up to 16)
-				const int faces = std::max(1, std::min(16, stbtt_GetNumberOfFonts(data->data())));
-				for (int i = 0; i < faces; i++)
+				// the file, then zeros (sfnt::kPad): the offsets inside a table can't reach past the buffer
+				auto data = std::make_shared<std::vector<unsigned char>>(size_t(fl.size) + sfnt::kPad, 0);
+				if (fread(data->data(), 1, size_t(fl.size), f) == size_t(fl.size))
 				{
-					std::unique_ptr<Face> face(new Face);
-					face->owned = data;
-					if (!face->Init(data->data(), data->size(), i))
-						continue;
-					face->file = i ? n + "#" + std::to_string(i) : n;
-					g_faces.extra.push_back(std::move(face));
-					added++;
+					// a collection (.ttc): each of its faces (up to 16), each checked
+					const int faces = sfnt::CountFaces(data->data(), size_t(fl.size), &why);
+					for (int i = 0; i < faces; i++)
+					{
+						std::unique_ptr<Face> face(new Face);
+						face->owned = data;
+						face->base = fl.name;
+						face->file = i ? fl.name + "#" + std::to_string(i) : fl.name;
+						face->fsize = fl.size;
+						face->mtime = fl.mtime;
+						if (!face->Init(data->data(), size_t(fl.size), i))
+						{
+							why = "no face it could read";
+							continue;
+						}
+						g_faces.extra.push_back(std::move(face));
+						added++;
+						got++;
+					}
 				}
+				fclose(f);
 			}
 		}
-		fclose(f);
+		if (got)
+			g_refused.erase(fl.name);
+		else
+		{
+			g_refused[fl.name] = {fl.size, fl.mtime};
+			OrbisLog("[fonts] %s left out: %s", fl.name.c_str(), why.c_str());
+		}
 	}
 	return added;
 }
@@ -795,15 +866,8 @@ std::vector<FontChoice> SubtitleFontChoices(const std::string& dir)
 	std::vector<FontChoice> out = {{"", "Selawik (Segoe UI)"}, {"Roboto", "Roboto"}};
 	std::vector<FontChoice> folder;
 	for (const auto& f : g_faces.extra)
-	{
-		// only the files still there
-		const std::string file = f->file.substr(0, f->file.find('#'));
-		if (FILE* t = fopen((dir + "/" + file).c_str(), "rb"))
-		{
-			fclose(t);
+		if (!f->gone) // the files still there, as they were read
 			folder.push_back({f->file, ChoiceName(*f)});
-		}
-	}
 	std::stable_sort(folder.begin(), folder.end(), [](const FontChoice& a, const FontChoice& b) { return Lower(a.name) < Lower(b.name); });
 	OrbisLog("[subs] Default Style fonts: %zu in %s (%d new)", folder.size(), dir.c_str(), added);
 	out.insert(out.end(), folder.begin(), folder.end());
@@ -822,7 +886,7 @@ const Face* FaceForFile(const std::string& file, bool* found)
 	if (file == "Roboto")
 		return &g_faces.roboto;
 	for (const auto& f : g_faces.extra)
-		if (f->file == file)
+		if (!f->gone && f->file == file)
 			return f.get();
 	*found = false;
 	return nullptr;

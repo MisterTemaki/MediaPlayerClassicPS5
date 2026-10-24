@@ -178,7 +178,7 @@ struct Settings
 	int cursor_speed = 3; // 1..5
 	int language = 0; // Options > Player > Language: 0 English, 1 Spanish, 2 Portuguese (Brazil), 3 French, 4 German
 	// boot.log and the others in <data>/logs: off unless mpc-hc.ini says debug_logs=1 (orbis_paths.cpp reads the
-	// same line; no menu item, the key is kept when the settings are saved)
+	// same line: the installer and the helper follow it); Options > Miscellaneous "Debug logs", applied at once
 	bool debug_logs = false;
 	// Lists
 	std::vector<std::string> recent; // MRU, newest first

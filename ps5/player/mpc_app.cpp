@@ -296,7 +296,6 @@ private:
 	void DoPadAction(PadAction a);
 	std::string Accel(PadAction a, const char* combination = "") const;
 	void NextTrack(TrackType t);
-	double wheel_t_[2] = {-100, -100}; // the right stick's last wheel step up / down (a held stick repeats)
 	void OnMouseMove(int x, int y);
 	void OnLButtonDown(int x, int y);
 	void OnLButtonUp(int x, int y);
@@ -1378,9 +1377,9 @@ std::vector<MenuItem> MainFrame::TrackMenu(TrackType t) const
 		v.push_back(M::Sep());
 		char b[64];
 		snprintf(b, sizeof(b), T("Delay: %+d ms"), int(std::lround(player_.SubtitleDelay() * 1000)));
-		v.push_back(M::Cmd(b, 0).Enable(false));
-		v.push_back(M::Cmd(Fmt(T("Delay +%d ms"), s_.sub_delay_step), ID_SUB_DELAY_UP));
-		v.push_back(M::Cmd(Fmt(T("Delay -%d ms"), s_.sub_delay_step), ID_SUB_DELAY_DOWN));
+		v.push_back(M::Shown(b, 0).Enable(false));
+		v.push_back(M::Shown(Fmt(T("Delay +%d ms"), s_.sub_delay_step), ID_SUB_DELAY_UP));
+		v.push_back(M::Shown(Fmt(T("Delay -%d ms"), s_.sub_delay_step), ID_SUB_DELAY_DOWN));
 		v.push_back(M::Cmd("Reset delay", ID_SUB_DELAY_RESET));
 	}
 	if (t == TrackType::Audio)
@@ -1388,7 +1387,7 @@ std::vector<MenuItem> MainFrame::TrackMenu(TrackType t) const
 		v.push_back(M::Sep());
 		char b[64];
 		snprintf(b, sizeof(b), T("Delay: %+d ms"), int(std::lround(player_.AudioDelay() * 1000)));
-		v.push_back(M::Cmd(b, 0).Enable(false));
+		v.push_back(M::Shown(b, 0).Enable(false));
 		v.push_back(M::Cmd("Delay +10 ms", ID_AUDIO_DELAY_UP));
 		v.push_back(M::Cmd("Delay -10 ms", ID_AUDIO_DELAY_DOWN));
 	}
@@ -1948,6 +1947,7 @@ void MainFrame::Command(int id)
 				input_.SetSpeed(s_.cursor_speed);
 				SetSubtitleFont(s_.sub_font);
 				sub_cache_.key.clear();
+				OrbisLogSetEnabled(s_.debug_logs); // Debug logs, at once (the helper reads mpc-hc.ini, saved below)
 				if (g_dpi != s_.dpi)
 				{
 					g_dpi = s_.dpi;
@@ -2862,26 +2862,30 @@ void MainFrame::OnEvent(const InputEvent& ev)
 				pl_top_ = std::max(0, std::min(pl_top_ - ev.wheel * 3, std::max(0, int(playlist_.size()) - 1)));
 				break;
 			}
-			const int dir = ev.wheel > 0 ? 0 : 1;
-			const double now = NowSeconds();
-			const bool held = now - wheel_t_[dir] < 0.35;
-			wheel_t_[dir] = now;
-			const PadAction a = s_.pad[int(dir == 0 ? PadButton::StickUp : PadButton::StickDown)];
-			if (!held || PadActionRepeats(a))
-				DoPadAction(a);
+			// ev.repeat: the stick was already pushed that way (InputMapper follows its axis), not a new push
+			const PadButton b = ev.wheel > 0 ? PadButton::StickUp : PadButton::StickDown;
+			const PadAction a = s_.pad[int(b)];
+			if (ev.repeat && !PadActionRepeats(a))
+				break;
+			if (!ev.repeat && a != PadAction::None)
+				OrbisLog("[ui] %s: %s", PadButtonName(b), PadActionKey(a));
+			DoPadAction(a);
 			break;
 		}
 		case InputEvent::KeyDown:
-			// L2/R2 held change Left/Right (while they keep their default actions): then they don't act themselves
-			if (((ev.key == Key::L2 && s_.pad[int(PadButton::L2)] == DefaultPadAction(PadButton::L2)) ||
-					(ev.key == Key::R2 && s_.pad[int(PadButton::R2)] == DefaultPadAction(PadButton::R2))) &&
-				(input_.Held(Key::Left) || input_.Held(Key::Right)))
-				break;
-			// the triggers don't repeat in the window (in lists they are Page Up / Down)
-			if ((ev.key == Key::L2 || ev.key == Key::R2) && ev.repeat)
+		{
+			// L2/R2 with their default actions are the modifiers of Left/Right: pressed while a Left/Right that jumps is
+			// held, they don't act themselves, and held they don't repeat (as before the Keys page); given another
+			// action, they act and repeat as any button
+			const bool trigger_default = (ev.key == Key::L2 && s_.pad[int(PadButton::L2)] == DefaultPadAction(PadButton::L2)) ||
+										 (ev.key == Key::R2 && s_.pad[int(PadButton::R2)] == DefaultPadAction(PadButton::R2));
+			const bool jump_held = (input_.Held(Key::Left) && IsJump(s_.pad[int(PadButton::Left)])) ||
+								   (input_.Held(Key::Right) && IsJump(s_.pad[int(PadButton::Right)]));
+			if (trigger_default && (jump_held || ev.repeat))
 				break;
 			OnKey(ev.key, ev.repeat);
 			break;
+		}
 		default:
 			break;
 	}

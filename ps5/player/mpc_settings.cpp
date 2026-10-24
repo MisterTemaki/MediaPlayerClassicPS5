@@ -292,11 +292,14 @@ const char* const kPadActionKeys[int(PadAction::Count)] = {"None", "PlayPause", 
 	"Mute", "FullScreen", "LeaveFullScreen", "GoTo", "ContextMenu", "MenuBar", "SubDelayDown", "SubDelayUp",
 	"NextSubtitle", "NextAudio", "AudioDelayDown", "AudioDelayUp", "Statistics"};
 
-uint32_t ParseColor(const std::string& v, uint32_t def)
+// RRGGBB or #RRGGBB (as the Default Style page shows a colour not in its palette)
+uint32_t ParseColor(std::string v, uint32_t def)
 {
-	char* end = nullptr;
-	const unsigned long n = strtoul(v.c_str(), &end, 16);
-	return end && end != v.c_str() && *end == 0 && v.size() <= 6 ? uint32_t(n) : def;
+	if (!v.empty() && v[0] == '#')
+		v.erase(0, 1);
+	if (v.empty() || v.size() > 6 || v.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+		return def;
+	return uint32_t(strtoul(v.c_str(), nullptr, 16));
 }
 } // namespace
 
@@ -408,6 +411,9 @@ bool PadActionRepeats(PadAction a)
 
 Settings::Settings()
 {
+	// debug logs: off by default; the host tests turn the default on (orbis_paths.cpp reads the same variable)
+	if (const char* d = getenv("MPCPS5_LOGS_DEFAULT"))
+		debug_logs = atoi(d) != 0;
 	for (int i = 0; i < int(PadButton::Count); i++)
 		pad[i] = DefaultPadAction(PadButton(i));
 }

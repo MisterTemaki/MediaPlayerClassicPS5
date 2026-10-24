@@ -1472,12 +1472,18 @@ void ShowOptionsDialog(std::function<void()> applied)
 	d->Group(sp, "Font", 5, 5, 105, 64);
 	// the fonts: Selawik, Roboto and the fonts folder's, read now (a font copied in while the app runs is listed)
 	const std::vector<FontChoice> fonts = SubtitleFontChoices(OrbisDir("fonts"));
-	ComboBox* font = d->Combo(sp, 10, 17, 95, 13, {}, 0);
+	ComboBox* font = d->Combo(sp, 10, 17, 95, 13, {}, -1);
 	for (const FontChoice& fc : fonts)
 	{
 		font->items.push_back(fc.name);
 		if (fc.file == s.sub_font)
 			font->sel = int(font->items.size()) - 1;
+	}
+	if (font->sel < 0)
+	{
+		// the saved font's file isn't in the folder (drawn as Selawik): shown by its name and kept unless another is chosen
+		font->items.push_back(s.sub_font);
+		font->sel = int(font->items.size()) - 1;
 	}
 	d->Text(sp, "Size", 10, 36, 48, 8);
 	NumberBox* fsize = d->Number(sp, 60, 33, 45, 13, s.sub_font_size, 8, 72);
@@ -1628,14 +1634,17 @@ void ShowOptionsDialog(std::function<void()> applied)
 
 	// ---- Miscellaneous (PS5: the interface scale, the pointer, the shares) ----
 	p = d->NewPage("Miscellaneous");
-	d->Group(p, "Interface (PlayStation 5)", 5, 5, 286, 60);
+	d->Group(p, "Interface (PlayStation 5)", 5, 5, 286, 74);
 	d->Text(p, "Size of the window's text and controls:", 10, 18, 160, 8);
 	ComboBox* scale = d->Combo(p, 175, 16, 110, 13, {"100%", "125%", "150% (recommended)", "175%", "200%"},
 		s.dpi == 96 ? 0 : s.dpi == 120 ? 1 : s.dpi == 168 ? 3 : s.dpi == 192 ? 4 : 2);
 	d->Text(p, "Pointer speed (left stick):", 10, 36, 160, 8);
 	NumberBox* speed = d->Number(p, 175, 33, 50, 14, s.cursor_speed, 1, 5);
-	d->Group(p, "Network locations", 5, 70, 286, 120);
-	ListView* servers = d->P(p, new ListView, 10, 82, 220, 100);
+	// the emulator ports' Settings > Debug logs: logs/boot.log in the data folder, on or off at once (off by default)
+	CheckBox* logs = d->Check(p, "Debug logs", 10, 50, 276, 8, s.debug_logs);
+	d->Text(p, "logs/boot.log in the data folder; on or off at once", 22, 62, 264, 8);
+	d->Group(p, "Network locations", 5, 83, 286, 107);
+	ListView* servers = d->P(p, new ListView, 10, 95, 220, 89);
 	servers->columns = {{T("Name"), servers->rect.Width() * 40 / 100}, {T("Address"), servers->rect.Width() * 58 / 100}};
 	auto fill_servers = [&s, servers] {
 		servers->rows.clear();
@@ -1645,9 +1654,9 @@ void ShowOptionsDialog(std::function<void()> applied)
 			servers->sel = int(servers->rows.size()) - 1;
 	};
 	fill_servers();
-	Button* addsrv = d->P(p, new Button, 235, 82, 50, 14);
+	Button* addsrv = d->P(p, new Button, 235, 95, 50, 14);
 	addsrv->text = T("Add...");
-	Button* delsrv = d->P(p, new Button, 235, 100, 50, 14);
+	Button* delsrv = d->P(p, new Button, 235, 113, 50, 14);
 	delsrv->text = T("Delete");
 	addsrv->on_click = [&s, fill_servers] {
 		ShowAddNetworkDialog([&s, fill_servers](const std::string& n, const std::string& u) {
@@ -1674,17 +1683,17 @@ void ShowOptionsDialog(std::function<void()> applied)
 				fresh.favorites = st.favorites;
 				fresh.servers = st.servers;
 				fresh.positions = st.positions;
-				fresh.debug_logs = st.debug_logs; // not one of the Options' settings
 				st = fresh;
 				o->EndDialog(1);
 				if (o->applied)
 					o->applied();
 			});
 	};
-	d->apply_fns.push_back([&s, scale, speed] {
+	d->apply_fns.push_back([&s, scale, speed, logs] {
 		static const int dpis[] = {96, 120, 144, 168, 192};
 		s.dpi = dpis[std::max(0, std::min(4, scale->sel))];
 		s.cursor_speed = speed->value;
+		s.debug_logs = logs->checked;
 	});
 
 	// the buttons

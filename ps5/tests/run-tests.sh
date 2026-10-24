@@ -867,6 +867,89 @@ expect "[ $rc = 0 ] && grep -q '\[ui\] L2: SubDelayDown' $T/root/logs/boot.log &
 nosan "$T"
 fi
 
+if want 23; then
+echo "== 23. 1.3 review: damaged fonts left out (no crash), Bold's face by weight, the stick's and the triggers' repeats, Debug logs"
+SANS=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+SERIF=/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf
+srt23() { printf '1\r\n00:00:00,000 --> 00:00:09,000\r\n%s\r\n' "$2" >"$1/root/media/movie.srt"; cp "$MEDIA/grey.mp4" "$1/root/media/movie.mp4"; }
+# a: truncated files (an unfinished copy), a name table past the end, a .ttc face far outside the file, a tiny .ttc,
+# junk; a font named C#Mono.ttf; a partial copy finished while the app runs. Options opened twice.
+T=$(newroot t23)
+mkdir -p $T/root/fonts
+python3 tests/make_test_fonts.py bad $T/root/fonts $SANS
+cp /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf "$T/root/fonts/C#Mono.ttf"
+head -c 300000 $SERIF >$T/root/fonts/zz-partial.ttf
+srt23 $T "A line over damaged fonts"
+ini "$T" "SubFont=aa-cut681.ttf"
+( for i in $(seq 1 200); do grep -q 'Default Style fonts:' $T/root/logs/boot.log 2>/dev/null && break; sleep 0.1; done
+  sleep 1.2; cp $SERIF $T/root/fonts/zz-partial.ttf ) &
+CP=$!
+rc=$(run "$T" "0:0" "60:state;70:cmd options;80:key down;83:key down;86:key down;89:key down;92:key down;95:key down;110:key escape;260:cmd options;275:key escape;300:quit" "60" "$T/root/media/movie.mp4")
+wait $CP
+expect "[ $rc = 0 ] && ! grep -q 'runtime error\|AddressSanitizer\|SEGV' $T/out.txt" "the app runs on: no crash, no sanitizer report"
+for f in aa-cut681.ttf ab-cut100.ttf ac-cut5000.ttf ad-cut-half.ttf ae-namepast.ttf ah-tiny.ttc ai-junk.otf zz-partial.ttf; do
+	expect "[ \$(grep -c '\[fonts\] $f left out' $T/root/logs/boot.log) = 1 ]" "$f: left out, logged once (not read again when Options opens)"
+done
+expect "grep -q '\[fonts\] ag-badoff.ttc#1: face 1 refused' $T/root/logs/boot.log" "ag-badoff.ttc: its face far outside the file refused..."
+expect "grep -q \"the Default Style's font aa-cut681.ttf isn't in the fonts folder: Selawik\" $T/root/logs/boot.log && $REGION $T/dump/flip00060.ppm 400 750 1520 977 255 255 255 30 1000 >/dev/null" "the damaged file chosen in the settings: Selawik, the line drawn"
+expect "grep -q 'Default Style fonts: 3 in .*(0 new)' $T/root/logs/boot.log" "listed: ag-badoff.ttc's good face, af-namestr.ttf (its names unread), C#Mono.ttf"
+expect "grep -q 'Default Style fonts: 4 in .*(1 new)' $T/root/logs/boot.log" "zz-partial.ttf copied whole meanwhile: read again (a new size), listed"
+# b: Bold from the family's faces: Bold (700, the bold bit), not SemiBold (first by name), ExtraBold or Black;
+# #RRGGBB colours read
+T=$(newroot t23b)
+mkdir -p $T/root/fonts
+python3 tests/make_test_fonts.py weights $T/root/fonts $SANS
+srt23 $T "Weights"
+ini "$T" "SubFont=a-regular.ttf
+SubColor=#FFFF00"
+rc=$(run "$T" "0:0" "60:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'Default Style font: DejaVu Sans (a-regular.ttf); bold: d-bold.ttf' $T/root/logs/boot.log" "Bold: d-bold.ttf (700, marked bold), not b-semibold, e-extrabold or c-black"
+expect "$REGION $T/dump/flip00060.ppm 400 750 1520 977 255 255 0 40 1000 >/dev/null" "SubColor=#FFFF00 (as the page shows a colour not in its palette): yellow"
+nosan "$T"
+# c: a saved font not in the folder: kept when Options is closed with OK
+T=$(newroot t23c)
+ini "$T" "SubFont=gone.ttf"
+rc=$(run "$T" "0:0" "30:cmd options;45:key menu;70:quit" "")
+expect "[ $rc = 0 ] && grep -q '^SubFont=gone.ttf$' $T/root/mpc-hc.ini" "SubFont=gone.ttf kept through Options, OK"
+# d: the right stick as Play/Pause: pushed gently and held (a wheel step every half second), it acts once; a second
+# push acts again
+T=$(newroot t23d)
+srt23 $T "Stick"
+ini "$T" "KeyStickUp=PlayPause"
+rc=$(run "$T" "0:0;60:0,128,128,128,90;200:0,128,128,128,128;260:0,128,128,128,0;275:0,128,128,128,128" "320:quit" "" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && [ \$(grep -c '\[osd\] Pause$\|\[osd\] Play$' $T/root/logs/boot.log) = 2 ] && [ \$(grep -c '\[ui\] Right stick up: PlayPause' $T/root/logs/boot.log) = 2 ]" "a held push is one press: Pause, then Play for the second push"
+nosan "$T"
+# e: L2 as subtitle delay + repeats while held (100 ms each)
+T=$(newroot t23e)
+srt23 $T "Trigger"
+ini "$T" "KeyL2=SubDelayUp"
+rc=$(run "$T" "0:0;50:100;150:0" "170:quit" "" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && [ \$(sed -n 's/^SubDelay=//p' $T/root/mpc-hc.ini) -ge 500 ]" "L2 = Subtitle delay +, held 1.6 s: it repeats (delay \$(sed -n 's/^SubDelay=//p' $T/root/mpc-hc.ini) ms)"
+# f: Left as volume down: L2 (its default 20 s jump) pressed while Left is held acts, not swallowed as a modifier
+T=$(newroot t23f)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeyLeft=VolumeDown"
+rc=$(run "$T" "0:0;50:80;55:180;60:80;65:0" "40:seek 5;90:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && grep -q '\[ui\] D-pad Left: VolumeDown' $T/root/logs/boot.log && grep -q '\[ui\] L2: JumpBackLarge' $T/root/logs/boot.log" "Left = Volume down held, L2 pressed: L2 jumps back 20 s"
+# g: Play > Subtitle Track's delay items made from translated formats are not looked up again
+T=$(newroot t23g)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "Language=1"
+rc=$(MPCPS5_HOST_I18N_MISSING=$T/missing.txt run "$T" "0:0" "30:key menu;40:key right;50:key right;60:key escape;65:key escape;80:quit" "" "$T/root/media/chapters.mkv")
+touch $T/missing.txt
+expect "[ $rc = 0 ] && ! grep -q '^Retardo' $T/missing.txt" "Spanish: 'Retardo +100 ms' and 'Retardo: +0 ms' not translated twice"
+# h: Options > Miscellaneous > Debug logs (off by default): turned on, saved as debug_logs=1, the log written at once
+T=$(newroot t23h)
+P="20:cmd options"
+f=30; for i in $(seq 1 8); do P="$P;$f:key down"; f=$((f + 3)); done
+rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "$P;60:key r1;63:key r1;66:key r1;70:key enter;80:key menu;100:cmd volup;120:quit" "75")
+expect "[ $rc = 0 ] && grep -q '^debug_logs=1$' $T/root/mpc-hc.ini" "the Debug logs box on, OK: debug_logs=1 in mpc-hc.ini"
+expect "grep -q '\[log\] debug logs turned on' $T/root/logs/boot.log && grep -q '\[osd\] Volume: 100%' $T/root/logs/boot.log && ! grep -q 'fonts folder:' $T/root/logs/boot.log" "boot.log written from then on, at once (nothing from before it was on)"
+rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "20:quit" "")
+expect "grep -q 'Media Player Classic PS5 .*FFmpeg' $T/root/logs/boot.log" "the next start: logged from the start"
+nosan "$T"
+fi
+
 echo
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]

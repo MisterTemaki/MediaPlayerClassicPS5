@@ -91,6 +91,8 @@ private:
 	bool cross_click_ = false, square_click_ = false;
 	int speed_ = 3;
 	double wheel_acc_ = 0;
+	int wheel_dir_ = 0; // the right stick: -1 / 0 / 1 as it is pushed now
+	bool wheel_sent_ = false; // a wheel step already sent for this push (the next ones are repeats)
 };
 
 void DrawCursor(CDC& dc, int x, int y);
