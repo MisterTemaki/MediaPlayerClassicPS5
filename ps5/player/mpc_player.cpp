@@ -5,6 +5,7 @@
 #include "mpc_player.h"
 
 #include "mpc_ass.h"
+#include "mpc_disc.h"
 #include "mpc_i18n.h"
 #include "mpc_res.h"
 #include "mpc_smb.h"
@@ -395,6 +396,8 @@ bool ReadWholeFile(const std::string& path, std::vector<uint8_t>& out, size_t ma
 {
 	if (path.compare(0, 6, "smb://") == 0)
 		return smb::ReadFile(path, out, max_bytes);
+	if (path.compare(0, 7, "disc://") == 0)
+		return disc::ReadFile(path, out, max_bytes);
 	FILE* f = fopen(path.c_str(), "rb");
 	if (!f)
 		return false;
@@ -423,8 +426,16 @@ struct Player::Impl
 
 	// ---- FFmpeg ----
 	AVFormatContext* ic = nullptr;
-	AVIOContext* custom_io = nullptr; // smb://
+	AVIOContext* custom_io = nullptr; // smb://, disc://
 	void* custom_io_owner = nullptr;
+	bool custom_io_disc = false; // custom_io is a disc file's (disc::CloseAvio)
+	// dvd:// and bluray:// (mpc_disc.h)
+	disc::TitleOpen title_open;
+	std::vector<DiscTitle> disc_titles;
+	int disc_title = 0;
+	std::vector<Chapter> disc_chapters; // Blu-ray (FFmpeg's DVD demuxer has the DVD's)
+	std::atomic<uint64_t> disc_gen{0}; // the disc it plays from (0: not a drive)
+	std::atomic<bool> disc_gone{false};
 	std::atomic<int> vstream{-1}, astream{-1}, sstream{-1}; // sstream: -1 off, or a stream index / 1000+n
 	std::atomic<bool> a_stop{false}; // the audio thread is asked to end (a track change)
 	int ctx_w = 0, ctx_h = 0, ctx_sw = 0, ctx_sh = 0, ctx_fmt = -1; // the scaler's sizes
@@ -643,6 +654,54 @@ struct Player::Impl
 			}
 		}
 		std::string open_url = url;
+		const AVInputFormat* force_fmt = nullptr;
+		disc_gen = disc::Generation(url);
+		if (disc::IsTitleUrl(url))
+		{
+			// a DVD-Video or Blu-ray title: what to open, from the disc's structure (this reads the disc)
+			const bool ok = disc::OpenTitle(url, title_open);
+			{
+				std::lock_guard<std::mutex> l(mu);
+				for (const auto& t : title_open.titles)
+					disc_titles.push_back({t.number, t.seconds, t.chapters});
+				disc_title = title_open.title;
+				for (const auto& c : title_open.chapters)
+					disc_chapters.push_back({c.time, c.name});
+			}
+			if (!ok)
+			{
+				av_dict_free(&opts);
+				avformat_free_context(ic);
+				ic = nullptr;
+				SetFailed(title_open.error);
+				return;
+			}
+			force_fmt = title_open.format;
+			if (title_open.io)
+			{
+				ic->pb = title_open.io;
+				ic->flags |= AVFMT_FLAG_CUSTOM_IO;
+			}
+			else
+				open_url = title_open.ffmpeg_url;
+			av_dict_copy(&opts, title_open.options, 0);
+		}
+		else if (low.compare(0, 7, "disc://") == 0)
+		{
+			std::string err;
+			custom_io = disc::OpenAvio(url, &custom_io_owner, &err);
+			if (!custom_io)
+			{
+				av_dict_free(&opts);
+				avformat_free_context(ic);
+				ic = nullptr;
+				SetFailed(err.empty() ? "The file can't be opened from the disc." : err);
+				return;
+			}
+			custom_io_disc = true;
+			ic->pb = custom_io;
+			ic->flags |= AVFMT_FLAG_CUSTOM_IO;
+		}
 		if (low.compare(0, 6, "smb://") == 0)
 		{
 			std::string err;
@@ -658,7 +717,7 @@ struct Player::Impl
 			ic->pb = custom_io;
 			ic->flags |= AVFMT_FLAG_CUSTOM_IO;
 		}
-		int r = avformat_open_input(&ic, open_url.c_str(), nullptr, &opts);
+		int r = avformat_open_input(&ic, open_url.c_str(), force_fmt, &opts);
 		av_dict_free(&opts);
 		if (r < 0)
 		{
@@ -674,6 +733,16 @@ struct Player::Impl
 			return;
 		ic_ready = true;
 		duration = ic->duration > 0 ? ic->duration / double(AV_TIME_BASE) : 0;
+		if (title_open.io)
+		{
+			// a Blu-ray title: its length and its tracks' languages from the playlist (the MPEG-TS has none)
+			if (title_open.duration > 0)
+				duration = title_open.duration;
+			for (unsigned i = 0; i < ic->nb_streams; i++)
+				for (const auto& pl : title_open.languages)
+					if (ic->streams[i]->id == pl.first && !av_dict_get(ic->streams[i]->metadata, "language", nullptr, 0))
+						av_dict_set(&ic->streams[i]->metadata, "language", pl.second.c_str(), 0);
+		}
 		seekable = ic->pb ? (ic->pb->seekable & AVIO_SEEKABLE_NORMAL) != 0 || duration > 0 : duration > 0;
 
 		// the tracks: the first default (or first) video and audio, MPC-HC's way
@@ -749,6 +818,20 @@ struct Player::Impl
 			SetFailed("No video or audio this player can decode");
 			return;
 		}
+		if (disc::IsTitleUrl(url))
+		{
+			// a disc's title: its chapters and its tracks' languages, as Navigate and Play show them
+			std::string langs;
+			for (unsigned i = 0; i < ic->nb_streams; i++)
+				if (ic->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO || ic->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE)
+				{
+					const AVDictionaryEntry* l = av_dict_get(ic->streams[i]->metadata, "language", nullptr, 0);
+					langs += std::string(langs.empty() ? "" : ", ") + "#" + std::to_string(i) + " " +
+							 (ic->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO ? "audio" : "subtitles") + " " + (l ? l->value : "und");
+				}
+			OrbisLog("[player] disc title %d of %zu: %u chapter(s); %s", disc_title, disc_titles.size(),
+				disc_chapters.empty() ? ic->nb_chapters : unsigned(disc_chapters.size()), langs.c_str());
+		}
 		OrbisLog("[player] opened %s in %.2f s: %s, %.1f s, video #%d %s %dx%d, audio #%d %s, %zu subtitle track(s)",
 			url.c_str(), NowS() - t0, ic->iformat->name, duration, vstream.load(), vdec ? vdec->codec->name : "-",
 			vdec ? vdec->width : 0, vdec ? vdec->height : 0, astream.load(), adec ? adec->codec->name : "-",
@@ -781,7 +864,7 @@ struct Player::Impl
 
 	void AutoLoadSubtitles()
 	{
-		if (url.find("://") != std::string::npos && url.compare(0, 6, "smb://") != 0)
+		if (url.find("://") != std::string::npos && url.compare(0, 6, "smb://") != 0 && url.compare(0, 7, "disc://") != 0)
 			return;
 		const size_t dot = url.find_last_of('.');
 		const size_t slash = url.find_last_of('/');
@@ -794,7 +877,7 @@ struct Player::Impl
 		for (const char* e : exts)
 		{
 			const std::string p = base + e;
-			if (url.compare(0, 6, "smb://") == 0 ? smb::Exists(p) : OrbisIsFile(p))
+			if (url.compare(0, 6, "smb://") == 0 ? smb::Exists(p) : url.compare(0, 7, "disc://") == 0 ? disc::Exists(p) : OrbisIsFile(p))
 			{
 				std::string err;
 				if (AddSubtitleFile(p, &err))
@@ -872,9 +955,18 @@ struct Player::Impl
 				continue;
 			}
 			const int r = av_read_frame(ic, pkt);
+			if (r < 0 && disc_gen && disc::Generation(url) != disc_gen)
+			{
+				// the disc was taken out: not the end of the film (the UI stops it and says so)
+				if (!disc_gone)
+					OrbisLog("[player] the disc was taken out while playing %s", url.c_str());
+				disc_gone = true;
+				av_usleep(20000);
+				continue;
+			}
 			if (r < 0)
 			{
-				if (r == AVERROR_EOF || avio_feof(ic->pb))
+				if (r == AVERROR_EOF || (ic->pb && avio_feof(ic->pb)))
 				{
 					if (!eof)
 					{
@@ -1456,10 +1548,14 @@ struct Player::Impl
 			avformat_close_input(&ic);
 		if (custom_io)
 		{
-			smb::CloseAvio(custom_io, custom_io_owner);
+			if (custom_io_disc)
+				disc::CloseAvio(custom_io, custom_io_owner);
+			else
+				smb::CloseAvio(custom_io, custom_io_owner);
 			custom_io = nullptr;
 			custom_io_owner = nullptr;
 		}
+		disc::CloseTitle(title_open);
 		ps5audio::Clear();
 		ps5audio::SetPaused(false);
 	}
@@ -1987,6 +2083,17 @@ std::vector<Chapter> Player::Chapters() const
 	std::vector<Chapter> out;
 	if (!m->ic || m->state == PlayState::Opening)
 		return out;
+	{
+		std::lock_guard<std::mutex> l(m->mu);
+		if (!m->disc_chapters.empty())
+		{
+			out = m->disc_chapters;
+			for (size_t i = 0; i < out.size(); i++)
+				if (out[i].name.empty())
+					out[i].name = Fmt(T("Chapter %d"), int(i) + 1);
+			return out;
+		}
+	}
 	for (unsigned i = 0; i < m->ic->nb_chapters; i++)
 	{
 		const AVChapter* c = m->ic->chapters[i];
@@ -1997,6 +2104,28 @@ std::vector<Chapter> Player::Chapters() const
 		out.push_back(ch);
 	}
 	return out;
+}
+
+std::vector<DiscTitle> Player::Titles() const
+{
+	std::lock_guard<std::mutex> l(m->mu);
+	return m->disc_titles;
+}
+
+int Player::CurrentTitle() const
+{
+	std::lock_guard<std::mutex> l(m->mu);
+	return m->disc_title;
+}
+
+bool Player::DiscGone() const
+{
+	return m->disc_gone;
+}
+
+uint64_t Player::DiscGeneration() const
+{
+	return m->disc_gen;
 }
 
 bool Player::HasVideo() const

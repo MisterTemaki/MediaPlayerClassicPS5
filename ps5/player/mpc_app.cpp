@@ -10,6 +10,7 @@
 #include "mpc_tonemap.h"
 
 #include "mpc_dialogs.h"
+#include "mpc_disc.h"
 #include "mpc_font.h"
 #include "mpc_gdi.h"
 #include "mpc_i18n.h"
@@ -188,6 +189,8 @@ enum Cmd
 	ID_CHAPTER_FIRST = 6000,
 	ID_FAVORITE_FIRST = 7000,
 	ID_PLAYLIST_ITEM_FIRST = 8000,
+	ID_DISC_FIRST = 9000, // File > Open Disc: + drive
+	ID_TITLE_FIRST = 9100, // Navigate > Titles: + title index
 };
 
 constexpr int kW = 1920, kH = 1080;
@@ -1280,9 +1283,21 @@ std::vector<MenuItem> MainFrame::FileMenu() const
 		M::Cmd("Save S&ubtitles...", ID_FILE_SUBTITLES_SAVE).Enable(false), M::Sep(),
 		M::Cmd("&Download Subtitles...", ID_FILE_SUBTITLES_DOWNLOAD).Enable(false),
 		M::Cmd("&Upload Subtitles...", ID_FILE_SUBTITLES_UPLOAD).Enable(false)};
+	// the disc drives (mpc_disc.h): the console's own, USB drives
+	std::vector<M> discs;
+	const std::vector<disc::DriveState> drives = disc::Drives();
+	for (size_t i = 0; i < drives.size() && i < 8; i++)
+	{
+		const disc::DriveState& d = drives[i];
+		const bool can = d.kind == disc::Kind::Data || d.kind == disc::Kind::DvdVideo || d.kind == disc::Kind::BluRay ||
+						 d.kind == disc::Kind::Encrypted;
+		discs.push_back(M::Shown(disc::DriveName(d), ID_DISC_FIRST + int(i)).Enable(can));
+	}
+	if (discs.empty())
+		discs.push_back(M::Cmd("<empty>", 0).Enable(false));
 	return {M::Cmd("&Quick Open File...", ID_FILE_OPENQUICK), M::Sep(), M::Cmd("&Open File...", ID_FILE_OPENMEDIA),
-		M::Cmd("Open &DVD/BD...", ID_FILE_OPENDVDBD).Enable(false), M::Cmd("Open De&vice...", ID_FILE_OPENDEVICE).Enable(false),
-		M::Cmd("Open Dir&ectory...", ID_FILE_OPENDIRECTORY), M::Popup("O&pen Disc", {M::Cmd("<empty>", 0).Enable(false)}),
+		M::Cmd("Open &DVD/BD...", ID_FILE_OPENDVDBD), M::Cmd("Open De&vice...", ID_FILE_OPENDEVICE).Enable(false),
+		M::Cmd("Open Dir&ectory...", ID_FILE_OPENDIRECTORY), M::Popup("O&pen Disc", discs),
 		M::Popup("Recent &Files", recent), M::Cmd("&Close", ID_FILE_CLOSE_AND_RESTORE).Enable(loaded || player_.State() == PlayState::Opening), M::Sep(),
 		M::Cmd("&Save a Copy...", ID_FILE_SAVE_COPY).Enable(false),
 		M::Cmd("Save &Image...", ID_FILE_SAVE_IMAGE).Enable(loaded && player_.HasPicture()),
@@ -1434,6 +1449,18 @@ std::vector<MenuItem> MainFrame::NavigateMenu() const
 		M::Cmd("&Title Menu", ID_NAVIGATE_TITLEMENU).Enable(false), M::Cmd("&Root Menu", ID_NAVIGATE_ROOTMENU).Enable(false),
 		M::Cmd("&Subtitle Menu", ID_NAVIGATE_SUBPICTUREMENU).Enable(false), M::Cmd("&Audio Menu", ID_NAVIGATE_AUDIOMENU).Enable(false),
 		M::Cmd("An&gle Menu", ID_NAVIGATE_ANGLEMENU).Enable(false), M::Cmd("&Chapter Menu", ID_NAVIGATE_CHAPTERMENU).Enable(false)};
+	// a DVD-Video / Blu-ray: its titles (the disc's menus aren't shown: the main title plays first)
+	const std::vector<DiscTitle> titles = player_.Titles();
+	if (!titles.empty())
+	{
+		std::vector<M> tm;
+		const int cur = player_.CurrentTitle();
+		for (size_t i = 0; i < titles.size() && i < 99; i++)
+			tm.push_back(M::Shown(Fmt(T("Title %d"), titles[i].number) + "  [" + FormatTime(titles[i].seconds) + "]",
+				ID_TITLE_FIRST + int(i)).Radio(titles[i].number == cur));
+		v.push_back(M::Sep());
+		v.push_back(M::Popup("&Titles", tm));
+	}
 	const std::vector<Chapter> ch = player_.Chapters();
 	if (!ch.empty())
 	{
@@ -1698,6 +1725,41 @@ void MainFrame::Command(int id)
 			Seek(ch[i].time);
 		return;
 	}
+	if (id >= ID_DISC_FIRST && id < ID_DISC_FIRST + 8)
+	{
+		// File > Open Disc: a DVD-Video / Blu-ray plays (its main title); a data disc opens in the Open dialog
+		const std::vector<disc::DriveState> drives = disc::Drives();
+		const size_t i = size_t(id - ID_DISC_FIRST);
+		if (i < drives.size())
+		{
+			const disc::DriveState& d = drives[i];
+			const std::string u = disc::PlayUrl(d);
+			if (!u.empty())
+				OpenAny(u);
+			else if (d.kind == disc::Kind::Data)
+			{
+				s_.last_dir = "disc://" + d.id;
+				Command(ID_FILE_OPENQUICK);
+			}
+			else
+				MessageBox(disc::DriveMessage(d), T("Open Disc"), MB_OK, 2);
+		}
+		return;
+	}
+	if (id >= ID_TITLE_FIRST && id < ID_TITLE_FIRST + 99)
+	{
+		// Navigate > Titles: the same disc, another title
+		const std::vector<DiscTitle> titles = player_.Titles();
+		const size_t i = size_t(id - ID_TITLE_FIRST);
+		if (i < titles.size() && disc::IsTitleUrl(current_url_))
+		{
+			const std::string u = disc::TitleBase(current_url_) + "?title=" + std::to_string(titles[i].number);
+			if (pl_cur_ >= 0 && pl_cur_ < int(playlist_.size()))
+				playlist_[pl_cur_] = u;
+			Open(u, false);
+		}
+		return;
+	}
 	if (id >= ID_FAVORITE_FIRST && id < ID_FAVORITE_FIRST + 999)
 	{
 		const int i = id - ID_FAVORITE_FIRST;
@@ -1746,6 +1808,20 @@ void MainFrame::Command(int id)
 				pl_cur_ = 0;
 				Open(url);
 				(void)dub;
+			});
+			break;
+		case ID_FILE_OPENDVDBD:
+			// a disc drive, or a folder with a DVD-Video (VIDEO_TS) or a Blu-ray (BDMV) in it
+			ShowFileBrowser(T("Open DVD/BD"), BrowseFilter::Folder, [this](const std::string& dir) {
+				if (dir.empty())
+					return;
+				const std::string u = disc::TitleUrlForFolder(dir);
+				if (u.empty())
+				{
+					MessageBox(T("This folder has no DVD-Video (VIDEO_TS) or Blu-ray (BDMV) to play."), T("Open DVD/BD"), MB_OK, 2);
+					return;
+				}
+				OpenAny(u);
 			});
 			break;
 		case ID_FILE_OPENDIRECTORY:
@@ -2136,7 +2212,7 @@ void MainFrame::Command(int id)
 // opening
 void MainFrame::SavePosition()
 {
-	if (current_url_.empty() || !s_.remember_file_pos || !Loaded())
+	if (current_url_.empty() || !s_.remember_file_pos || !Loaded() || disc::IsTitleUrl(current_url_))
 		return;
 	const double pos = player_.Position(), dur = player_.Duration();
 	// near the end (or the start): forget it, as MPC-HC does at the end of a file
@@ -2151,7 +2227,8 @@ void MainFrame::Open(const std::string& url, bool use_saved_pos)
 	SavePosition();
 	MPCPS5_STAGE(Emu, "open");
 	current_url_ = url;
-	const double pos = use_saved_pos && s_.remember_file_pos ? s_.FilePos(url) : 0;
+	// (not for a disc's titles: dvd://cd0 names the drive, not the disc in it)
+	const double pos = use_saved_pos && s_.remember_file_pos && !disc::IsTitleUrl(url) ? s_.FilePos(url) : 0;
 	player_.Open(url, pos);
 	opened_ok_ = false;
 	sub_cache_.key.clear();
@@ -2376,12 +2453,25 @@ void MainFrame::Tick()
 		if (st == PlayState::Failed)
 		{
 			const std::string err = player_.Error();
-			MessageBox(Fmt(T("Failed to open \"%s\":\n%s"), FileName(current_url_).c_str(), T(err).c_str()),
-				"Media Player Classic Home Cinema", MB_OK, 3);
+			if (err == disc::EncryptedText())
+				MessageBox(disc::EncryptedMessage(), "Media Player Classic Home Cinema", MB_OK, 3);
+			else
+				MessageBox(Fmt(T("Failed to open \"%s\":\n%s"), FileName(current_url_).c_str(), T(err).c_str()),
+					"Media Player Classic Home Cinema", MB_OK, 3);
 			ProsperoNotify(T("Media Player Classic PS5: could not open %s"), FileName(current_url_).c_str());
 			player_.Close();
 		}
 		last_state_ = st;
+	}
+	// the disc it plays from taken out (or changed): stopped, and said so
+	if (st != PlayState::Closed && st != PlayState::Failed && player_.DiscGeneration() != 0 &&
+		(player_.DiscGone() || disc::Generation(current_url_) != player_.DiscGeneration()))
+	{
+		OrbisLog("[ui] the disc of %s was taken out: stopped", current_url_.c_str());
+		player_.Close();
+		last_state_ = PlayState::Closed;
+		MessageBox(T("The disc was taken out: playback stopped."), "Media Player Classic Home Cinema", MB_OK, 2);
+		return;
 	}
 	// the end of a file
 	if (Loaded() && player_.Ended() && st == PlayState::Playing)
@@ -2918,6 +3008,7 @@ int MainFrame::Run(const std::string& first)
 		update::StartCheck(true);
 	}
 	WindowManager::Get().screen = CRect(0, 0, kW, kH);
+	disc::Start(); // the disc drives (mpc_disc.h)
 	ApplyAudio();
 	if (!first.empty())
 		OpenAny(first);
@@ -2969,7 +3060,8 @@ int MainFrame::Run(const std::string& first)
 					{"volup", ID_VOLUME_UP}, {"voldown", ID_VOLUME_DOWN}, {"faster", ID_PLAY_INCRATE}, {"slower", ID_PLAY_DECRATE},
 					{"close", ID_FILE_CLOSE_AND_RESTORE}, {"saveimage", ID_FILE_SAVE_IMAGE}, {"next", ID_NAVIGATE_SKIPFORWARD},
 					{"prev", ID_NAVIGATE_SKIPBACK}, {"addfav", ID_FAVORITES_ADD}, {"loadsub", ID_FILE_SUBTITLES_LOAD},
-					{"opendir", ID_FILE_OPENDIRECTORY}, {"exit", ID_FILE_EXIT}};
+					{"opendir", ID_FILE_OPENDIRECTORY}, {"opendvdbd", ID_FILE_OPENDVDBD}, {"disc0", ID_DISC_FIRST},
+					{"disc1", ID_DISC_FIRST + 1}, {"title1", ID_TITLE_FIRST}, {"title2", ID_TITLE_FIRST + 1}, {"exit", ID_FILE_EXIT}};
 				if (c.compare(0, 4, "cmd ") == 0)
 				{
 					int id = atoi(c.c_str() + 4);
@@ -3027,6 +3119,10 @@ int MainFrame::Run(const std::string& first)
 				}
 				else if (c == "quit")
 					quit_ = true;
+#ifndef __PROSPERO__
+				else if (c.compare(0, 6, "eject ") == 0 || c.compare(0, 7, "insert ") == 0)
+					disc::HostEject(c.substr(c.find(' ') + 1), c[0] == 'e'); // a disc taken out / put back (host tests)
+#endif
 				else if (c == "state")
 				{
 					const PlayerStats ps = player_.Stats();
@@ -3099,6 +3195,7 @@ int MainFrame::Run(const std::string& first)
 	}
 	SavePosition();
 	player_.Close();
+	disc::Stop();
 	tonemap::Shutdown(); // the HDR workers stopped and joined (the player's threads are gone)
 	s_.Save();
 	return 0;

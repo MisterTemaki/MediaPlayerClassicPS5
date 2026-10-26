@@ -4,6 +4,7 @@
 
 #include "mpc_dialogs.h"
 
+#include "mpc_disc.h"
 #include "mpc_i18n.h"
 #include "mpc_player.h"
 #include "mpc_settings.h"
@@ -98,17 +99,27 @@ struct FsEntry
 	bool dir = false;
 	uint64_t size = 0;
 	int64_t mtime = 0;
+	std::string target; // opens this instead (a disc's DVD-Video / Blu-ray)
 };
 
 bool ListDir(const std::string& path, std::vector<FsEntry>& out, std::string* err)
 {
+	if (path.compare(0, 7, "disc://") == 0)
+	{
+		std::vector<disc::Entry> e;
+		if (!disc::List(path, e, err))
+			return false;
+		for (const auto& x : e)
+			out.push_back({x.name, x.dir, x.size, x.mtime, ""});
+		return true;
+	}
 	if (path.compare(0, 6, "smb://") == 0)
 	{
 		std::vector<smb::Entry> e;
 		if (!smb::List(path, e, err))
 			return false;
 		for (const auto& x : e)
-			out.push_back({x.name, x.dir, x.size, x.mtime});
+			out.push_back({x.name, x.dir, x.size, x.mtime, ""});
 		return true;
 	}
 	DIR* d = opendir(path.c_str());
@@ -126,7 +137,7 @@ bool ListDir(const std::string& path, std::vector<FsEntry>& out, std::string* er
 		struct stat st = {};
 		if (stat(full.c_str(), &st) != 0)
 			continue;
-		out.push_back({e->d_name, S_ISDIR(st.st_mode), uint64_t(st.st_size), int64_t(st.st_mtime)});
+		out.push_back({e->d_name, S_ISDIR(st.st_mode), uint64_t(st.st_size), int64_t(st.st_mtime), ""});
 	}
 	closedir(d);
 	return true;
@@ -179,6 +190,9 @@ bool IsPlaylistFile(const std::string& name)
 
 std::string FileName(const std::string& path)
 {
+	// a DVD-Video / Blu-ray title: the disc's name (and the title)
+	if (disc::IsTitleUrl(path))
+		return disc::DisplayName(path);
 	std::string p = path;
 	while (p.size() > 1 && p.back() == '/')
 		p.pop_back();
@@ -253,12 +267,13 @@ enum class Ico
 	Network,
 	Server,
 	Computer,
-	Add
+	Add,
+	Disc
 };
 
 const Image* Icon(Ico which)
 {
-	static std::vector<Image> cache(16);
+	static std::vector<Image> cache(20);
 	static int made_dpi = 0;
 	if (made_dpi != g_dpi)
 	{
@@ -338,6 +353,29 @@ const Image* Icon(Ico which)
 			put(0.44, 0.16, 0.56, 0.84, 0, 120, 215);
 			put(0.16, 0.44, 0.84, 0.56, 0, 120, 215);
 			break;
+		case Ico::Disc:
+		{
+			// the drive, and a disc on it
+			put(0.06, 0.62, 0.94, 0.90, 120, 120, 120);
+			put(0.09, 0.65, 0.91, 0.87, 210, 210, 210);
+			const double cx = 0.5 * s, cy = 0.36 * s, r = 0.32 * s;
+			for (int y = 0; y < s; y++)
+				for (int x = 0; x < s; x++)
+				{
+					const double d = std::hypot(x + 0.5 - cx, y + 0.5 - cy);
+					if (d > r)
+						continue;
+					uint8_t* p = &rgba[(size_t(y) * s + x) * 4];
+					const bool hole = d < r * 0.22, edge = d > r - 1.2 || (d >= r * 0.22 && d < r * 0.22 + 1.2);
+					if (hole)
+						continue;
+					p[0] = edge ? 110 : uint8_t(190 + 40 * (x + y) / (2 * s));
+					p[1] = edge ? 110 : uint8_t(200 + 30 * x / s);
+					p[2] = edge ? 120 : 230;
+					p[3] = 255;
+				}
+			break;
+		}
 	}
 	img.FromRGBA(rgba.data(), s, s);
 	return &img;
@@ -452,6 +490,13 @@ public:
 			if (OrbisIsDir(p))
 				add(Fmt(T("Extended Storage %d (%s)"), i, p.c_str()), p, Ico::Usb);
 		}
+		// the disc drives (mpc_disc.h): the console's own and USB drives, with the disc's name
+		drives_seen = DrivesKey();
+		for (const disc::DriveState& d : disc::Drives())
+		{
+			add(disc::DriveName(d), "disc://" + d.id, Ico::Disc);
+			OrbisLog("[ui] file browser: %s (disc://%s)", disc::DriveName(d).c_str(), d.id.c_str());
+		}
 		nav->items.push_back({T("Network"), 0, Icon(Ico::Network), false});
 		places.push_back({T("Network"), "smb://", Ico::Network});
 		for (const NetServer& s : AppSettings().servers)
@@ -464,9 +509,55 @@ public:
 		places.push_back(ap);
 	}
 
+	// what the disc drives look like now (the pane is made again when it changes)
+	std::string drives_seen;
+	static std::string DrivesKey()
+	{
+		std::string k;
+		for (const disc::DriveState& d : disc::Drives())
+			k += d.id + ":" + std::to_string(int(d.kind)) + ":" + std::to_string(d.generation) + ";";
+		return k;
+	}
+	void Tick() override
+	{
+		const std::string k = DrivesKey();
+		if (k == drives_seen)
+			return;
+		// a disc put in or taken out: the pane, and the list if it shows a drive
+		const int sel = nav->sel;
+		const std::string sel_path = sel >= 0 && sel < int(places.size()) ? places[sel].path : "";
+		BuildPlaces();
+		for (size_t i = 0; i < places.size(); i++)
+			if (places[i].path == sel_path)
+				nav->sel = int(i);
+		if (dir.empty() || dir.compare(0, 7, "disc://") == 0)
+		{
+			const int keep = list->sel;
+			std::string to = dir;
+			if (!to.empty() && !disc::IsDir(to))
+				to = "disc://" + disc::DriveOf(to); // the disc changed: its root
+			Navigate(to, false);
+			if (keep >= 0 && keep < int(list->rows.size()))
+				list->sel = keep;
+		}
+	}
+
+	// a DVD-Video / Blu-ray structure's file: it plays the disc (or folder) as MPC-HC does
+	static bool IsTitleFile(const std::string& name)
+	{
+		std::string n = name;
+		for (char& c : n)
+			c = char(tolower(static_cast<unsigned char>(c)));
+		return n == "video_ts.ifo" || n == "index.bdmv";
+	}
+
 	bool Shown(const FsEntry& e) const
 	{
 		if (e.dir)
+			return true;
+		if (!e.target.empty())
+			return filter == BrowseFilter::Media;
+		if (filter == BrowseFilter::Media && IsTitleFile(e.name))
 			return true;
 		if (filter == BrowseFilter::Folder)
 			return false;
@@ -500,7 +591,8 @@ public:
 					e.name = places[i].name;
 					e.dir = true;
 					entries.push_back(e);
-					list->rows.push_back({places[i].name, "", T(places[i].path.compare(0, 6, "smb://") == 0 ? "Network location" : "Drive"), ""});
+					list->rows.push_back({places[i].name, "", T(places[i].path.compare(0, 6, "smb://") == 0 ? "Network location"
+						: places[i].path.compare(0, 7, "disc://") == 0 ? "Disc drive" : "Drive"), ""});
 					list->icons.push_back(Icon(places[i].icon));
 				}
 		}
@@ -531,18 +623,40 @@ public:
 			else
 				ListDir(dir, all, &error);
 			SortEntries(all);
+			// the root of a DVD-Video / Blu-ray disc: playing it comes first
+			if (dir.compare(0, 7, "disc://") == 0 && dir.find('/', 7) == std::string::npos && error.empty())
+			{
+				disc::DriveState ds;
+				if (disc::GetDrive(disc::DriveOf(dir), &ds) && !disc::PlayUrl(ds).empty())
+				{
+					FsEntry play;
+					play.name = ds.kind == disc::Kind::BluRay ? T("Play the Blu-ray") : T("Play the DVD-Video");
+					play.target = disc::PlayUrl(ds);
+					all.insert(all.begin(), play);
+				}
+			}
 			for (const auto& e : all)
 				if (Shown(e))
 				{
 					entries.push_back(e);
-					list->rows.push_back({e.name, DateText(e.mtime), TypeName(e.name, e.dir), e.dir ? "" : SizeText(e.size)});
-					list->icons.push_back(e.dir ? Icon(Ico::Folder) : FileIcon(e.name));
+					if (!e.target.empty())
+						list->rows.push_back({e.name, "", T(e.target.compare(0, 9, "bluray://") == 0 ? "Blu-ray" : "DVD-Video"), ""});
+					else
+						list->rows.push_back({e.name, DateText(e.mtime), TypeName(e.name, e.dir), e.dir ? "" : SizeText(e.size)});
+					list->icons.push_back(e.dir ? Icon(Ico::Folder) : !e.target.empty() ? Icon(Ico::Disc) : FileIcon(e.name));
 				}
 		}
 		if (!error.empty())
 		{
 			list->rows.push_back({error, "", "", ""});
 			list->icons.push_back(nullptr);
+		}
+		if (dir.compare(0, 7, "disc://") == 0)
+		{
+			std::string names;
+			for (const auto& e : entries)
+				names += (names.empty() ? "" : ", ") + e.name;
+			OrbisLog("[ui] file browser at %s: %s", dir.c_str(), error.empty() ? names.c_str() : error.c_str());
 		}
 		if (!entries.empty())
 			list->sel = 0;
@@ -563,6 +677,8 @@ public:
 		if (i < 0 || i >= int(entries.size()))
 			return "";
 		const FsEntry& e = entries[i];
+		if (!e.target.empty())
+			return e.target;
 		if (dir.empty())
 		{
 			for (const auto& p : places)
@@ -592,6 +708,15 @@ public:
 		const std::string p = EntryPath(i);
 		if (entries[i].dir)
 			Navigate(p);
+		else if (filter == BrowseFilter::Media && entries[i].target.empty() && IsTitleFile(entries[i].name))
+		{
+			// VIDEO_TS.IFO / index.bdmv: the DVD-Video / Blu-ray it belongs to
+			const std::string u = disc::TitleUrlForFolder(dir);
+			if (u.empty())
+				MessageBox(T("This folder has no DVD-Video (VIDEO_TS) or Blu-ray (BDMV) to play."), title, MB_OK, 2);
+			else
+				Finish(u);
+		}
 		else
 			Finish(p);
 	}
@@ -729,7 +854,7 @@ void ShowFileBrowser(const std::string& title, BrowseFilter filter, std::functio
 		std::string t = fb->address->text;
 		while (t.size() > 1 && t.back() == '/')
 			t.pop_back();
-		if (t.compare(0, 6, "smb://") == 0 || OrbisIsDir(t))
+		if (t.compare(0, 6, "smb://") == 0 || OrbisIsDir(t) || disc::IsDir(t))
 			fb->Navigate(t);
 		else if (OrbisIsFile(t))
 			fb->Finish(t);
@@ -763,7 +888,9 @@ void ShowFileBrowser(const std::string& title, BrowseFilter filter, std::functio
 	d->cancel->on_click = [fb] { fb->Finish(""); };
 	d->BuildPlaces();
 	std::string start = AppSettings().last_dir;
-	if (!start.empty() && start.compare(0, 6, "smb://") != 0 && !OrbisIsDir(start))
+	disc::DriveState start_drive;
+	if (!start.empty() && start.compare(0, 6, "smb://") != 0 && !OrbisIsDir(start) && !disc::IsDir(start) &&
+		!(start == "disc://" + disc::DriveOf(start) && disc::GetDrive(disc::DriveOf(start), &start_drive)))
 		start.clear();
 	d->Navigate(start.empty() ? OrbisDir("media") : start, false);
 	d->SetFocus(d->list);

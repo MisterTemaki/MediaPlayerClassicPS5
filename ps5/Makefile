@@ -1,6 +1,8 @@
 # Media Player Classic PS5
 #   make deps   -> build/deps/prefix-{ps5,host}   FFmpeg, libsmb2, Mbed TLS, zlib, libass (tools/build-deps.sh; once)
 #   make deps-subs -> the same prefixes: only FreeType, FriBidi, HarfBuzz, libass (tools/build-deps.sh subs)
+#   make deps-disc -> the same prefixes: libudfread, libbluray, libdvdread, libdvdnav, then FFmpeg again with its DVD-Video
+#                  demuxer (tools/build-deps.sh disc; 1.4)
 #   make ps5    -> build/ps5/MediaPlayerClassicPS5.elf   the payload to send with the PS5 Payload Manager / ELF loader:
 #                  it installs or updates the dashboard app /data/homebrew/$(TITLE_ID)/ (the player itself, icon
 #                  included) and stays running as the helper that lets the app reach /data and USB drives
@@ -25,7 +27,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.3.1
+VERSION ?= 1.4
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -42,7 +44,7 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
 	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
 	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp player/mpc_i18n.cpp \
-	player/mpc_ass.cpp player/mpc_sfnt.cpp \
+	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp \
 	coreorbis/orbis-shims/ProsperoUpdate.cpp
 # the payloads: the helper, and the installer (= helper + install)
 HELPER_SRC := coreorbis/orbis-shims/orbis_paths.cpp coreorbis/orbis-shims/ProsperoNotify.cpp \
@@ -62,7 +64,7 @@ DEFS := -DMPCPS5_PS5_VERSION='"$(VERSION)"' -DMPCPS5_TITLE_ID='"$(TITLE_ID)"' -D
 	-DORBIS_ROOT_DEFAULT='"/data/mpcps5"' -DMPCPS5_RELEASE_KEY='"$(RELEASE_KEY)"' -Ithird_party/monocypher
 PORT_WARN := -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers
 FF_LIBS = -lavformat -lavcodec -lavfilter -lswscale -lswresample -lavutil -ldav1d -lsmb2 -lmbedtls -lmbedx509 -lmbedcrypto -lz \
-	-lass -lharfbuzz -lfribidi -lfreetype
+	-lass -lharfbuzz -lfribidi -lfreetype -ldvdnav -ldvdread -lbluray -ludfread
 
 # stb and NanoSVG inside mpc_res.o / mpc_font.o have warnings of their own; the resources are built in
 %/port/player/mpc_res.o: EXTRA_FLAGS = -Wno-error -Wno-sign-compare -Wno-unused-function -Wno-unused-but-set-variable \
@@ -93,6 +95,9 @@ deps:
 
 deps-subs:
 	bash tools/build-deps.sh subs
+
+deps-disc:
+	bash tools/build-deps.sh disc
 
 $(PS5_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h
 	@mkdir -p $(dir $@)
@@ -200,7 +205,7 @@ build/app/app_crt.o build/app/app_cpp_runtime.o: build/app/%.o: $(NATIVE)/toolin
 
 FF_PS5_ARCHIVES = $(addprefix $(DEPS_PS5)/lib/,libavformat.a libavcodec.a libavfilter.a libswscale.a libswresample.a \
 	libavutil.a libdav1d.a libsmb2.a libmbedtls.a libmbedx509.a libmbedcrypto.a libz.a \
-	libass.a libharfbuzz.a libfribidi.a libfreetype.a)
+	libass.a libharfbuzz.a libfribidi.a libfreetype.a libdvdnav.a libdvdread.a libbluray.a libudfread.a)
 EBOOT_OBJS = build/app/app_crt.o build/app/app_cpp_runtime.o $(PS5_EMU_OBJ) $(PS5_OUT)/helper_data.o
 # the console's video decoder: the SDK has no stub for it, so one is made (stubs/videodec2_stub.c); it and
 # libSceSysmodule are linked before --as-needed, since the player only refers to them weakly (mpc_vdec.cpp)
@@ -309,5 +314,5 @@ test: host
 clean:
 	rm -rf build/ps5 build/host build/app build/dist
 
-.PHONY: ps5 host test send app dist clean deps deps-subs
+.PHONY: ps5 host test send app dist clean deps deps-subs deps-disc
 .SECONDARY:

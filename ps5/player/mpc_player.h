@@ -4,7 +4,8 @@
 // inside), its audio renderer and a video renderer (EVR-CP). Here the same work is done with FFmpeg's
 // libraries directly, laid out as ffplay and VLC do it:
 //   - an opener thread: avformat_open_input (local files, smb:// through libsmb2 -- mpc_smb.h --, http(s),
-//     HLS...), stream info, the default tracks, the decoders;
+//     HLS..., discs -- mpc_disc.h: files on data discs, DVD-Video and Blu-ray titles), stream info, the default
+//     tracks, the decoders;
 //   - a demux thread: packets into one queue per decoder; a seek flushes them (a new "serial" -- ffplay's
 //     word -- so whatever was decoded before is thrown away);
 //   - a video decoder thread (FFmpeg's own frame threads inside), decoded pictures into a short queue;
@@ -50,6 +51,14 @@ struct Chapter
 {
 	double time = 0;
 	std::string name;
+};
+
+// a DVD-Video / Blu-ray title (Navigate > Titles)
+struct DiscTitle
+{
+	int number = 0; // 1-based
+	double seconds = 0;
+	int chapters = 0;
 };
 
 enum class PlayState
@@ -142,6 +151,13 @@ public:
 	void SelectTrack(TrackType type, int id);
 	bool AddSubtitleFile(const std::string& path, std::string* error = nullptr);
 	std::vector<Chapter> Chapters() const;
+	// dvd:// and bluray:// (mpc_disc.h): the disc's titles and the one playing (0: not a disc title)
+	std::vector<DiscTitle> Titles() const;
+	int CurrentTitle() const;
+	// the disc this was playing from was taken out (the playback has stopped)
+	bool DiscGone() const;
+	// the disc it plays from (mpc_disc.h's generation; 0: not from a drive)
+	uint64_t DiscGeneration() const;
 
 	bool HasVideo() const;
 	bool AudioOnly() const;

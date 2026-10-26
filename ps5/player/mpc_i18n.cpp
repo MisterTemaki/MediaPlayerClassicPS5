@@ -1006,6 +1006,83 @@ const Entry kTable[] = {
 		"X: digitar   Quadrado: apagar   Triângulo: espaço   L2/R2: maiúsculas   Options: concluir   Bola: cancelar",
 		"Croix : saisir   Carré : effacer   Triangle : espace   L2/R2 : majuscules   Options : terminé   Rond : annuler",
 		"Kreuz: tippen   Quadrat: löschen   Dreieck: Leerzeichen   L2/R2: Umschalt   Options: fertig   Kreis: abbrechen"},
+	// ---- 1.4: disc drives (mpc_disc.h)
+	{"Disc drive (%s)", "Unidad de disco (%s)", "Unidade de disco (%s)", "Lecteur de disque (%s)", "Disc-Laufwerk (%s)"},
+	{"USB disc drive (%s)", "Unidad de disco USB (%s)", "Unidade de disco USB (%s)", "Lecteur de disque USB (%s)",
+		"USB-Disc-Laufwerk (%s)"},
+	{"Disc drive", "Unidad de disco", "Unidade de disco", "Lecteur de disque", "Disc-Laufwerk"},
+	{"No disc", "No hay disco", "Sem disco", "Aucun disque", "Keine Disc"},
+	{"reading...", "leyendo...", "lendo...", "lecture...", "wird gelesen..."},
+	{"unreadable disc", "disco ilegible", "disco ilegível", "disque illisible", "Disc nicht lesbar"},
+	{"no name", "sin nombre", "sem nome", "sans nom", "ohne Namen"},
+	{"Reading the disc...", "Leyendo el disco...", "Lendo o disco...", "Lecture du disque...", "Die Disc wird gelesen..."},
+	{"This disc is encrypted (a commercial film) and can't be played here: Media Player Classic PS5 doesn't decrypt "
+	 "discs. On a PS5 with a disc drive, the console's own player plays it.",
+		"Este disco está cifrado (una película comercial) y no se puede reproducir aquí: Media Player Classic PS5 no "
+		"descifra discos. En una PS5 con unidad de disco, lo reproduce el propio reproductor de la consola.",
+		"Este disco é criptografado (um filme comercial) e não pode ser reproduzido aqui: o Media Player Classic PS5 não "
+		"descriptografa discos. Num PS5 com leitor de disco, o próprio player do console o reproduz.",
+		"Ce disque est chiffré (un film du commerce) et ne peut pas être lu ici : Media Player Classic PS5 ne déchiffre "
+		"pas les disques. Sur une PS5 avec lecteur de disque, le lecteur de la console le lit.",
+		"Diese Disc ist verschlüsselt (ein Kauffilm) und kann hier nicht abgespielt werden: Media Player Classic PS5 "
+		"entschlüsselt keine Discs. Auf einer PS5 mit Laufwerk spielt sie der Player der Konsole ab."},
+	{"This disc can't be read: an audio CD (audio CDs can't be played here), or a blank or damaged disc.",
+		"No se puede leer este disco: un CD de audio (los CD de audio no se pueden reproducir aquí), o un disco vacío o "
+		"dañado.",
+		"Não é possível ler este disco: um CD de áudio (CDs de áudio não podem ser reproduzidos aqui), ou um disco vazio "
+		"ou danificado.",
+		"Ce disque ne peut pas être lu : un CD audio (les CD audio ne peuvent pas être lus ici), ou un disque vierge ou "
+		"endommagé.",
+		"Diese Disc kann nicht gelesen werden: eine Audio-CD (Audio-CDs können hier nicht abgespielt werden) oder ein "
+		"eine leere oder beschädigte Disc."},
+	{"This disc can't be read: the PS5's own drive doesn't read CDs (a USB drive does; audio CDs can't be played here), "
+	 "or the disc is blank or damaged.",
+		"No se puede leer este disco: la unidad de la propia PS5 no lee CD (una unidad USB sí; los CD de audio no se "
+		"pueden reproducir aquí), o el disco está vacío o dañado.",
+		"Não é possível ler este disco: o leitor do próprio PS5 não lê CDs (um leitor USB lê; CDs de áudio não podem "
+		"ser reproduzidos aqui), ou o disco está vazio ou danificado.",
+		"Ce disque ne peut pas être lu : le lecteur de la PS5 ne lit pas les CD (un lecteur USB, oui ; les CD audio ne "
+		"peuvent pas être lus ici), ou le disque est vierge ou endommagé.",
+		"Diese Disc kann nicht gelesen werden: Das Laufwerk der PS5 liest keine CDs (ein USB-Laufwerk schon; Audio-CDs "
+		"können hier nicht abgespielt werden), oder die Disc ist leer oder beschädigt."},
+	{"This disc is not a DVD-Video.", "Este disco no es un DVD-Video.", "Este disco não é um DVD-Video.",
+		"Ce disque n'est pas un DVD-Vidéo.", "Diese Disc ist keine DVD-Video."},
+	{"This disc is not a Blu-ray.", "Este disco no es un Blu-ray.", "Este disco não é um Blu-ray.",
+		"Ce disque n'est pas un Blu-ray.", "Diese Disc ist keine Blu-ray."},
+	{"This is not a Blu-ray this player can read.", "No es un Blu-ray que este reproductor pueda leer.",
+		"Não é um Blu-ray que este player consiga ler.", "Ce n'est pas un Blu-ray que ce lecteur sait lire.",
+		"Das ist keine Blu-ray, die dieser Player lesen kann."},
+	{"This Blu-ray has no title to play.", "Este Blu-ray no tiene ningún título que reproducir.",
+		"Este Blu-ray não tem nenhum título para reproduzir.", "Ce Blu-ray n'a aucun titre à lire.",
+		"Diese Blu-ray hat keinen Titel zum Abspielen."},
+	{"This Blu-ray's title can't be played.", "El título de este Blu-ray no se puede reproducir.",
+		"O título deste Blu-ray não pode ser reproduzido.", "Le titre de ce Blu-ray ne peut pas être lu.",
+		"Der Titel dieser Blu-ray kann nicht abgespielt werden."},
+	{"This DVD-Video's structure (VIDEO_TS) can't be read.", "No se puede leer la estructura (VIDEO_TS) de este DVD-Video.",
+		"Não é possível ler a estrutura (VIDEO_TS) deste DVD-Video.",
+		"La structure (VIDEO_TS) de ce DVD-Vidéo ne peut pas être lue.",
+		"Die Struktur (VIDEO_TS) dieser DVD-Video kann nicht gelesen werden."},
+	{"The folder can't be opened.", "No se puede abrir la carpeta.", "Não é possível abrir a pasta.",
+		"Le dossier ne peut pas être ouvert.", "Der Ordner kann nicht geöffnet werden."},
+	{"The file can't be opened from the disc.", "No se puede abrir el archivo del disco.",
+		"Não é possível abrir o arquivo do disco.", "Le fichier ne peut pas être ouvert depuis le disque.",
+		"Die Datei kann nicht von der Disc geöffnet werden."},
+	{"The disc was taken out: playback stopped.", "Se sacó el disco: la reproducción se detuvo.",
+		"O disco foi retirado: a reprodução parou.", "Le disque a été retiré : la lecture s'est arrêtée.",
+		"Die Disc wurde entnommen: Die Wiedergabe wurde gestoppt."},
+	{"Play the DVD-Video", "Reproducir el DVD-Video", "Reproduzir o DVD-Video", "Lire le DVD-Vidéo", "DVD-Video abspielen"},
+	{"Play the Blu-ray", "Reproducir el Blu-ray", "Reproduzir o Blu-ray", "Lire le Blu-ray", "Blu-ray abspielen"},
+	{"DVD-Video", "DVD-Video", "DVD-Video", "DVD-Vidéo", "DVD-Video"},
+	{"Blu-ray", "Blu-ray", "Blu-ray", "Blu-ray", "Blu-ray"},
+	{"This folder has no DVD-Video (VIDEO_TS) or Blu-ray (BDMV) to play.",
+		"Esta carpeta no tiene ningún DVD-Video (VIDEO_TS) ni Blu-ray (BDMV) que reproducir.",
+		"Esta pasta não tem nenhum DVD-Video (VIDEO_TS) nem Blu-ray (BDMV) para reproduzir.",
+		"Ce dossier ne contient aucun DVD-Vidéo (VIDEO_TS) ni Blu-ray (BDMV) à lire.",
+		"Dieser Ordner enthält keine DVD-Video (VIDEO_TS) und keine Blu-ray (BDMV) zum Abspielen."},
+	{"Open DVD/BD", "Abrir DVD/BD", "Abrir DVD/BD", "Ouvrir un DVD/BD", "DVD/BD öffnen"},
+	{"Open Disc", "Abrir disco", "Abrir disco", "Ouvrir un disque", "Disc öffnen"},
+	{"&Titles", "&Títulos", "&Títulos", "&Titres", "&Titel"},
+	{"Title %d", "Título %d", "Título %d", "Titre %d", "Titel %d"},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};

@@ -1,0 +1,20 @@
+diff --git a/libavformat/dvdvideodec.c b/libavformat/dvdvideodec.c
+index f92c5ae..967e1a2 100644
+--- a/libavformat/dvdvideodec.c
++++ b/libavformat/dvdvideodec.c
+@@ -1755,6 +1755,15 @@ static int dvdvideo_read_seek(AVFormatContext *s, int stream_index, int64_t time
+         c->seek_warned = 1;
+     }
+ 
++    /* back into the title's PGC first: once its end was read, libdvdnav has left it (the post commands, the next
++     * PGC, a menu, or stopped: then the next block would start the disc over from its first-play PGC) */
++    if (dvdnav_program_play(c->play_state.dvdnav, c->opt_title, c->play_state.pgcn, 1) != DVDNAV_STATUS_OK) {
++        av_log(s, AV_LOG_ERROR, "libdvdnav: unable to return to title %d, PGC %d for seeking\n",
++                                c->opt_title, c->play_state.pgcn);
++
++        return AVERROR_EXTERNAL;
++    }
++
+     /* XXX(PATCHWELCOME): use dvdnav_jump_to_sector_by_time(c->play_state.dvdnav, timestamp, 0)
+      * when it is available in a released version of libdvdnav; it is more accurate */
+     if (dvdnav_time_search(c->play_state.dvdnav, timestamp) != DVDNAV_STATUS_OK) {

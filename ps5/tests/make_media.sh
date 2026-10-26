@@ -162,4 +162,18 @@ EOF
 $FF -i "$D/grey.mp4" -i "$D/fontsub.ass" -map 0:v -map 1:s -c:v copy -c:s ass -attach "$FONT" \
 	-metadata:s:t mimetype=application/x-truetype-font "$D/fonts.mkv"
 rm -f "$D/fontsub.ass"
+# 1.4: disc images (tests/make_disc.py) for the drives (MPCPS5_HOST_DISC): data discs (UDF 1.02 with an ISO 9660 bridge;
+# ISO 9660 + Joliet), a DVD-Video (two titles, the longer with three chapters and two audio tracks), the same with its
+# packs marked scrambled (CSS), a Blu-ray (BDMV: one title, three chapters, two audio tracks), one with AACS
+mkdir -p "$D/discdata/Filmes"
+cp "$D/chapters.mkv" "$D/discdata/Filmes/"
+cp "$D/red.mp4" "$D/discdata/Ação - um nome longo demais para o ISO 9660.mp4"
+echo "not a video" >"$D/discdata/leia-me.txt"
+python3 "$(dirname "$0")/make_disc.py" data "$D/data-udf.iso" "$D/discdata" "MPC DATA" udf
+python3 "$(dirname "$0")/make_disc.py" data "$D/data-joliet.iso" "$D/discdata" "MPC_JOLIET" joliet
+rm -rf "$D/discdata"
+python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd.iso" "TEST_DVD"
+python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-css.iso" "CSS_DVD" css
+python3 "$(dirname "$0")/make_disc.py" bd "$D/bd.iso" "TEST_BD"
+python3 "$(dirname "$0")/make_disc.py" bd "$D/bd-aacs.iso" "AACS_BD" aacs
 echo "media in $D"

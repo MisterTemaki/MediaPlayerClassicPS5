@@ -6,6 +6,7 @@
 
 #include "mpc_i18n.h"
 
+#include "OrbisPaths.h"
 #include "ProsperoInput.h"
 #include "ProsperoSce.h"
 
@@ -1743,6 +1744,7 @@ public:
 
 void MessageBox(const std::string& text, const std::string& caption, int buttons, int icon, std::function<void(int)> done)
 {
+	OrbisLog("[ui] message: %s", text.c_str());
 	MsgBox* d = new MsgBox;
 	d->title = caption;
 	d->text = text;

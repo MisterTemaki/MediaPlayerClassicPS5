@@ -1,0 +1,234 @@
+diff -ruN a/src/dvd_input.c b/src/dvd_input.c
+--- a/src/dvd_input.c
++++ b/src/dvd_input.c
+@@ -425,144 +425,13 @@
+  */
+ int dvdinput_setup(void *priv, dvd_logger_cb *logcb, dvd_type_t dvda_flag)
+ {
+-  void *dvdcss_library = NULL;
+-
+-#ifdef HAVE_DVDCSS_DVDCPXM_H
+-  /* linking to libdvdcss */
+-  dvdcss_library = &dvdcss_library;  /* Give it some value != NULL */
+-#elif defined( HAVE_DVDCSS_DVDCSS_H )
+-  if (dvda_flag == DVD_V )
+-    dvdcss_library = &dvdcss_library;  /* Give it some value != NULL */
+-#else
+-  /* dlopening libdvdcss */
+-
+-#ifdef __APPLE__
+-  #define CSS_LIB "libdvdcss.2.dylib"
+-#elif defined(_WIN32)
+-  #define CSS_LIB "libdvdcss-2.dll"
+-#elif defined(__OS2__)
+-  #define CSS_LIB "dvdcss2.dll"
+-#elif defined(__OpenBSD__)
+-  #define CSS_LIB "libdvdcss.so"
+-#else
+-  #define CSS_LIB "libdvdcss.so.2"
+-#endif
+-
+-#define WIDEN_(x) L ## x
+-#define WIDEN(x) WIDEN_(x)
+-
+-#ifdef __OS2__
+-#define U_S "_"
+-#else
+-#define U_S
+-#endif
+-
+-/* Actually dlopen */
+-#if defined(_WIN32)
+-# if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+-    UINT em;
+-    /* First assume the dso/dll's required by -this- dso are sitting in the
+-     * same path or can be found in the usual places.  Failing that, let's
+-     * let that dso look in the apache root.
+-     */
+-    em = SetErrorMode(SEM_FAILCRITICALERRORS);
+-    dvdcss_library = LoadLibraryExA(CSS_LIB, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+-    if (!dvdcss_library)
+-    {
+-        SetLastError(0); // clear the last error
+-        dvdcss_library = LoadLibraryExA(CSS_LIB, NULL, 0);
+-    }
+-    SetErrorMode(em);
+-    SetLastError(0); // clear the last error
+-# else /* WINAPI_PARTITION_DESKTOP */
+-    dvdcss_library = LoadPackagedLibrary(WIDEN(CSS_LIB), 0);
+-# endif /* WINAPI_PARTITION_DESKTOP */
+-#else
+-  dvdcss_library = dlopen(CSS_LIB, RTLD_LAZY);
+-#endif
+-
+-  /* Locate the functions, DVD_V or DVD_A */
+-  if(dvdcss_library != NULL) {
+-    /* functions should have the same template*/
+-    /* hybrid discs encrypt video tracks with css*/
+-    DVDcss_open_stream = (dvdcss_t (*)(void *, dvdcss_stream_cb *))
+-      dlsym(dvdcss_library, U_S "dvdcss_open_stream");
+-    DVDcss_open = (dvdcss_t (*)(const char*))
+-      dlsym(dvdcss_library, U_S "dvdcss_open");
+-    DVDcss_close = (int (*)(dvdcss_t))
+-      dlsym(dvdcss_library, U_S "dvdcss_close");
+-    DVDcss_seek = (int (*)(dvdcss_t, int, int))
+-      dlsym(dvdcss_library, U_S "dvdcss_seek");
+-    DVDcss_read = (int (*)(dvdcss_t, void*, int, int))
+-      dlsym(dvdcss_library, U_S "dvdcss_read");
+-    if (dvda_flag == DVD_A || dvda_flag == DVD_VR ) {
+-#ifdef HAVE_DVDCSS_DVDCPXM_H
+-      DVDcpxm_read = (int (*)(dvdcss_t, void*, int, int))
+-        dlsym(dvdcss_library, U_S "dvdcpxm_read");
+-      DVDcpxm_init = (int (*)(dvdcss_t, uint8_t *p_mkb))
+-        dlsym(dvdcss_library, U_S "dvdcpxm_init");
+-#else
+-    DVDReadLog(priv, logcb, DVD_LOGGER_LEVEL_ERROR,
+-            "DVD-Audio headers not present, update the DVDCSS library");
+-    dlclose(dvdcss_library);
+-    dvdcss_library = NULL;
+-#endif
+-    }
+-    if(dlsym(dvdcss_library, U_S "dvdcss_crack")) {
+-      DVDReadLog(priv, logcb, DVD_LOGGER_LEVEL_ERROR,
+-                "Old (pre-0.0.2) version of libdvdcss found. "
+-                "libdvdread: You should get the latest version from "
+-                "https://www.videolan.org/" );
+-    } else if(!DVDcss_open || !DVDcss_close || !DVDcss_seek || !DVDcss_read) {
+-      DVDReadLog(priv, logcb, DVD_LOGGER_LEVEL_ERROR,
+-                 "Missing symbols in %s, "
+-                "this shouldn't happen !", CSS_LIB);
+-      dlclose(dvdcss_library);
+-      dvdcss_library = NULL;
+-#ifdef HAVE_DVDCSS_DVDCPXM_H
+-      } else if( (dvda_flag != DVD_V) && (!DVDcpxm_read || !DVDcpxm_init) ) {
+-      DVDReadLog(priv, logcb, DVD_LOGGER_LEVEL_ERROR,
+-              "Missing symbols for DVD-Audio in %s, "
+-              "this shouldn't happen !", CSS_LIB);
+-      dlclose(dvdcss_library);
+-      dvdcss_library = NULL;
+-#endif
+-    }
+-  }
+-#endif /* HAVE_DVDCSS_DVDCSS_H */
+-
+-  if(dvdcss_library != NULL) {
+-    /*
+-    char *psz_method = getenv( "DVDCSS_METHOD" );
+-    char *psz_verbose = getenv( "DVDCSS_VERBOSE" );
+-    fprintf(stderr, "DVDCSS_METHOD %s\n", psz_method);
+-    fprintf(stderr, "DVDCSS_VERBOSE %s\n", psz_verbose);
+-    */
+-
+-    /* libdvdcss wrapper functions */
+-    dvdinput_open  = css_open;
+-    dvdinput_close = css_close;
+-    dvdinput_seek  = css_seek;
+-    dvdinput_title = css_title;
+-    dvdinput_read  = css_read;
+-
+-    /* additional setup function that must be run for DVD_A decryption */
+-    if (dvda_flag == DVD_A || dvda_flag == DVD_VR) {
+-#ifdef HAVE_DVDCSS_DVDCPXM_H
+-    dvdinput_init  = cpxm_init;
+-#else
+-    assert(!"libdvdcss compiled without DVD-Audio (CPXM) support");
+-#endif
+-    }
+-    return 1;
+-
+-  } else {
+-    DVDReadLog(priv, logcb, DVD_LOGGER_LEVEL_WARN,
+-               "Encrypted DVD support unavailable.");
+-
+-    dvdinput_setup_builtin(priv, logcb);
+-    return 0;
+-  }
++  /* Media Player Classic PS5: no decryption of any kind. libdvdcss is neither linked nor loaded (no dlopen):
++   * the discs are read as they are, so an encrypted (CSS/CPRM) disc can't be played, by design. */
++  (void)dvda_flag;
++  DVDReadLog(priv, logcb, DVD_LOGGER_LEVEL_INFO,
++             "Decryption is not built in: unencrypted discs only.");
++  dvdinput_setup_builtin(priv, logcb);
++  return 0;
+ }
+ 
+ /**
+diff -ruN a/src/dvd_reader.c b/src/dvd_reader.c
+--- a/src/dvd_reader.c
++++ b/src/dvd_reader.c
+@@ -426,6 +426,19 @@
+   return dir_has_file( ctx, low, name );
+ }
+ 
++/* Media Player Classic PS5: the filesystem the DVDOpen* calls with a path read through (DVDSetFilesystemFactory) */
++static dvd_reader_filesystem_h *(*filesystem_factory)(void);
++
++void DVDSetFilesystemFactory( dvd_reader_filesystem_h *(*factory)(void) )
++{
++  filesystem_factory = factory;
++}
++
++static dvd_reader_filesystem_h *MakeFilesystem(void)
++{
++  return filesystem_factory ? filesystem_factory() : InitInternalFilesystem();
++}
++
+ static dvd_reader_t *DVDOpenCommon( void *priv,
+                                     const dvd_logger_cb *logcb,
+                                     const char *ppath,
+@@ -474,7 +487,7 @@
+   }
+ 
+   // create the internal filesystem
+-  ctx->fs = InitInternalFilesystem();
++  ctx->fs = MakeFilesystem();
+   if (!ctx->fs)
+   {
+     free(ctx);
+@@ -614,7 +627,10 @@
+         goto DVDOpen_error;
+     }
+ 
+-#if defined(__APPLE__)
++#if 1
++    /* Media Player Classic PS5: no decryption, so no device is looked for behind a mount point (that was for CSS
++     * authentication): a folder is read as files. */
++#elif defined(__APPLE__)
+     struct statfs s[128];
+     int r = getfsstat(NULL, 0, MNT_NOWAIT);
+     if (r > 0) {
+@@ -698,7 +714,7 @@
+ 
+ #if !defined(_WIN32) && !defined(__OS2__)
+     if( !dev_name ) {
+-      Log0(ctx, "Couldn't find device name." );
++      /* Media Player Classic PS5: a folder is read as files */
+     } else if( !ctx->rd ) {
+       Log0(ctx, "Device %s inaccessible, "
+                 "CSS authentication not available.", dev_name );
+@@ -763,7 +779,7 @@
+     return ret;
+ 
+   /* the builtin input reads through ctx->fs so set it before probing */
+-  ctx->fs = InitInternalFilesystem();
++  ctx->fs = MakeFilesystem();
+   if(!ctx->fs) {
+     free(ctx);
+     return ret;
+diff -ruN a/src/dvdread/dvd_reader.h b/src/dvdread/dvd_reader.h
+--- a/src/dvdread/dvd_reader.h
++++ b/src/dvdread/dvd_reader.h
+@@ -190,6 +190,13 @@
+  * do not mix this with a css reader in the same process
+  * it switches all readers to the builtin input
+  */
++/**
++ * Media Player Classic PS5: every DVDOpen, DVDOpen2 (and libdvdnav's dvdnav_open2) of a path reads through the
++ * filesystem the factory makes (stat, file_open, file_read, file_seek...), one per open, instead of the system's
++ * files; NULL: the system's again. Set it before opening anything.
++ */
++DVDREAD_API void DVDSetFilesystemFactory( dvd_reader_filesystem_h *(*factory)(void) );
++
+ DVDREAD_API dvd_reader_t *DVDOpenFiles( void *priv, const dvd_logger_cb *logcb, const char * path, dvd_reader_filesystem_h *fs);
+ 
+ /**

@@ -1,0 +1,144 @@
+diff -ruN a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -159,11 +159,8 @@
+     libdl_dependency = []
+     thread_dependency = []
+ else
+-    if cc.has_function('dlopen', prefix: '#include <dlfcn.h>', args: test_args)
+-        libdl_dependency = []
+-    else
+-        libdl_dependency = cc.find_library('dl')
+-    endif
++    # Media Player Classic PS5: no dynamic loading (src/file/dl_posix.c), so no libdl
++    libdl_dependency = []
+     thread_dependency = dependency('threads')
+     cdata.set('HAVE_PTHREAD_H', 1)
+ endif
+diff -ruN a/src/file/dl_posix.c b/src/file/dl_posix.c
+--- a/src/file/dl_posix.c
++++ b/src/file/dl_posix.c
+@@ -22,9 +22,6 @@
+ #include "config.h"
+ #endif
+ 
+-#ifdef HAVE_DLADDR
+-#  define _GNU_SOURCE  /* dladdr */
+-#endif
+ 
+ #include "dl.h"
+ #include "util/macro.h"
+@@ -36,94 +33,29 @@
+ #    define _DARWIN_C_SOURCE
+ #endif
+ 
+-#if defined(HAVE_DLFCN_H)
+-#   include <dlfcn.h>
+-#elif defined(HAVE_SYS_DL_H)
+-#   include <sys/dl.h>
+-#endif
+-
++/* Media Player Classic PS5: nothing is ever loaded at run time. libbluray loads libaacs, libbdplus, libmmbd and the
++ * Java VM (BD-J) through these functions only: here they find nothing, so an AACS / BD+ disc can't be played and BD-J
++ * is off, by design (no decryption of any kind). */
+ #include <string.h>
+ 
+-static void *_dl_dlopen(const char *path)
+-{
+-    void *result;
+-
+-    result = dlopen(path, RTLD_LAZY);
+-
+-    if (!result) {
+-        BD_DEBUG(DBG_FILE, "can't open library '%s': %s\n", path, dlerror());
+-    } else {
+-        BD_DEBUG(DBG_FILE, "opened library '%s'\n", path);
+-    }
+-
+-    return result;
+-}
+-
+ void *dl_dlopen(const char *path, const char *version)
+ {
+-    char *name;
+-    void *dll;
+-    int i;
+-
+-#if defined(__APPLE__)
+-    static const char ext[] = ".dylib";
+-    /*
+-      Search for the library in several locations:
+-       ""               - default search path (including DYLD_LIBRARY_PATH)
+-       @loader_path     - location of current library/binary (ex. libbluray.dylib)
+-       @executable_path - location of running binary (ex. /Applications/Some.app/Contents/MacOS)
+-       @rpath           - search rpaths of running binary (man install_name_path)
+-       /usr/local/lib/  - explicitly added path, as runtime hardened programs ignore DYLD_FALLBACK_PATH now
+-    */
+-    static const char *search_paths[] = {"", "@loader_path/lib/", "@loader_path/", "@executable_path/",
+-                                         "@executable_path/lib/", "@executable_path/../lib/",
+-                                         "@executable_path/../Resources/", "@rpath/", "/usr/local/lib/", NULL};
+-    version = NULL;
+-#else
+-    static const char ext[] = ".so";
+-    static const char *search_paths[] = {"", NULL};
+-#endif
+-
+-    for (i = 0 ; search_paths[i] ; ++i) {
+-#ifdef __OpenBSD__
+-        name = str_printf("%s%s%s", search_paths[i], path, ext);
+-#else
+-        if (version) {
+-            name = str_printf("%s%s%s.%s", search_paths[i], path, ext, version);
+-        } else {
+-            name = str_printf("%s%s%s", search_paths[i], path, ext);
+-        }
+-#endif
+-
+-        if (!name) {
+-            BD_DEBUG(DBG_FILE | DBG_CRIT, "out of memory\n");
+-            continue;
+-        }
+-
+-        dll = _dl_dlopen (name);
+-        X_FREE(name);
+-        if (dll) {
+-            return dll;
+-        }
+-    }
+-
++    (void)version;
++    BD_DEBUG(DBG_FILE, "not loading '%s': this build loads no libraries\n", path);
+     return NULL;
+ }
+ 
+ void *dl_dlsym(void *handle, const char *symbol)
+ {
+-    void *result = dlsym(handle, symbol);
+-
+-    if (!result) {
+-        BD_DEBUG(DBG_FILE, "dlsym(%p, '%s') failed: %s\n", handle, symbol, dlerror());
+-    }
+-
+-    return result;
++    (void)handle;
++    (void)symbol;
++    return NULL;
+ }
+ 
+ int dl_dlclose(void *handle)
+ {
+-    return dlclose(handle);
++    (void)handle;
++    return 0;
+ }
+ 
+ #define PATH_SEPARATOR '/'
+@@ -135,7 +67,7 @@
+     if (!initialized) {
+         initialized = 1;
+ 
+-#if defined(__APPLE__) || defined(HAVE_DLADDR)
++#if 0 /* Media Player Classic PS5: no dladdr */
+         Dl_info dl_info;
+         int ret = dladdr((void *)(uintptr_t)dl_get_path, &dl_info);
+         if (ret != 0) {

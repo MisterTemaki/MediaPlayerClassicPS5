@@ -2,8 +2,9 @@
 
 A port of **Media Player Classic - Home Cinema** (MPC-HC 1.7.13) to the PlayStation 5: MPC-HC's window,
 menus, toolbar, seek bar, status bar, dialogs and keyboard behaviour, drawn as Windows 10 draws them, on a
-native PS5 app that plays video and music from **USB drives, the console's storage, Windows/Samba network
-shares (SMB) and the Internet (HTTP/HTTPS, HLS)**.
+native PS5 app that plays video and music from **USB drives, the console's storage, disc drives (the PS5's own and
+USB drives: data discs, unencrypted DVD-Video and Blu-ray), Windows/Samba network shares (SMB) and the Internet
+(HTTP/HTTPS, HLS)**.
 
 On Windows MPC-HC plays through DirectShow and LAV Filters, which are FFmpeg inside; here the playback engine
 is **FFmpeg 7.1.1** itself (with **dav1d** for AV1), built for the console, and SMB shares are read with
@@ -14,10 +15,10 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.3.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 324 host tests
+> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 353 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
-> HDR tone mapping, 5.1/7.1 output). It has **not been run on a PS5 yet** -- please report what works and what
+> HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
 > doesn't (with **View > Options > Miscellaneous > Debug logs** on -- `debug_logs=1` in `/data/mpcps5/mpc-hc.ini` -- the
 > log goes to `/data/mpcps5/logs/boot.log`).
 
@@ -26,6 +27,16 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.4:** what MachoMan1988 asked for ([#2](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/2)): "attach my
+external blu ray disc drive to enjoy my movies in the same way they are doing with PS2 disc games". **Disc drives**
+-- the PS5's own and a USB drive -- appear in the Open dialog as *Disc drive (name)* / *USB disc drive (name)*, and in
+**File > Open Disc**: **data discs** (CD-ROM through a USB drive, DVD±R, BD-R with files: UDF, ISO 9660, Joliet)
+open like a USB drive, and **unencrypted DVD-Video and Blu-ray** play their main title, with their chapters and
+audio/subtitle tracks (**Navigate > Titles** for the others). **No decryption of any kind**: a commercial (encrypted)
+film is recognised and refused with a message -- on a PS5 with a disc drive, the console's own player plays it. Disc
+reading follows **5S2CD** (by The7mirrors, a fork of PS5SX2), which reads PS2 discs from the same drives. Not tried on
+a PS5 yet; see [Discs](#discs) for what plays and what doesn't.
 
 **1.3.1:** what Sulfurico-One64 also asked for, in a comment on
 [#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1): adjusting the sound "like we can do on the PC
@@ -123,6 +134,7 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 - [The window](#the-window)
 - [Controls](#controls)
 - [Opening media](#opening-media)
+- [Discs](#discs)
 - [Subtitles](#subtitles)
 - [Audio](#audio)
 - [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround)
@@ -134,8 +146,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.3.1.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.3.1.elf`).
+1. Send `MediaPlayerClassicPS5-v1.4.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.4.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
@@ -220,10 +232,12 @@ Cross types the key under the highlight, **Square** is backspace, **Triangle** a
 ## Opening media
 
 - **File > Quick Open File...** -- the "Open" dialog: the navigation pane (This PS5, Media, Internal storage,
-  each USB drive, Network), the folder, File name, the types (Media files / All files), Open.
+  each USB drive, each disc drive, Network), the folder, File name, the types (Media files / All files), Open.
 - **File > Open File...** -- MPC-HC's Open dialog: an address (a file or a URL; Recent Files in the list),
   Browse..., "Add to playlist without opening".
 - **File > Open Directory...** -- every media file of a folder as the playlist.
+- **File > Open Disc** -- a disc drive's DVD-Video or Blu-ray (its main title), or a data disc's files in the Open
+  dialog; **File > Open DVD/BD...** -- a disc drive, or a folder with a `VIDEO_TS` or `BDMV` in it. See [Discs](#discs).
 - **File > Recent Files**, **Favorites** (Add to Favorites remembers the position).
 
 Where:
@@ -239,10 +253,57 @@ Where:
 - **The Internet**: `http://` and `https://` (certificates checked against Mozilla's list), HLS (`.m3u8`),
   `rtmp://`, `rtsp://`, `udp://`. Type the address in File > Open File.
 - **Playlists**: `.m3u`, `.m3u8`, `.pls`.
+- **Discs** in the PS5's own drive or a USB drive: see [Discs](#discs).
 
 **Remember File position** is on (Options > Player): a file opens again where it was left (not near its start
 or its end). **After Playback** (Play menu): do nothing, play the next file in the folder, or exit. Navigate >
 Previous/Next goes by chapter, then by playlist item, then to the neighbouring file in the folder.
+
+## Discs
+
+**1.4**, for MachoMan1988 ([#2](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/2)). The console's own
+disc drive (`/dev/cd0`) and a USB drive (`/dev/cd1`...) are read sector by sector, as **5S2CD** reads PS2 discs from them (FreeBSD's cd(4), payload-tested by 5S2CD on firmware
+13.00). Reading needs what the rest of the app needs: the payload sent (the HEN running), which lets the app out of
+its sandbox. A disc put in or taken out while the app runs is seen within a few seconds (the Open dialog follows).
+
+![The Open dialog with a DVD-Video in the console's drive, a data disc and an empty USB drive](docs/screenshots/discs.png)
+
+**What plays:**
+
+- **Data discs** -- a CD-ROM (through a USB drive), DVD±R/RW, BD-R/RE with files on them, as UDF (libudfread reads
+  up to 2.60, what Blu-ray burners write; the tests use 1.02) or ISO 9660 with Joliet's long names: in the Open
+  dialog's navigation pane as *Disc drive (name)* / *USB disc drive (name)*; files open and seek like files on a USB
+  drive (read from the disc as they play, nothing copied first); File > Open Disc on a data disc opens the dialog
+  there.
+- **DVD-Video, unencrypted** (home-made DVDs, discs burned from a `VIDEO_TS` folder): **File > Open Disc > the
+  drive**, *Play the DVD-Video* at the disc's top in the Open dialog, or `VIDEO_TS.IFO`, plays the **main title** (the
+  longest) with its **chapters** (Navigate > Chapters, Previous/Next, R1/L1) and its **audio and subtitle tracks**
+  (Play > Audio Track / Subtitle Track, with their languages). **Navigate > Titles** plays another title. Through
+  FFmpeg's DVD-Video demuxer (libdvdnav, libdvdread).
+- **Blu-ray, unencrypted** (BDMV structures without AACS: BD-R/RE authored at home): the same -- the main title
+  (libbluray's choice), its chapters, its tracks (languages from the playlist), Navigate > Titles. Through libbluray;
+  the title's stream goes to FFmpeg.
+- A `VIDEO_TS` or `BDMV` **folder** on a USB drive or the console's storage plays the same way: File > Open
+  DVD/BD..., or `VIDEO_TS.IFO` / `index.bdmv` in the Open dialog.
+
+**What doesn't:**
+
+- **Encrypted discs** -- commercial DVD films (CSS) and Blu-ray films (AACS, BD+): there is **no decryption of any
+  kind** in this app (no libdvdcss, libaacs, libbdplus, keys; the libraries are built so they can't load one either).
+  Such a disc is recognised -- a DVD by the drive's copyright information, packs marked scrambled or a drive that
+  won't read its titles, a Blu-ray by its AACS / BD+ files -- and refused with a message. **On a PS5 with a disc drive, the console's own player plays
+  them.**
+- **Disc menus** (1.4): the main title plays; Navigate > Titles picks another. The menu commands stay greyed.
+- **Audio CDs**: FreeBSD's cd(4) can't read audio tracks (5S2CD found the same); such a disc shows as unreadable.
+- **CDs in the PS5's own drive**: it doesn't read CDs at all (5S2CD); a USB drive does.
+- **Blu-ray through a drive hasn't been tried anywhere** (5S2CD reads DVDs and CDs): only a PS5 with a Blu-ray drive
+  can confirm it. Neither part of this has been run on a PS5 yet -- the tests use disc images in stand-in drives.
+- A Blu-ray title made of several clips (seamless branching) may show odd times when seeking: the tests' title is one
+  clip. No BD-J (Java) menus, no 3D; Ultra HD Blu-ray films are always encrypted (AACS 2).
+- The drive name is a guess from its number, as 5S2CD's: `cd0` "Disc drive" (the console's own), `cd1` and up "USB disc
+  drive".
+
+`boot.log` (Debug logs on) says what each disc was found to be (`[disc] cd0: "NAME", UDF, ...: DVD-Video`).
 
 ## Subtitles
 
@@ -344,8 +405,8 @@ Honest limits:
 - **HDR is tone mapped to SDR**, not sent to the TV as HDR (the screen is drawn in SDR). Dolby Vision profile
   5 (no HDR10 base layer) has wrong colours.
 - The output is 1920x1080 at 60 Hz: 24 fps films have the usual 3:2 cadence.
-- No DVD or Blu-ray discs or menus (the console's drive isn't readable this way), no DRM (Netflix, Prime...),
-  no Chromecast/DLNA server.
+- Discs: unencrypted DVD-Video, Blu-ray and data discs only, no disc menus, no audio CDs (see [Discs](#discs)); no
+  DRM (Netflix, Prime...), no Chromecast/DLNA server.
 - The Save Image command writes PNGs to `/data/mpcps5/screenshots`; Save a Copy, thumbnails and subtitle
   downloads are greyed.
 
@@ -420,10 +481,11 @@ On Linux (Ubuntu 24.04 tested), with the [ps5-payload-dev SDK](https://github.co
 
 ```
 cd ps5
-make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib for the PS5 and the host (once)
+make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib, the subtitle and the disc libraries,
+                   # for the PS5 and the host (once); make deps-disc: only the disc libraries, then FFmpeg again
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.3.1.elf, the release zip, mpc-ps5-v1.3.1-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.4.elf, the release zip, mpc-ps5-v1.4-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 
@@ -448,6 +510,7 @@ Source map:
 | `player/mpc_dialogs.cpp` | MPC-HC's dialogs (from mpc-hc.rc's templates) and the Open dialog |
 | `player/mpc_gdi.cpp`, `mpc_font.cpp`, `mpc_res.cpp` | a small GDI, fonts (stb_truetype), MPC-HC's resources |
 | `player/mpc_smb.cpp`, `mpc_console.cpp` | SMB through libsmb2; the console glue (thread stacks, name lookups) |
+| `player/mpc_disc.cpp` | disc drives: the watcher, the sector reader (read-ahead cache), UDF / ISO 9660, DVD-Video and Blu-ray titles |
 | `player/mpc_settings.cpp` | mpc-hc.ini, and credentials.ini (the network passwords) |
 
 ## Credits and licences
@@ -472,6 +535,20 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   portions of this software are copyright (C) The FreeType Project, www.freetype.org; all rights reserved), **HarfBuzz** 14.5.1 (MIT,
   the core only: no glib, ICU or cairo) and **FriBidi** 1.0.16 (LGPL-2.1), all static, built without fontconfig
   by `tools/build-deps.sh` (`tools/build-deps.sh subs` -- `make deps-subs` -- builds only these four).
+- **5S2CD** (by The7mirrors, a fork of PS5SX2, GPL-3.0) -- disc reading after it: the drives as FreeBSD cd(4) devices
+  (`/dev/cd0` the console's own, `/dev/cd1` a USB drive), whole 2048-byte sectors with `pread()`, `DIOCGMEDIASIZE`,
+  `DVDIOCREADSTRUCTURE`, `CDIOREADTOCHEADER`, a disc being there when its sector 16 reads, the read-ahead; and what it
+  found (the console's drive reads no CDs, cd(4) no audio tracks). 1.4, see [Discs](#discs).
+- **libdvdread** 7.1.1 and **libdvdnav** 7.0.0 -- DVD-Video (FFmpeg's DVD-Video demuxer uses them); GPL-2.0-or-later;
+  VideoLAN and the libdvdread/libdvdnav authors. Built **without libdvdcss**, and with
+  `tools/patches/libdvdread-7.1.1-mpcps5.patch`: no decryption of any kind (libdvdcss neither linked nor loaded), no
+  device looked up behind a mount point, `DVDSetFilesystemFactory()` (the drives read through the player's sector
+  reader).
+- **libbluray** 1.5.0 -- Blu-ray; LGPL-2.1-or-later; VideoLAN and the libbluray authors. No BD-J (Java), libxml2,
+  fontconfig or FreeType; `tools/patches/libbluray-1.5.0-mpcps5.patch`: nothing is loaded at run time (no libaacs,
+  libbdplus, libmmbd or Java VM). **libudfread** 1.2.0 -- UDF; LGPL-2.1-or-later; VideoLAN. All four static, from
+  VideoLAN's release tarballs (SHA-256 in `tools/build-deps.sh`); FFmpeg's DVD-Video demuxer with
+  `tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch` (a seek once the title's end was read).
 - **Mbed TLS** 3.6.7 (Apache-2.0), **zlib**, **Mozilla's CA list** (MPL-2.0, via certifi).
 - **Monocypher** 4.0.2 -- Ed25519 for the release signatures; BSD-2-Clause or CC0; Loup Vaillant and contributors.
   <https://github.com/LoupVaillant/Monocypher>

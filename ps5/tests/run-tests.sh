@@ -19,7 +19,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/fonts.mkv" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/bd-aacs.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -436,10 +436,10 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 u16run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.3.1 01.031.000
+release v1.4 01.040.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.3.1)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.4)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -547,12 +547,14 @@ S="$S;82:key escape;88:mouse 960,540;90:rclick;100:key escape;110:cmd about;130:
 S="$S;146:key down;149:key down;152:key down;155:key down;158:key down;161:key down;170:key escape"
 S="$S;180:cmd open;195:key escape;200:cmd quickopen;220:key escape;230:cmd props;245:key escape;250:cmd goto;258:key enter"
 S="$S;270:key escape;275:key escape;280:cmd addfav;290:key escape;300:cmd volup;305:cmd mute;310:cmd faster;315:cmd next"
-S="$S;320:cmd pause;325:cmd opendir;340:key escape;350:open $WORK/no-such-file.mkv;380:key enter;390:quit"
+S="$S;320:cmd pause;325:cmd opendir;340:key escape;350:open $WORK/no-such-file.mkv;380:key enter"
+# 1.4: the disc drives in the panes (an encrypted DVD, an empty USB drive), File > Open DVD/BD, the encrypted disc's message
+S="$S;390:cmd opendvdbd;405:key escape;410:open dvd://cd0;440:key enter;450:quit"
 for L in 1 2 3 4; do
 	T=$(newroot t17_$L)
 	cp "$MEDIA/chapters.mkv" "$T/root/media/"
 	ini "$T" "Language=$L"
-	rc=$(MPCPS5_HOST_I18N_MISSING=$T/missing.txt run "$T" "0:0" "$S" "145,255,262" "$T/root/media/chapters.mkv")
+	rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd-css.iso,$WORK/no-disc.iso MPCPS5_HOST_I18N_MISSING=$T/missing.txt run "$T" "0:0" "$S" "145,255,262,400,430" "$T/root/media/chapters.mkv")
 	touch $T/missing.txt
 	# what was shown untranslated: only names (the file's, its tracks', the buttons') and texts made from translated formats
 	python3 - $T/missing.txt $PWD/player/mpc_i18n.cpp > $T/untranslated.txt <<'PY'
@@ -1080,6 +1082,67 @@ w = [rms(x[i:i + 2400]) for i in range(s, b0 - 7200, 2400)]  # not the last bloc
 k = next(i for i, r in enumerate(w) if r > 1000)
 ok = k >= 4 and all(abs(r - 463) < 15 for r in w[:k]) and all(abs(r - 1852) < 40 for r in w[k + 1:]) and len(w) - k - 1 >= 2
 print([round(r) for r in w]); sys.exit(0 if ok else 1)\" >$T/live.txt" "turned on while a file plays: from then on, after what was queued (as it is first, 4x before the burst)"
+nosan "$T"
+fi
+
+if want 25; then
+echo "== 25. 1.4: disc drives (the PS5's own, USB): data discs, DVD-Video, Blu-ray; encrypted discs refused, nothing decrypted"
+# disc images in the drives (MPCPS5_HOST_DISC: cd0 the console's own, cd1... USB; a missing file: an empty drive)
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+# a: the Open dialog: the drives with their discs' names; a data disc (UDF) listed; a file on it plays and seeks
+T=$(newroot t25)
+ini "$T" "LastDir=disc://cd1/Filmes"
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso,$MEDIA/data-udf.iso,$WORK/no-disc.iso run "$T" "0:0" "30:cmd quickopen;60:key enter;150:state;160:seek 4;230:state;250:quit" "55,140,225")
+expect "[ $rc = 0 ] && log $T '\[ui\] file browser: Disc drive (TEST_DVD) (disc://cd0)' && log $T '\[ui\] file browser: USB disc drive (MPC DATA) (disc://cd1)' && log $T '\[ui\] file browser: USB disc drive (No disc) (disc://cd2)'" "the Open dialog's navigation pane: Disc drive (TEST_DVD), USB disc drive (MPC DATA), USB disc drive (No disc)"
+expect "log $T '\[disc\] cd1: \"MPC DATA\", UDF, ' && log $T '\[ui\] file browser at disc://cd1/Filmes: chapters.mkv$'" "the data disc read (UDF) and its folder listed: chapters.mkv"
+expect "log $T '\[disc\] opened disc://cd1/Filmes/chapters.mkv' && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00140.ppm 960 400 red >/dev/null" "Cross: it plays from the disc (red)"
+expect "near \$(field $T 2 2) 5 1 && $CHECK $T/dump/flip00225.ppm 960 400 green >/dev/null" "it seeks: 4 s, green"
+nosan "$T"
+# b: ISO 9660 + Joliet: the long, accented name as Joliet keeps it
+T=$(newroot t25b)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/data-joliet.iso run "$T" "0:0" "30:open disc://cd0/Ação - um nome longo demais para o ISO 9660.mp4;100:state;110:open disc://cd0/Filmes/chapters.mkv;170:seek 7;230:state;240:quit" "95,225")
+expect "[ $rc = 0 ] && log $T '\[disc\] cd0: \"MPC_JOLIET\", ISO 9660 + Joliet, ' && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00095.ppm 960 400 red >/dev/null" "ISO 9660 + Joliet: the file with a long, accented name plays (red)"
+expect "near \$(field $T 2 2) 7.9 1 && $CHECK $T/dump/flip00225.ppm 960 400 blue >/dev/null" "another file, seeking to 7 s: blue"
+nosan "$T"
+# c: a DVD-Video: File > Open Disc plays the longest title (2 of 2) with its chapters and audio tracks; Next goes to the next
+# chapter, the Portuguese track, a seek, Navigate > Titles: title 1 (white)
+T=$(newroot t25c)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso run "$T" "0:0" "30:cmd disc0;90:state;100:cmd next;170:state;180:cmd 2002;220:state;230:seek 6.5;300:state;310:cmd title1;390:state;400:quit" "85,165,295,385")
+expect "[ $rc = 0 ] && log $T 'DVD-Video mpcdisc:cd0: 2 title(s), playing title 2 (9.0 s), the longest' && log $T 'disc title 2 of 2: 3 chapter(s); #1 audio eng, #2 audio por'" "File > Open Disc: the DVD's main title (the longest, 2 of 2): 3 chapters, audio English and Portuguese"
+expect "[ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 1 3) 9 0.1 && [ \"\$(field $T 1 5)\" = 1 ] && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "it plays: 9 s, the first audio track, red"
+expect "near \$(field $T 2 2) 4.4 1.3 && $CHECK $T/dump/flip00165.ppm 960 400 green >/dev/null" "Next: chapter 2 (3 s, green)"
+expect "[ \"\$(field $T 3 5)\" = 2 ]" "Play > Audio Track: the Portuguese one"
+expect "near \$(field $T 4 2) 7.6 1.2 && $CHECK $T/dump/flip00295.ppm 960 400 blue >/dev/null" "a seek to 6.5 s: blue"
+expect "log $T 'playing title 1 (3.0 s)' && near \$(field $T 5 3) 3 0.1 && $CHECK $T/dump/flip00385.ppm 960 400 255 255 255 12 >/dev/null" "Navigate > Titles > Title 1: the other title (3 s, white)"
+nosan "$T"
+# d: a Blu-ray (BDMV): libbluray reads it through the sector reader; its main title, chapters, the tracks' languages from
+# the playlist; Next, a seek
+T=$(newroot t25d)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/bd.iso run "$T" "0:0" "30:cmd disc0;90:state;100:cmd next;170:state;180:seek 6.5;250:state;260:quit" "85,165,245")
+expect "[ $rc = 0 ] && log $T '\[disc\] cd0: \"TEST_BD\", UDF, .*: Blu-ray$' && log $T 'Blu-ray title 1 of 1: playlist 00000.mpls, 9.0 s, 3 chapters' && log $T 'disc title 1 of 1: 3 chapter(s); #1 audio eng, #2 audio por'" "File > Open Disc: the Blu-ray's title: 3 chapters, audio English and Portuguese (from the playlist)"
+expect "[ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 1 3) 9 0.1 && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "it plays: 9 s, red"
+expect "near \$(field $T 2 2) 4.4 1.3 && $CHECK $T/dump/flip00165.ppm 960 400 green >/dev/null" "Next: chapter 2 (green)"
+expect "near \$(field $T 3 2) 7.6 1.2 && $CHECK $T/dump/flip00245.ppm 960 400 blue >/dev/null" "a seek to 6.5 s: blue"
+nosan "$T"
+# e: encrypted discs: a DVD whose packs are marked scrambled (CSS) and a Blu-ray with AACS: recognised, refused with the
+# message; nothing opened; the disc libraries can't load anything at run time (no libdvdcss / libaacs / libbdplus)
+T=$(newroot t25e)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd-css.iso,$MEDIA/bd-aacs.iso run "$T" "0:0" "30:cmd disc0;60:key enter;80:cmd disc1;110:key enter;130:quit" "55")
+expect "[ $rc = 0 ] && log $T '\[disc\] cd0: \"CSS_DVD\", UDF, .*: encrypted - CSS' && log $T '\[disc\] cd1: \"AACS_BD\", UDF, .*: encrypted - AACS'" "recognised: the DVD (scrambled packs: CSS), the Blu-ray (AACS)"
+expect "[ \$(grep -c '\[ui\] message: This disc is encrypted (a commercial film) and can.t be played here' $T/root/logs/boot.log) = 2 ] && ! log $T '\[player\] opened'" "both refused with the message; nothing played"
+expect "! nm -u $PWD/build/deps/prefix-host/lib/libdvdread.a $PWD/build/deps/prefix-host/lib/libdvdnav.a $PWD/build/deps/prefix-host/lib/libbluray.a $PWD/build/deps/prefix-host/lib/libudfread.a 2>/dev/null | grep -qw 'dlopen\|dvdcss_open\|aacs_open'" "the disc libraries refer to no dlopen, libdvdcss or libaacs"
+nosan "$T"
+# f: the disc taken out while it plays: stopped, and said so; put back: read again
+T=$(newroot t25f)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso run "$T" "0:0" "30:cmd disc0;100:state;110:eject cd0;150:state;160:key enter;170:insert cd0;220:quit" "")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && log $T '\[ui\] the disc of dvd://cd0 was taken out: stopped' && log $T '\[ui\] message: The disc was taken out: playback stopped.' && [ \"\$(field $T 2 1)\" = 0 ]" "taken out while playing: playback stopped, the message shown"
+expect "[ \$(grep -c '\[disc\] cd0: \"TEST_DVD\"' $T/root/logs/boot.log) = 2 ]" "put back: read again"
+nosan "$T"
+# g: an empty drive: "No disc"
+T=$(newroot t25g)
+ini "$T" "LastDir=disc://cd0"
+rc=$(MPCPS5_HOST_DISC=$WORK/no-disc.iso run "$T" "0:0" "30:cmd quickopen;50:key escape;60:open dvd://cd0;90:key enter;100:quit" "")
+expect "[ $rc = 0 ] && log $T '\[ui\] file browser at disc://cd0: No disc' && log $T '\[ui\] message: Failed to open \"cd0\":' && log $T '\[player\] failed: No disc'" "an empty drive: the Open dialog says No disc; playing it: No disc"
 nosan "$T"
 fi
 
