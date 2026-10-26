@@ -27,11 +27,13 @@
 //   Disc menus are not shown (1.4): the main title plays, Navigate > Titles picks another.
 //
 // Host builds: MPCPS5_HOST_DISC=<image>[,<image2>...] puts a disc image in drive cd0 (the console's), cd1 (USB)...;
-// a missing file is an empty drive; the test script's "eject cdN" / "insert cdN" take it out and put it back.
+// a missing file is an empty drive; the test script's "eject cdN" / "insert cdN" take it out and put it back;
+// MPCPS5_HOST_DISC_FAULT=slow=<ms>,from=<sector>[,fail=1] makes the drive slow (and failing) from that sector on.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -66,6 +68,22 @@ struct DriveState
 	std::string protection; // "CSS", "AACS", "BD+"
 	uint64_t generation = 0; // a new number for every disc put in (0: none)
 	uint64_t sectors = 0;
+	bool damaged = false; // Unreadable: a DVD-Video whose title sectors don't read (scratched?)
+	bool cut = false; // its file system was only read in part (too big, or damaged: a directory in itself)
+};
+
+// While one is alive on a thread, the disc reads of that thread give up as soon as *flag is true (the player's quit:
+// Close / Stop / another file never wait for a slow or scratched disc; the read itself finishes in the background).
+class CancelScope
+{
+public:
+	explicit CancelScope(const std::atomic<bool>* flag);
+	~CancelScope();
+	CancelScope(const CancelScope&) = delete;
+	CancelScope& operator=(const CancelScope&) = delete;
+
+private:
+	const std::atomic<bool>* prev_;
 };
 
 // the watcher (a thread), started once; Stop() at exit

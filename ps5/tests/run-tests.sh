@@ -19,7 +19,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/bd-aacs.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/data-big.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -1068,20 +1068,27 @@ P="5:cmd options"
 f=8; for i in $(seq 1 7); do P="$P;$f:key down"; f=$((f + 3)); done
 P="$P;29:key r1;32:key enter;35:key menu;300:quit"
 rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/live run "$T" "0:0" "$P" "" "$T/root/media/norm.mkv")
-# in 50 ms windows up to the burst: as it is (463) for at least 0.2 s, then 4x (1852) from one window on (what was
-# already queued, up to ~340 ms, plays as it was), at least 0.1 s of it before the burst, nothing in between but the
-# window where it changes
-expect "[ $rc = 0 ] && python3 -c \"
+# where it took effect: the block the player logs (its time in the stream; the dump's first sound is the stream's
+# start). In 50 ms windows: as it is (463) before that, 4x (1852) after it up to the burst -- or, when the pad's way
+# through Options took so long that it came at the burst, the burst brought to full scale (Normalize at work), not
+# left as it is (11585). (The dump is in the stream's order: what was already queued is before that block.)
+on=$(sed -n 's/.*\[player\] Normalize on from \([0-9.]*\) s of the stream.*/\1/p' $T/root/logs/boot.log | head -1)
+expect "[ $rc = 0 ] && [ -n \"$on\" ] && python3 -c \"
 import array, sys
 a = array.array('h'); a.frombytes(open('$T/live.2ch', 'rb').read())
 x = a[0::2]
+R = 48000
 s = [i for i, v in enumerate(x) if v != 0][0]
 b0 = [i for i, v in enumerate(x) if abs(v) > 8000][0]
+b1 = [i for i, v in enumerate(x) if abs(v) > 8000][-1]
+on = s + int($on * R)
 rms = lambda q: (sum(v * v for v in q) / max(1, len(q))) ** 0.5
-w = [rms(x[i:i + 2400]) for i in range(s, b0 - 7200, 2400)]  # not the last block: the burst's lowers its gain
-k = next(i for i, r in enumerate(w) if r > 1000)
-ok = k >= 4 and all(abs(r - 463) < 15 for r in w[:k]) and all(abs(r - 1852) < 40 for r in w[k + 1:]) and len(w) - k - 1 >= 2
-print([round(r) for r in w]); sys.exit(0 if ok else 1)\" >$T/live.txt" "turned on while a file plays: from then on, after what was queued (as it is first, 4x before the burst)"
+before = [rms(x[i:i + 2400]) for i in range(s, min(on, b0) - 2400, 2400)]
+after = [rms(x[i:i + 2400]) for i in range(on + 2400, b0 - 7200, 2400)]  # not the burst's block: its peak lowers the gain
+burst = rms(x[b0 + R // 10:b1 - R // 10])
+ok = len(before) >= 2 and all(abs(r - 463) < 15 for r in before)
+ok = ok and (all(abs(r - 1852) < 40 for r in after) if after else abs(burst - 23170) < 400)
+print([round(r) for r in before], [round(r) for r in after], round(burst)); sys.exit(0 if ok else 1)\" >$T/live.txt" "turned on while a file plays: as it is up to the block it took effect at ($on s), 4x from there on"
 nosan "$T"
 fi
 
@@ -1108,7 +1115,7 @@ nosan "$T"
 # chapter, the Portuguese track, a seek, Navigate > Titles: title 1 (white)
 T=$(newroot t25c)
 rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso run "$T" "0:0" "30:cmd disc0;90:state;100:cmd next;170:state;180:cmd 2002;220:state;230:seek 6.5;300:state;310:cmd title1;390:state;400:quit" "85,165,295,385")
-expect "[ $rc = 0 ] && log $T 'DVD-Video mpcdisc:cd0: 2 title(s), playing title 2 (9.0 s), the longest' && log $T 'disc title 2 of 2: 3 chapter(s); #1 audio eng, #2 audio por'" "File > Open Disc: the DVD's main title (the longest, 2 of 2): 3 chapters, audio English and Portuguese"
+expect "[ $rc = 0 ] && log $T 'DVD-Video mpcdisc:cd0:[0-9]*: 2 title(s), playing title 2 (9.0 s), the longest' && log $T 'disc title 2 of 2: 3 chapter(s); #1 audio eng, #2 audio por'" "File > Open Disc: the DVD's main title (the longest, 2 of 2): 3 chapters, audio English and Portuguese"
 expect "[ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 1 3) 9 0.1 && [ \"\$(field $T 1 5)\" = 1 ] && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "it plays: 9 s, the first audio track, red"
 expect "near \$(field $T 2 2) 4.4 1.3 && $CHECK $T/dump/flip00165.ppm 960 400 green >/dev/null" "Next: chapter 2 (3 s, green)"
 expect "[ \"\$(field $T 3 5)\" = 2 ]" "Play > Audio Track: the Portuguese one"
@@ -1144,6 +1151,66 @@ ini "$T" "LastDir=disc://cd0"
 rc=$(MPCPS5_HOST_DISC=$WORK/no-disc.iso run "$T" "0:0" "30:cmd quickopen;50:key escape;60:open dvd://cd0;90:key enter;100:quit" "")
 expect "[ $rc = 0 ] && log $T '\[ui\] file browser at disc://cd0: No disc' && log $T '\[ui\] message: Failed to open \"cd0\":' && log $T '\[player\] failed: No disc'" "an empty drive: the Open dialog says No disc; playing it: No disc"
 nosan "$T"
+fi
+
+if want 26; then
+echo "== 26. 1.4 review: damaged and hostile discs, a drive that fails or is slow, encrypted films as files, ISO 9660 DVDs"
+DT="env ASAN_OPTIONS=detect_leaks=0 $PWD/build/host/mpc-disc-test"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+# a: one byte of VIDEO_TS.IFO changed (a scratch): libdvdread freed a command table twice on that error path
+r=$($DT title $MEDIA/dvd-damaged.iso dvd://cd0 2>&1)
+expect "! echo \"\$r\" | grep -q AddressSanitizer && echo \"\$r\" | grep -q '^open 1 '" "a damaged IFO: no double free (libdvdread patched), the titles read from the backup"
+T=$(newroot t26)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd-damaged.iso run "$T" "0:0" "30:open dvd://cd0;90:key enter;100:quit" "")
+expect "[ $rc = 0 ] && log $T '\\[ui\\] message: Failed to open'" "... and the app says it can't open it, and goes on"
+nosan "$T"
+# b: root directories inside themselves (64 MiB each): read in part, quickly, in little memory; the other drive still
+# watched; quitting doesn't wait
+r1=$($DT mount $MEDIA/loop1.iso 5 300 2>&1); r2=$($DT mount $MEDIA/loop2.iso 5 300 2>&1)
+expect "echo \"\$r1\" | grep -q '^mounted 1 kind 2 cut 1 ' && echo \"\$r2\" | grep -q '^mounted 1 kind 2 cut 1 '" "a directory in itself (one record over 32 sectors; two records): read in part in under 5 s and 300 MiB, Stop() at once ($(echo $r1 | grep -o 'in [0-9.]* s.*'); $(echo $r2 | grep -o 'in [0-9.]* s.*'))"
+T=$(newroot t26b)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/loop2.iso,$MEDIA/dvd.iso run "$T" "0:0" "60:quit" "")
+expect "[ $rc = 0 ] && log $T 'cd0: its file system was read in part' && log $T 'cd1: \"TEST_DVD\"'" "in the app: the hostile disc read in part (logged), the other drive's disc read too, quit at once"
+nosan "$T"
+# c: the drive fails, slowly, while the read-ahead runs: Stop() returns (a disc was let go of under the drives' lock)
+expect "$DT stop-failing $MEDIA/data-big.iso disc://cd0/big.bin >/dev/null 2>&1" "the drive failing during read-ahead: Stop() returns at once"
+# d: a slow drive (1.5 s a read): a read gives up as soon as it is cancelled; a part that can't be read isn't tried again
+expect "$DT cancel $MEDIA/data-big.iso disc://cd0/big.bin >/dev/null 2>&1" "a read on a slow drive gives up at once when cancelled"
+expect "$DT negcache $MEDIA/data-big.iso disc://cd0/big.bin >/dev/null 2>&1" "an unreadable part is read once (kept as unreadable: read-ahead doesn't retry it)"
+T=$(newroot t26d)
+sec=$($DT sector $MEDIA/data-udf.iso disc://cd0/Filmes/chapters.mkv 2>/dev/null)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/data-udf.iso MPCPS5_HOST_DISC_FAULT=slow=2500,from=$sec run "$T" "0:0" "30:open disc://cd0/Filmes/chapters.mkv;60:cmd close;61:state;100:quit" "")
+expect "[ $rc = 0 ] && python3 -c \"
+import re, sys
+t = {int(m.group(2)): float(m.group(1)) for m in re.finditer(r'\\[ *([0-9.]+)\\] \\[test\\] frame ([0-9]+):', open('$T/root/logs/boot.log').read())}
+print(t[61] - t[60]); sys.exit(0 if t[61] - t[60] < 0.6 else 1)\" >$T/close.txt" "File > Close while the drive takes 2.5 s a read: the window waits $(cat $T/close.txt 2>/dev/null) s"
+nosan "$T"
+# e: an encrypted disc's films as files (File > Open File, Recent Files): refused with the message too
+r=$($DT open $MEDIA/dvd-css.iso disc://cd0/VIDEO_TS/VTS_01_1.VOB 2>&1); r2=$($DT open $MEDIA/bd-aacs.iso disc://cd0/BDMV/STREAM/00000.m2ts 2>&1)
+expect "echo \"\$r\" | grep -q '^This disc is encrypted' && echo \"\$r2\" | grep -q '^This disc is encrypted'" "VTS_01_1.VOB of the CSS DVD, 00000.m2ts of the AACS Blu-ray: refused as files"
+T=$(newroot t26e)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd-css.iso run "$T" "0:0" "30:open disc://cd0/VIDEO_TS/VTS_01_1.VOB;60:key enter;70:quit" "")
+expect "[ $rc = 0 ] && log $T '\\[ui\\] message: This disc is encrypted (a commercial film)' && ! log $T '\\[player\\] opened'" "... in the app: the message, nothing played"
+nosan "$T"
+expect "$DT swap $MEDIA/dvd.iso dvd://cd0 >/dev/null 2>&1" "a disc swapped between finding its title and opening it: the new one isn't read as the old"
+# f: title VOBs that don't read (a scratched disc, a drive that won't): "can't be read", not "encrypted"
+sec=$($DT sector $MEDIA/dvd.iso disc://cd0/VIDEO_TS/VTS_01_1.VOB 2>/dev/null)
+r=$(MPCPS5_HOST_DISC_FAULT=fail=1,from=$sec $DT mount $MEDIA/dvd.iso 5 300 2>&1)
+expect "echo \"\$r\" | grep -q \"kind 6 cut 0 damaged 1 protection ''\"" "unreadable title VOBs: unreadable (scratched?), not called encrypted"
+T=$(newroot t26f)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso MPCPS5_HOST_DISC_FAULT=fail=1,from=$sec run "$T" "0:0" "30:cmd disc0;31:open dvd://cd0;60:key enter;70:quit" "")
+expect "[ $rc = 0 ] && log $T \"\\[ui\\] message: .*This disc can't be read (scratched or damaged?)\"" "... and the app says so"
+nosan "$T"
+# g: a DVD-Video on an ISO 9660-only disc (no UDF): libdvdread reads it as a folder of files through the player
+T=$(newroot t26g)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd-iso.iso run "$T" "0:0" "30:cmd disc0;90:state;100:quit" "85")
+expect "[ $rc = 0 ] && log $T 'cd0: \"ISO_DVD\", ISO 9660, .*: DVD-Video' && log $T 'disc title 2 of 2: 3 chapter(s)' && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "an ISO 9660-only DVD-Video plays its main title with its chapters"
+nosan "$T"
+# h: a fragmented UDF file (its runs checked block by block); ISO 9660: a file in two extents (flag 0x80), and A.TXT;1 /
+# A.TXT;2 as two files
+expect "$DT read $MEDIA/frag.iso disc://cd0/FRAG.BIN $MEDIA/red.mp4 >/dev/null 2>&1" "a fragmented UDF file (blocks 0-9, 12- in line, 10-11 elsewhere) reads as itself"
+r=$($DT list $MEDIA/multi.iso disc://cd0 2>&1)
+expect "[ \"\$(echo \"\$r\" | grep -c '^A.TXT ')\" = 2 ] && echo \"\$r\" | grep -q '^BIG.BIN 10340$' && $DT read $MEDIA/multi.iso disc://cd0/BIG.BIN $MEDIA/multi.iso.big >/dev/null 2>&1" "ISO 9660: A.TXT;1 and A.TXT;2 two files, BIG.BIN's two extents one file (read whole)"
 fi
 
 echo

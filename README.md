@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 353 host tests
+> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 375 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -275,7 +275,8 @@ its sandbox. A disc put in or taken out while the app runs is seen within a few 
   dialog's navigation pane as *Disc drive (name)* / *USB disc drive (name)*; files open and seek like files on a USB
   drive (read from the disc as they play, nothing copied first); File > Open Disc on a data disc opens the dialog
   there.
-- **DVD-Video, unencrypted** (home-made DVDs, discs burned from a `VIDEO_TS` folder): **File > Open Disc > the
+- **DVD-Video, unencrypted** (home-made DVDs, discs burned from a `VIDEO_TS` folder, as UDF or, from some burning
+  programs, ISO 9660 only -- the tests play both): **File > Open Disc > the
   drive**, *Play the DVD-Video* at the disc's top in the Open dialog, or `VIDEO_TS.IFO`, plays the **main title** (the
   longest) with its **chapters** (Navigate > Chapters, Previous/Next, R1/L1) and its **audio and subtitle tracks**
   (Play > Audio Track / Subtitle Track, with their languages). **Navigate > Titles** plays another title. Through
@@ -290,9 +291,11 @@ its sandbox. A disc put in or taken out while the app runs is seen within a few 
 
 - **Encrypted discs** -- commercial DVD films (CSS) and Blu-ray films (AACS, BD+): there is **no decryption of any
   kind** in this app (no libdvdcss, libaacs, libbdplus, keys; the libraries are built so they can't load one either).
-  Such a disc is recognised -- a DVD by the drive's copyright information, packs marked scrambled or a drive that
-  won't read its titles, a Blu-ray by its AACS / BD+ files -- and refused with a message. **On a PS5 with a disc drive, the console's own player plays
-  them.**
+  Such a disc is recognised -- a DVD by the drive's copyright information or packs marked scrambled, a Blu-ray by
+  its AACS / BD+ files -- and refused with a message. **On a PS5 with a disc drive, the console's own player plays
+  them.** A DVD whose films' sectors don't read at all is not called encrypted on that alone: it gets *This disc
+  can't be read (scratched or damaged?)* (a drive that won't read a film without the authentication this app never
+  does looks the same; only a PS5 with a commercial disc can tell which message it gets).
 - **Disc menus** (1.4): the main title plays; Navigate > Titles picks another. The menu commands stay greyed.
 - **Audio CDs**: FreeBSD's cd(4) can't read audio tracks (5S2CD found the same); such a disc shows as unreadable.
 - **CDs in the PS5's own drive**: it doesn't read CDs at all (5S2CD); a USB drive does.

@@ -176,4 +176,17 @@ python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd.iso" "TEST_DVD"
 python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-css.iso" "CSS_DVD" css
 python3 "$(dirname "$0")/make_disc.py" bd "$D/bd.iso" "TEST_BD"
 python3 "$(dirname "$0")/make_disc.py" bd "$D/bd-aacs.iso" "AACS_BD" aacs
+# the review's cases: one byte of the DVD's IFO changed, a DVD-Video without UDF, root directories inside themselves
+# (sparse 64 MiB images), a file in two ISO 9660 extents beside one in two versions, a fragmented UDF file, a data
+# disc with a 6 MB file (faults are put 3 MiB into it)
+python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-damaged.iso" "TEST_DVD" damaged
+python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-iso.iso" "ISO_DVD" iso
+python3 "$(dirname "$0")/make_disc.py" loop "$D/loop1.iso" 67108864 1 32
+python3 "$(dirname "$0")/make_disc.py" loop "$D/loop2.iso" 67108864 2 0
+python3 "$(dirname "$0")/make_disc.py" multiext "$D/multi.iso"
+python3 "$(dirname "$0")/make_disc.py" frag "$D/frag.iso" "$D/red.mp4"
+mkdir -p "$D/discbig"
+python3 -c "import random, sys; random.seed(14); sys.stdout.buffer.write(bytes(random.getrandbits(8) for _ in range(6000000)))" >"$D/discbig/big.bin"
+python3 "$(dirname "$0")/make_disc.py" data "$D/data-big.iso" "$D/discbig" "BIG" udf
+rm -rf "$D/discbig"
 echo "media in $D"

@@ -263,7 +263,7 @@ HOST_HELPER_OBJ := $(HOST_OUT)/port/installer/helper_main.o $(patsubst %.cpp,$(H
 HOST_INSTALLER_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(INSTALLER_SRC) host/sce_host.cpp) \
 	$(patsubst %.c,$(HOST_OUT)/port/%.o,$(MONO_SRC))
 
-host: $(HOST_OUT)/mpc-ps5-host $(HOST_OUT)/mpc-ps5-installer $(HOST_OUT)/mpc-ps5-helper
+host: $(HOST_OUT)/mpc-ps5-host $(HOST_OUT)/mpc-ps5-installer $(HOST_OUT)/mpc-ps5-helper $(HOST_OUT)/mpc-disc-test
 
 $(HOST_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h
 	@mkdir -p $(dir $@)
@@ -307,6 +307,12 @@ $(HOST_OUT)/mpc-ps5-installer: $(HOST_INSTALLER_OBJ) $(HOST_OUT)/install_data.o
 
 $(HOST_OUT)/mpc-ps5-host: $(HOST_EMU_OBJ) $(HOST_OUT)/helper_data.o
 	$(HOST_CXX) $(HOST_SAN) -o $@ $^ -L$(DEPS_HOST)/lib $(FF_LIBS) -lpthread -lm -ldl
+
+# player/mpc_disc.cpp on its own, with faults put into the drive (tests/disc_test.cpp)
+$(HOST_OUT)/mpc-disc-test: tests/disc_test.cpp player/mpc_disc.cpp player/mpc_disc.h player/mpc_i18n.h
+	@mkdir -p $(dir $@)
+	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) -o $@ $< \
+		-L$(DEPS_HOST)/lib $(FF_LIBS) -lpthread -lm -ldl
 
 test: host
 	bash tests/run-tests.sh

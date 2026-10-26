@@ -631,6 +631,7 @@ struct Player::Impl
 	// ---------------------------------------------------------------------------------------------
 	void OpenThread()
 	{
+		disc::CancelScope cancel_reads(&quit); // Close: a disc being read gives up at once (mpc_disc.h)
 		const double t0 = NowS();
 		ic = avformat_alloc_context();
 		ic->interrupt_callback.callback = Interrupt;
@@ -899,6 +900,7 @@ struct Player::Impl
 	// ---------------------------------------------------------------------------------------------
 	void DemuxThread()
 	{
+		disc::CancelScope cancel_reads(&quit);
 		AVPacket* pkt = av_packet_alloc();
 		int64_t last_sub_check = 0;
 		(void)last_sub_check;
@@ -1352,11 +1354,16 @@ struct Player::Impl
 	// 75 % of full scale; never above Max amplification. It starts at the max (a file, a seek, a track or format
 	// change: MPC-HC's flush / new segment / new media type). Boost and the volume come after it, at the output.
 	// Returns where the result is: `s` itself when Normalize is off.
-	const int16_t* Normalize(const int16_t* s, int n, int ch, double dur)
+	const int16_t* Normalize(const int16_t* s, int n, int ch, double dur, double end_pts)
 	{
 		const bool on = norm_on.load(std::memory_order_relaxed);
 		if (on && !norm_was_on)
+		{
 			norm_factor = -1; // turned on: from the max (MPC-HC's SetNormalizeBoost)
+			OrbisLog("[player] Normalize on from %.3f s of the stream", end_pts - dur);
+		}
+		else if (!on && norm_was_on)
+			OrbisLog("[player] Normalize off from %.3f s of the stream", end_pts - dur);
 		norm_was_on = on;
 		if (!on || n <= 0)
 			return s;
@@ -1398,7 +1405,7 @@ struct Player::Impl
 	bool PushAudio(const int16_t* s, int n, int my_serial, double end_pts, double dur)
 	{
 		int ch = ag_out_ch;
-		s = Normalize(s, n, ch, dur);
+		s = Normalize(s, n, ch, dur, end_pts);
 		if (ch == 8)
 		{
 			// FFmpeg's 7.1 (FL FR FC LFE BL BR SL SR) -> the console's (L R C LFE Ls Rs Lb Rb)

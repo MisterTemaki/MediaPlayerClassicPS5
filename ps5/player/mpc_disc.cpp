@@ -47,6 +47,7 @@ extern "C" {
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 
 namespace mpc
@@ -141,9 +142,19 @@ struct Node
 	bool dir = false;
 	uint64_t size = 0;
 	int64_t mtime = 0;
-	std::vector<Extent> extents; // ISO 9660 (UDF files are mapped through libudfread when opened)
+	std::vector<Extent> extents; // ISO 9660 (UDF files are mapped through libudfread as they are read)
 	std::vector<int> kids;
 };
+
+// the reads of this thread give up when *t_cancel turns true (CancelScope)
+thread_local const std::atomic<bool>* t_cancel = nullptr;
+
+bool Cancelled()
+{
+	return t_cancel && t_cancel->load();
+}
+
+std::atomic<bool> g_stop{false}; // the watcher is asked to end (Stop())
 
 #ifndef __PROSPERO__
 // host tests: the drives' images and the "eject" switch
@@ -155,63 +166,276 @@ bool HostOut(const std::string& id)
 	auto it = g_host_out.find(id);
 	return it != g_host_out.end() && it->second;
 }
+// host tests: a slow (and failing) drive from a sector on (MPCPS5_HOST_DISC_FAULT=slow=<ms>,from=<sector>[,fail=1])
+std::atomic<int> g_fault_slow_ms{0};
+std::atomic<int64_t> g_fault_from{-1};
+std::atomic<bool> g_fault_fail{false};
+std::atomic<int> g_fault_hits{0}; // reads that met the fault (tests/disc_test.cpp)
+void ReadFaultSetting()
+{
+	const char* e = getenv("MPCPS5_HOST_DISC_FAULT");
+	if (!e)
+		return;
+	std::string s = e;
+	size_t p = 0;
+	while (p < s.size())
+	{
+		size_t c = s.find(',', p);
+		if (c == std::string::npos)
+			c = s.size();
+		const std::string kv = s.substr(p, c - p);
+		const size_t eq = kv.find('=');
+		const std::string k = kv.substr(0, eq), v = eq == std::string::npos ? "" : kv.substr(eq + 1);
+		if (k == "slow")
+			g_fault_slow_ms = atoi(v.c_str());
+		else if (k == "from")
+			g_fault_from = atoll(v.c_str());
+		else if (k == "fail")
+			g_fault_fail = atoi(v.c_str()) != 0;
+		p = c + 1;
+	}
+}
 #endif
 
 void Poke();
 
 // ---------------------------------------------------------------------------------------------------------------
-// One disc in one drive: the device, a cache of chunks with read-ahead, the file system.
+// The drive's side of one disc: the device, a cache of chunks, the reading thread. Shared by the Media and its
+// thread, so a Media can go (the player closed, the disc taken out) while a read is still in the drive: the thread
+// finishes it and closes the device after.
+struct Chunk
+{
+	uint64_t index = UINT64_MAX;
+	std::vector<uint8_t> data;
+	uint64_t ok = 0; // a bit per sector read: a chunk whose reads failed stays known (they aren't tried again)
+	uint32_t count = 0; // sectors in it
+	bool loading = false;
+	uint64_t stamp = 0;
+};
+
+struct DriveIO
+{
+	std::string id;
+	int fd = -1;
+	uint64_t sectors = 0;
+	std::atomic<bool> gone{false}, stop{false};
+	std::atomic<double> last_io{0};
+	std::mutex mu;
+	std::condition_variable cv;
+	std::vector<Chunk> chunks;
+	std::deque<uint64_t> want; // chunks to read: asked for at the front, read-ahead at the back
+	uint64_t clock = 0, last_idx = UINT64_MAX;
+	bool running = false;
+
+	DriveIO()
+	{
+		chunks.resize(kChunks);
+		for (auto& c : chunks)
+			c.data.resize(size_t(kChunk) * kSector);
+	}
+	~DriveIO()
+	{
+		if (fd >= 0)
+			close(fd);
+	}
+
+	// straight from the drive. check: on a failure, is the disc still there? (sector 16 always reads on one)
+	bool DeviceRead(uint64_t lba, uint32_t count, uint8_t* out, bool check)
+	{
+#ifndef __PROSPERO__
+		if (HostOut(id))
+		{
+			gone = true;
+			return false;
+		}
+		if (g_fault_from >= 0 && int64_t(lba + count) > g_fault_from)
+		{
+			g_fault_hits++;
+			if (g_fault_slow_ms > 0)
+				std::this_thread::sleep_for(std::chrono::milliseconds(int(g_fault_slow_ms)));
+			if (g_fault_fail)
+			{
+				errno = EIO;
+				return false;
+			}
+		}
+#endif
+		last_io = Now();
+		const size_t want_bytes = size_t(count) * kSector;
+		size_t got = 0;
+		int tries = 0;
+		while (got < want_bytes)
+		{
+			const ssize_t r = pread(fd, out + got, want_bytes - got, off_t(lba * kSector + got));
+			if (r > 0)
+			{
+				got += size_t(r);
+				continue;
+			}
+			if (r < 0 && errno == EINTR)
+				continue;
+			const int e = r < 0 ? errno : 0;
+			if (++tries < 2 && r < 0 && !stop && !gone)
+				continue; // once more (a drive spinning up)
+			if (check)
+			{
+				OrbisLog("[disc] %s: read of sectors %llu-%llu failed: %s", id.c_str(), (unsigned long long)lba,
+					(unsigned long long)(lba + count - 1), e ? strerror(e) : "end of the disc");
+				uint8_t s[kSector];
+				if (!DeviceRead(16, 1, s, false))
+				{
+					gone = true;
+					Poke();
+				}
+			}
+			return false;
+		}
+		return true;
+	}
+
+	Chunk* Find(uint64_t idx)
+	{
+		for (auto& c : chunks)
+			if (c.index == idx)
+				return &c;
+		return nullptr;
+	}
+
+	Chunk* Victim()
+	{
+		Chunk* v = nullptr;
+		for (auto& c : chunks)
+			if (!c.loading && (!v || c.stamp < v->stamp))
+				v = &c;
+		return v;
+	}
+};
+
+// the reading thread: one chunk at a time, in the order they are wanted
+void IoThread(std::shared_ptr<DriveIO> io)
+{
+	std::unique_lock<std::mutex> l(io->mu);
+	while (!io->stop)
+	{
+		if (io->want.empty() || io->gone)
+		{
+			io->cv.wait(l);
+			continue;
+		}
+		const uint64_t idx = io->want.front();
+		io->want.pop_front();
+		if (io->Find(idx))
+			continue;
+		Chunk* c = io->Victim();
+		if (!c)
+			continue;
+		c->index = idx;
+		c->loading = true;
+		c->ok = 0;
+		c->stamp = ++io->clock;
+		const uint64_t first = idx * kChunk;
+		const uint32_t n = uint32_t(std::min<uint64_t>(kChunk, io->sectors > first ? io->sectors - first : 0));
+		uint8_t* data = c->data.data();
+		l.unlock();
+		uint64_t ok = 0;
+		if (n && io->DeviceRead(first, n, data, true))
+			ok = n == 64 ? ~uint64_t(0) : (uint64_t(1) << n) - 1;
+		else
+		{
+			// what of it can be read, sector by sector (a scratch, the disc's end); four failures in a row: the rest
+			// isn't tried (it stays known as unreadable: read-ahead won't try it again)
+			int bad = 0;
+			for (uint32_t s = 0; s < n && !io->gone && !io->stop && bad < 4; s++)
+				if (io->DeviceRead(first + s, 1, data + size_t(s) * kSector, false))
+				{
+					ok |= uint64_t(1) << s;
+					bad = 0;
+				}
+				else
+					bad++;
+		}
+		l.lock();
+		c->ok = ok;
+		c->count = n;
+		c->loading = false;
+		io->cv.notify_all();
+	}
+	io->running = false;
+}
+
+// One disc in one drive: its reader, its file system.
 class Media
 {
 public:
 	std::string id, dev;
-	int fd = -1;
-	uint64_t sectors = 0;
 	uint64_t gen = 0;
-	std::atomic<bool> gone{false};
-	std::atomic<double> last_io{0};
+	std::shared_ptr<DriveIO> io;
+	std::atomic<bool>& gone;
+	uint64_t& sectors;
 	// the file system
 	std::mutex udf_mu; // libudfread isn't for several threads at once
 	udfread* udf = nullptr;
 	std::vector<Node> nodes; // [0]: the root
 	std::string fs, label;
-	bool cut = false; // more entries than kMaxNodes
+	bool cut = false; // read in part (kMaxNodes, a loop, too big)
 
-	Media(std::string i, std::string d, int f, uint64_t g) : id(std::move(i)), dev(std::move(d)), fd(f), gen(g)
+	Media(std::string i, std::string d, int f, uint64_t g)
+		: id(std::move(i)), dev(std::move(d)), gen(g), io(std::make_shared<DriveIO>()), gone(io->gone), sectors(io->sectors)
 	{
-		chunks_.resize(kChunks);
-		for (auto& c : chunks_)
-			c.data.resize(size_t(kChunk) * kSector);
+		io->id = id;
+		io->fd = f;
 	}
 	~Media()
 	{
-		{
-			std::lock_guard<std::mutex> l(cmu_);
-			stop_ = true;
-			ccv_.notify_all();
-		}
-		if (ahead_.joinable())
-			ahead_.join();
 		if (udf)
 			udfread_close(udf);
-		if (fd >= 0)
-			close(fd);
+		// the reading thread ends on its own, after a read still in the drive (the device closes with it)
+		std::lock_guard<std::mutex> l(io->mu);
+		io->stop = true;
+		io->want.clear();
+		io->cv.notify_all();
 	}
 
-	// sectors [lba, lba + count) into out; false when the disc can't be read there (or is gone)
+	// sectors [lba, lba + count) into out; false when they can't be read, the disc is gone, or this thread's reads
+	// are cancelled (CancelScope): then at once, whatever the drive is doing
 	bool Read(uint64_t lba, uint32_t count, uint8_t* out)
 	{
 		while (count > 0)
 		{
-			if (gone)
+			if (gone || Cancelled())
 				return false;
 			const uint64_t idx = lba / kChunk;
 			const uint32_t in = uint32_t(lba % kChunk);
 			const uint32_t n = std::min<uint32_t>(count, kChunk - in);
-			if (!ReadFromChunk(idx, in, n, out))
+			std::unique_lock<std::mutex> l(io->mu);
+			for (;;)
 			{
-				// the chunk couldn't be read whole (the disc's end, a bad sector): exactly what was asked for
-				if (!DeviceRead(lba, n, out))
+				Chunk* c = io->Find(idx);
+				if (c && !c->loading)
+				{
+					const uint64_t need = (n == 64 ? ~uint64_t(0) : ((uint64_t(1) << n) - 1)) << in;
+					if (in + n > c->count || (c->ok & need) != need)
+						return false; // known unreadable (or past the disc's end)
+					memcpy(out, c->data.data() + size_t(in) * kSector, size_t(n) * kSector);
+					c->stamp = ++io->clock;
+					// in order (a film playing): the next chunks in the background
+					if (idx == io->last_idx + 1 || idx == io->last_idx)
+						for (int k = 1; k <= kAhead; k++)
+						{
+							const uint64_t a = idx + uint64_t(k);
+							if (a * kChunk < io->sectors && !io->Find(a) &&
+								std::find(io->want.begin(), io->want.end(), a) == io->want.end())
+								io->want.push_back(a);
+						}
+					io->last_idx = idx;
+					Wake();
+					break;
+				}
+				if (!c && std::find(io->want.begin(), io->want.end(), idx) == io->want.end())
+					io->want.push_front(idx);
+				Wake();
+				io->cv.wait_for(l, std::chrono::milliseconds(50));
+				if (gone || io->stop || Cancelled())
 					return false;
 			}
 			lba += n;
@@ -229,164 +453,26 @@ public:
 		if (fs.empty())
 		{
 			ioc_toc_header th = {};
-			return ioctl(fd, CDIOREADTOCHEADER, &th) == 0 && th.ending_track >= th.starting_track && th.starting_track > 0;
+			return ioctl(io->fd, CDIOREADTOCHEADER, &th) == 0 && th.ending_track >= th.starting_track && th.starting_track > 0;
 		}
 #endif
 		uint8_t s[kSector];
-		return DeviceRead(16, 1, s, false);
+		return io->DeviceRead(16, 1, s, false);
 	}
+
+	double LastIo() const { return io->last_io; }
+	int Fd() const { return io->fd; }
 
 private:
-	struct Chunk
+	// (io->mu held) the reading thread, started when first needed
+	void Wake()
 	{
-		uint64_t index = UINT64_MAX;
-		std::vector<uint8_t> data;
-		uint32_t count = 0; // sectors in it
-		bool loading = false;
-		uint64_t stamp = 0;
-	};
-	std::mutex cmu_;
-	std::condition_variable ccv_;
-	std::vector<Chunk> chunks_;
-	std::deque<uint64_t> want_;
-	std::thread ahead_;
-	bool stop_ = false;
-	uint64_t clock_ = 0;
-	uint64_t last_idx_ = UINT64_MAX;
-
-	bool DeviceRead(uint64_t lba, uint32_t count, uint8_t* out, bool check = true)
-	{
-#ifndef __PROSPERO__
-		if (HostOut(id))
+		if (!io->want.empty() && !io->running)
 		{
-			gone = true;
-			return false;
+			io->running = true;
+			std::thread(IoThread, io).detach();
 		}
-#endif
-		last_io = Now();
-		const size_t want = size_t(count) * kSector;
-		size_t got = 0;
-		int tries = 0;
-		while (got < want)
-		{
-			const ssize_t r = pread(fd, out + got, want - got, off_t(lba * kSector + got));
-			if (r > 0)
-			{
-				got += size_t(r);
-				continue;
-			}
-			if (r < 0 && errno == EINTR)
-				continue;
-			const int e = r < 0 ? errno : 0;
-			if (++tries < 2 && r < 0)
-				continue; // once more (a drive spinning up)
-			if (check)
-			{
-				OrbisLog("[disc] %s: read of sectors %llu-%llu failed: %s", id.c_str(), (unsigned long long)lba,
-					(unsigned long long)(lba + count - 1), e ? strerror(e) : "end of the disc");
-				// is the disc still there? (sector 16 always reads on a readable disc)
-				uint8_t s[kSector];
-				if (!DeviceRead(16, 1, s, false))
-				{
-					gone = true;
-					Poke();
-				}
-			}
-			return false;
-		}
-		return true;
-	}
-
-	Chunk* Find(uint64_t idx)
-	{
-		for (auto& c : chunks_)
-			if (c.index == idx)
-				return &c;
-		return nullptr;
-	}
-
-	Chunk* Victim()
-	{
-		Chunk* v = nullptr;
-		for (auto& c : chunks_)
-			if (!c.loading && (!v || c.stamp < v->stamp))
-				v = &c;
-		return v;
-	}
-
-	// loads chunk idx into a free slot (the lock held on entry and on return; the drive is read without it)
-	Chunk* Load(std::unique_lock<std::mutex>& l, uint64_t idx)
-	{
-		Chunk* c = Victim();
-		if (!c)
-			return nullptr;
-		c->index = idx;
-		c->loading = true;
-		c->stamp = ++clock_;
-		const uint64_t first = idx * kChunk;
-		const uint32_t n = uint32_t(std::min<uint64_t>(kChunk, sectors > first ? sectors - first : 0));
-		l.unlock();
-		const bool ok = n > 0 && DeviceRead(first, n, c->data.data());
-		l.lock();
-		c->loading = false;
-		c->count = ok ? n : 0;
-		if (!ok)
-			c->index = UINT64_MAX;
-		ccv_.notify_all();
-		return ok ? c : nullptr;
-	}
-
-	bool ReadFromChunk(uint64_t idx, uint32_t in, uint32_t n, uint8_t* out)
-	{
-		std::unique_lock<std::mutex> l(cmu_);
-		Chunk* c = Find(idx);
-		while (c && c->loading)
-		{
-			ccv_.wait(l);
-			c = Find(idx);
-		}
-		if (!c)
-			c = Load(l, idx);
-		if (!c || in + n > c->count)
-			return false;
-		memcpy(out, c->data.data() + size_t(in) * kSector, size_t(n) * kSector);
-		c->stamp = ++clock_;
-		// in order (a film playing): the next chunks in the background
-		if (idx == last_idx_ + 1 || idx == last_idx_)
-		{
-			for (int k = 1; k <= kAhead; k++)
-			{
-				const uint64_t a = idx + uint64_t(k);
-				if (a * kChunk < sectors && !Find(a) && std::find(want_.begin(), want_.end(), a) == want_.end())
-					want_.push_back(a);
-			}
-			if (!want_.empty())
-			{
-				if (!ahead_.joinable())
-					ahead_ = std::thread([this] { AheadThread(); });
-				ccv_.notify_all();
-			}
-		}
-		last_idx_ = idx;
-		return true;
-	}
-
-	void AheadThread()
-	{
-		std::unique_lock<std::mutex> l(cmu_);
-		while (!stop_)
-		{
-			if (want_.empty() || gone)
-			{
-				ccv_.wait(l);
-				continue;
-			}
-			const uint64_t idx = want_.front();
-			want_.pop_front();
-			if (Find(idx))
-				continue;
-			Load(l, idx);
-		}
+		io->cv.notify_all();
 	}
 };
 
@@ -415,7 +501,25 @@ int UdfClose(udfread_block_input* in)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// reading the file system into Media::nodes
+// reading the file system into Media::nodes, within bounds: a damaged or hostile disc (a directory inside itself, a
+// huge directory) is read in part, in little memory, and quickly
+constexpr int kMaxDepth = 24;
+constexpr uint64_t kMaxDirBytes = 4u << 20; // one directory
+constexpr uint64_t kMaxAllDirBytes = 32u << 20; // all of them
+constexpr size_t kMaxDirs = 20000;
+
+struct WalkBudget
+{
+	std::set<uint64_t> seen; // ISO 9660: the directories' extents already read
+	uint64_t dir_bytes = 0;
+	size_t dirs = 0;
+};
+
+bool WalkStop()
+{
+	return g_stop || Cancelled();
+}
+
 int AddNode(Media& m, int parent, Node n)
 {
 	if (m.nodes.size() >= kMaxNodes)
@@ -430,10 +534,15 @@ int AddNode(Media& m, int parent, Node n)
 	return i;
 }
 
-void UdfWalk(Media& m, const std::string& path, int node, int depth)
+void UdfWalk(Media& m, const std::string& path, int node, int depth, WalkBudget& b)
 {
-	if (depth > 32)
+	if (WalkStop() || m.cut)
 		return;
+	if (depth > kMaxDepth || ++b.dirs > kMaxDirs)
+	{
+		m.cut = true;
+		return;
+	}
 	UDFDIR* d = udfread_opendir(m.udf, path.empty() ? "/" : path.c_str());
 	if (!d)
 		return;
@@ -444,13 +553,19 @@ void UdfWalk(Media& m, const std::string& path, int node, int depth)
 		if (!e.d_name || !strcmp(e.d_name, ".") || !strcmp(e.d_name, ".."))
 			continue;
 		list.push_back({e.d_name, e.d_type == UDF_DT_DIR});
+		if (list.size() > kMaxNodes)
+		{
+			m.cut = true;
+			break;
+		}
 	}
 	for (const auto& x : list)
 	{
+		if (WalkStop())
+			break;
 		Node n;
 		n.name = x.first;
 		n.dir = x.second;
-		const std::string p = path + "/" + x.first;
 		if (!n.dir)
 		{
 			if (UDFFILE* f = udfread_file_openat(d, x.first.c_str()))
@@ -463,7 +578,7 @@ void UdfWalk(Media& m, const std::string& path, int node, int depth)
 		if (i < 0)
 			break;
 		if (x.second)
-			UdfWalk(m, p, i, depth + 1);
+			UdfWalk(m, path + "/" + x.first, i, depth + 1, b);
 	}
 	udfread_closedir(d);
 }
@@ -482,67 +597,92 @@ int64_t IsoTime(const uint8_t* t)
 	return int64_t(timegm(&tmv)) - int64_t(int8_t(t[6])) * 15 * 60;
 }
 
-void IsoWalk(Media& m, uint64_t lba, uint64_t bytes, int node, bool joliet, int depth)
+// a directory's records, read a few sectors at a time (records don't cross sectors)
+void IsoWalk(Media& m, uint64_t lba, uint64_t bytes, int node, bool joliet, int depth, WalkBudget& b)
 {
-	if (depth > 32 || bytes > (64u << 20))
+	if (WalkStop() || m.cut)
 		return;
-	const uint32_t n = uint32_t((bytes + kSector - 1) / kSector);
-	std::vector<uint8_t> buf(size_t(n) * kSector);
-	if (!m.Read(lba, n, buf.data()))
-		return;
-	size_t p = 0;
-	std::string last_name;
-	int last = -1;
-	while (p < buf.size())
+	if (depth > kMaxDepth || !b.seen.insert(lba).second || ++b.dirs > kMaxDirs)
 	{
-		const uint8_t len = buf[p];
-		if (len == 0)
+		// too deep, or a directory already read (one inside itself: a damaged or hostile disc)
+		OrbisLog("[disc] %s: directory at sector %llu %s: not read again", m.id.c_str(), (unsigned long long)lba,
+			depth > kMaxDepth ? "too deep" : "already read");
+		m.cut = true;
+		return;
+	}
+	if (bytes > kMaxDirBytes || b.dir_bytes + bytes > kMaxAllDirBytes)
+	{
+		m.cut = true;
+		bytes = std::min(kMaxDirBytes, kMaxAllDirBytes > b.dir_bytes ? kMaxAllDirBytes - b.dir_bytes : 0);
+	}
+	b.dir_bytes += bytes;
+	const uint32_t total = uint32_t((bytes + kSector - 1) / kSector);
+	constexpr uint32_t kStep = 16;
+	std::vector<uint8_t> buf(size_t(kStep) * kSector);
+	int multi = -1; // a file whose last record said "more extents follow" (flag 0x80)
+	for (uint32_t at = 0; at < total && !WalkStop(); at += kStep)
+	{
+		const uint32_t n = std::min(kStep, total - at);
+		if (!m.Read(lba + at, n, buf.data()))
+			return;
+		for (uint32_t s = 0; s < n; s++)
 		{
-			p = (p / kSector + 1) * kSector; // records don't cross sectors
-			continue;
+			const uint8_t* sec = &buf[size_t(s) * kSector];
+			size_t p = 0;
+			while (p < kSector)
+			{
+				const uint8_t len = sec[p];
+				if (len == 0)
+					break; // the rest of this sector is padding
+				if (len < 34 || p + len > kSector)
+					break;
+				const uint8_t* r = sec + p;
+				p += len;
+				const uint8_t nl = r[32];
+				if (33u + nl > len)
+					break;
+				if (nl == 1 && (r[33] == 0 || r[33] == 1))
+					continue; // . and ..
+				uint32_t ext_at, size;
+				memcpy(&ext_at, r + 2, 4);
+				memcpy(&size, r + 10, 4);
+				const uint8_t flags = r[25];
+				std::string name = joliet ? Ucs2ToUtf8(r + 33, nl) : std::string(reinterpret_cast<const char*>(r + 33), nl);
+				const size_t semi = name.find(';');
+				if (semi != std::string::npos)
+					name.resize(semi);
+				if (!joliet && !name.empty() && name.back() == '.')
+					name.pop_back();
+				const bool dir = (flags & 2) != 0;
+				// the next extent of a file in several (ECMA-119 9.1.6: every record but the last has flag 0x80)
+				if (!dir && multi >= 0 && m.nodes[multi].name == name)
+				{
+					Node& prev = m.nodes[multi];
+					prev.extents.push_back({prev.size, ext_at, size});
+					prev.size += size;
+					if (!(flags & 0x80))
+						multi = -1;
+					continue;
+				}
+				multi = -1;
+				Node nd;
+				nd.name = name;
+				nd.dir = dir;
+				nd.size = dir ? 0 : size;
+				nd.mtime = IsoTime(r + 18);
+				if (!dir)
+					nd.extents.push_back({0, ext_at, size});
+				const int i = AddNode(m, node, std::move(nd));
+				if (i < 0)
+					return;
+				if (!dir && (flags & 0x80))
+					multi = i;
+				if (dir)
+					IsoWalk(m, ext_at, size, i, joliet, depth + 1, b);
+				if (m.cut && m.nodes.size() >= kMaxNodes)
+					return;
+			}
 		}
-		if (len < 34 || p + len > buf.size())
-			break;
-		const uint8_t* r = &buf[p];
-		p += len;
-		const uint8_t nl = r[32];
-		if (33u + nl > len)
-			break;
-		if (nl == 1 && (r[33] == 0 || r[33] == 1))
-			continue; // . and ..
-		uint32_t at, size;
-		memcpy(&at, r + 2, 4);
-		memcpy(&size, r + 10, 4);
-		const uint8_t flags = r[25];
-		std::string name = joliet ? Ucs2ToUtf8(r + 33, nl) : std::string(reinterpret_cast<const char*>(r + 33), nl);
-		const size_t semi = name.find(';');
-		if (semi != std::string::npos)
-			name.resize(semi);
-		if (!joliet && !name.empty() && name.back() == '.')
-			name.pop_back();
-		const bool dir = (flags & 2) != 0;
-		// a file in several extents (multi-extent: the same name again)
-		if (!dir && last >= 0 && name == last_name && !m.nodes[last].dir)
-		{
-			Node& prev = m.nodes[last];
-			prev.extents.push_back({prev.size, at, size});
-			prev.size += size;
-			continue;
-		}
-		Node nd;
-		nd.name = name;
-		nd.dir = dir;
-		nd.size = dir ? 0 : size;
-		nd.mtime = IsoTime(r + 18);
-		if (!dir)
-			nd.extents.push_back({0, at, size});
-		const int i = AddNode(m, node, std::move(nd));
-		if (i < 0)
-			break;
-		last = i;
-		last_name = name;
-		if (dir)
-			IsoWalk(m, at, size, i, joliet, depth + 1);
 	}
 }
 
@@ -585,60 +725,7 @@ int FindNode(const Media& m, const std::string& path)
 	return cur;
 }
 
-// a file's extents: ISO 9660 from its records, UDF through libudfread (block by block, a run at a time)
-bool FileExtents(Media& m, const std::string& path, std::vector<Extent>& out, uint64_t* size)
-{
-	const int n = FindNode(m, path);
-	if (n < 0 || m.nodes[n].dir)
-		return false;
-	*size = m.nodes[n].size;
-	if (!m.udf)
-	{
-		out = m.nodes[n].extents;
-		return true;
-	}
-	std::lock_guard<std::mutex> l(m.udf_mu);
-	UDFFILE* f = udfread_file_open(m.udf, ("/" + path).c_str());
-	if (!f)
-		return false;
-	const int64_t sz = udfread_file_size(f);
-	*size = uint64_t(std::max<int64_t>(0, sz));
-	const uint32_t blocks = uint32_t((*size + kSector - 1) / kSector);
-	uint32_t b = 0;
-	bool ok = true;
-	while (b < blocks)
-	{
-		const uint32_t lba = udfread_file_lba(f, b);
-		if (lba == 0)
-		{
-			ok = false; // data inside the file entry (a tiny file), or unrecorded: read through libudfread
-			break;
-		}
-		// how far the run goes: double the step while it holds, then halve it
-		uint32_t run = 1, step = 1;
-		while (b + run < blocks)
-		{
-			const uint32_t s = std::min(step, blocks - b - run);
-			if (udfread_file_lba(f, b + run + s - 1) == lba + run + s - 1 &&
-				(s == 1 || udfread_file_lba(f, b + run) == lba + run))
-			{
-				run += s;
-				step *= 2;
-			}
-			else if (step > 1)
-				step /= 2;
-			else
-				break;
-		}
-		const uint64_t off = uint64_t(b) * kSector;
-		out.push_back({off, lba, std::min<uint64_t>(uint64_t(run) * kSector, *size - off)});
-		b += run;
-	}
-	udfread_file_close(f);
-	return ok;
-}
-
-// the whole of a small file, through libudfread
+// the whole of a small file, through libudfread (data inside its file entry)
 bool UdfReadAll(Media& m, const std::string& path, std::vector<uint8_t>& out, size_t max_bytes)
 {
 	std::lock_guard<std::mutex> l(m.udf_mu);
@@ -657,6 +744,142 @@ bool UdfReadAll(Media& m, const std::string& path, std::vector<uint8_t>& out, si
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// a file on a disc, read through the sector reader: ISO 9660 from its records; UDF mapped through libudfread a run
+// at a time as it is read (every block of a run checked: a fragmented file is never read from the wrong place)
+struct FileReader
+{
+	std::shared_ptr<Media> m;
+	std::vector<Extent> ext;
+	UDFFILE* uf = nullptr;
+	uint32_t blocks = 0;
+	std::vector<uint8_t> mem; // a file read whole (UDF data inside its entry)
+	bool in_mem = false;
+	uint64_t size = 0, pos = 0;
+	std::vector<uint8_t> tmp;
+
+	~FileReader()
+	{
+		if (uf)
+		{
+			std::lock_guard<std::mutex> l(m->udf_mu);
+			udfread_file_close(uf);
+		}
+	}
+
+	const Extent* Locate(uint64_t at)
+	{
+		for (const Extent& x : ext)
+			if (at >= x.file_off && at < x.file_off + x.bytes)
+				return &x;
+		if (!uf)
+			return nullptr;
+		const uint32_t b = uint32_t(at / kSector);
+		std::lock_guard<std::mutex> l(m->udf_mu);
+		const uint32_t lba = udfread_file_lba(uf, b);
+		if (lba == 0)
+			return nullptr;
+		uint32_t run = 1;
+		while (b + run < blocks && run < 65536 && udfread_file_lba(uf, b + run) == lba + run)
+			run++;
+		const uint64_t off = uint64_t(b) * kSector;
+		ext.push_back({off, lba, std::min<uint64_t>(uint64_t(run) * kSector, size - off)});
+		return &ext.back();
+	}
+};
+
+// the file at path on the Media (no checks of the drive's state: the caller's)
+bool OpenReaderOn(const std::shared_ptr<Media>& m, const std::string& path, FileReader& f)
+{
+	f.m = m;
+	const int n = FindNode(*m, path);
+	if (n < 0 || m->nodes[n].dir)
+		return false;
+	f.size = m->nodes[n].size;
+	if (!m->udf)
+	{
+		f.ext = m->nodes[n].extents;
+		return true;
+	}
+	{
+		std::lock_guard<std::mutex> l(m->udf_mu);
+		f.uf = udfread_file_open(m->udf, ("/" + path).c_str());
+		if (!f.uf)
+			return false;
+		f.size = uint64_t(std::max<int64_t>(0, udfread_file_size(f.uf)));
+		f.blocks = uint32_t((f.size + kSector - 1) / kSector);
+		if (f.size == 0 || udfread_file_lba(f.uf, 0) != 0)
+			return true;
+	}
+	// data inside the file entry (a tiny file), or not recorded: read whole through libudfread
+	if (UdfReadAll(*m, path, f.mem, 16u << 20))
+	{
+		f.in_mem = true;
+		f.size = f.mem.size();
+		return true;
+	}
+	return false;
+}
+
+int FileRead(void* opaque, uint8_t* buf, int len)
+{
+	FileReader* f = static_cast<FileReader*>(opaque);
+	if (f->pos >= f->size)
+		return AVERROR_EOF;
+	if (f->m->gone)
+		return AVERROR(EIO);
+	size_t want = size_t(std::min<uint64_t>(uint64_t(len), f->size - f->pos));
+	if (f->in_mem)
+	{
+		memcpy(buf, f->mem.data() + f->pos, want);
+		f->pos += want;
+		return int(want);
+	}
+	const Extent* e = f->Locate(f->pos);
+	if (!e)
+		return AVERROR(EIO);
+	const uint64_t in = f->pos - e->file_off;
+	want = size_t(std::min<uint64_t>(want, e->bytes - in));
+	const uint64_t first = e->lba + in / kSector;
+	const uint32_t skip = uint32_t(in % kSector);
+	const uint32_t count = uint32_t(std::min<uint64_t>((skip + want + kSector - 1) / kSector, 128));
+	want = std::min<size_t>(want, size_t(count) * kSector - skip);
+	f->tmp.resize(size_t(count) * kSector);
+	if (!f->m->Read(first, count, f->tmp.data()))
+		return Cancelled() ? AVERROR_EXIT : AVERROR(EIO);
+	memcpy(buf, f->tmp.data() + skip, want);
+	f->pos += want;
+	return int(want);
+}
+
+int64_t FileSeek(void* opaque, int64_t offset, int whence)
+{
+	FileReader* f = static_cast<FileReader*>(opaque);
+	if (whence == AVSEEK_SIZE)
+		return int64_t(f->size);
+	whence &= ~AVSEEK_FORCE;
+	const int64_t p = whence == SEEK_SET ? offset : whence == SEEK_CUR ? int64_t(f->pos) + offset : int64_t(f->size) + offset;
+	if (p < 0)
+		return AVERROR(EINVAL);
+	f->pos = uint64_t(p);
+	return p;
+}
+
+// count bytes at offset into out (whole sectors' worth), false on a read failure
+bool ReadAt(FileReader& f, uint64_t offset, uint8_t* out, size_t count)
+{
+	f.pos = offset;
+	size_t done = 0;
+	while (done < count)
+	{
+		const int r = FileRead(&f, out + done, int(std::min<size_t>(count - done, 1u << 20)));
+		if (r <= 0)
+			return false;
+		done += size_t(r);
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // the drives
 struct Slot
 {
@@ -664,14 +887,13 @@ struct Slot
 	bool usb = false;
 	std::shared_ptr<Media> media;
 	DriveState state;
-	double next_probe = 0;
 };
 
 std::mutex g_mu;
 std::condition_variable g_cv;
 std::vector<Slot> g_slots;
 std::thread g_thread;
-bool g_stop = false, g_poke = false, g_started = false;
+bool g_poke = false, g_started = false;
 uint64_t g_gen = 0;
 
 void Poke()
@@ -708,25 +930,39 @@ bool Scrambled(const uint8_t* s, uint32_t count)
 	return false;
 }
 
-// a few runs of sectors across a VOB file: any marked scrambled?
-template <typename ReadAt>
-bool VobScrambled(uint64_t sectors, ReadAt read)
+// Runs of 16 sectors spread across a title VOB (a few for a small one, never the same twice): any marked scrambled?
+// failures: the runs that couldn't be read.
+template <typename ReadAtFn>
+bool VobScrambled(uint64_t sectors, ReadAtFn read, int* attempts, int* failures)
 {
 	if (sectors == 0)
 		return false;
 	std::vector<uint8_t> buf(16 * kSector);
-	const uint64_t at[] = {0, std::min<uint64_t>(64, sectors - 1), sectors / 4, sectors / 2, sectors * 3 / 4};
-	for (uint64_t a : at)
+	const uint64_t span = sectors > 16 ? sectors - 16 : 0;
+	const int k = int(std::min<uint64_t>(4, sectors / 16 + 1));
+	uint64_t last = UINT64_MAX;
+	for (int i = 0; i < k; i++)
 	{
+		const uint64_t a = k > 1 ? span * uint64_t(i) / uint64_t(k - 1) : 0;
+		if (a == last)
+			continue;
+		last = a;
 		const uint32_t n = uint32_t(std::min<uint64_t>(16, sectors - a));
-		if (n && read(a, n, buf.data()) && Scrambled(buf.data(), n))
+		(*attempts)++;
+		if (!read(a, n, buf.data()))
+		{
+			(*failures)++;
+			continue;
+		}
+		if (Scrambled(buf.data(), n))
 			return true;
 	}
 	return false;
 }
 
-void Classify(Media& m, DriveState& st)
+void Classify(const std::shared_ptr<Media>& mp, DriveState& st)
 {
+	Media& m = *mp;
 	auto has = [&](const char* p) { return FindNode(m, p) >= 0; };
 	if (has("VIDEO_TS/VIDEO_TS.IFO"))
 	{
@@ -735,53 +971,45 @@ void Classify(Media& m, DriveState& st)
 		// the drive's copyright information (lead-in): CSS / CPPM, CPRM
 		dvd_struct ds = {};
 		ds.format = DVD_STRUCT_COPYRIGHT;
-		if (ioctl(m.fd, DVDIOCREADSTRUCTURE, &ds) == 0 && ds.cpst != 0)
+		if (ioctl(m.Fd(), DVDIOCREADSTRUCTURE, &ds) == 0 && ds.cpst != 0)
 		{
 			OrbisLog("[disc] %s: copyright protection system %u (the drive says so)", m.id.c_str(), ds.cpst);
 			st.protection = ds.cpst == 2 ? "CPRM" : "CSS";
 		}
 #endif
-		// the title VOBs' packs, sampled
+		// the title VOBs' packs (every title set's, every part), sampled
 		const int vt = FindNode(m, "VIDEO_TS");
+		int attempts = 0, failures = 0;
 		if (st.protection.empty() && vt >= 0)
 			for (int k : m.nodes[vt].kids)
 			{
 				const std::string n = Lower(m.nodes[k].name);
-				if (n.size() != 12 || n.compare(0, 4, "vts_") || n.compare(6, 6, "_1.vob"))
+				if (n.size() != 12 || n.compare(0, 4, "vts_") || n.compare(6, 1, "_") || n[7] < '1' || n[7] > '9' ||
+					n.compare(8, 4, ".vob"))
 					continue;
-				std::vector<Extent> ext;
-				uint64_t size = 0;
-				if (!FileExtents(m, "VIDEO_TS/" + m.nodes[k].name, ext, &size))
+				FileReader f;
+				if (!OpenReaderOn(mp, "VIDEO_TS/" + m.nodes[k].name, f))
 					continue;
-				int refused = 0;
-				auto read = [&](uint64_t s, uint32_t cnt, uint8_t* out) {
-					const uint64_t off = s * kSector;
-					for (const Extent& e : ext)
-						if (off >= e.file_off && off + uint64_t(cnt) * kSector <= e.file_off + ((e.bytes + kSector - 1) / kSector) * kSector)
-						{
-							const bool ok = m.Read(e.lba + (off - e.file_off) / kSector, cnt, out);
-							refused += !ok && !m.gone;
-							return ok;
-						}
-					return false;
-				};
-				if (VobScrambled(size / kSector, read))
+				auto read = [&](uint64_t s, uint32_t cnt, uint8_t* out) { return ReadAt(f, s * kSector, out, size_t(cnt) * kSector); };
+				if (VobScrambled(f.size / kSector, read, &attempts, &failures))
 				{
 					OrbisLog("[disc] %s: %s has scrambled packs", m.id.c_str(), m.nodes[k].name.c_str());
 					st.protection = "CSS";
 					break;
 				}
-				// a drive refuses to read CSS-scrambled sectors before the (never done) authentication: a title VOB
-				// that can't be read at all while the rest of the disc can
-				if (refused >= 3)
-				{
-					OrbisLog("[disc] %s: the drive won't read %s (scrambled sectors, CSS)", m.id.c_str(), m.nodes[k].name.c_str());
-					st.protection = "CSS";
+				if (m.gone || WalkStop())
 					break;
-				}
 			}
 		if (!st.protection.empty())
 			st.kind = Kind::Encrypted;
+		else if (failures >= 3 && failures * 2 >= attempts && !m.gone)
+		{
+			// its films' sectors don't read: a scratched or damaged disc (or one the drive won't read without the
+			// authentication this app never does) -- not called encrypted on that alone
+			OrbisLog("[disc] %s: %d of %d samples of the title VOBs don't read", m.id.c_str(), failures, attempts);
+			st.kind = Kind::Unreadable;
+			st.damaged = true;
+		}
 	}
 	else if (has("BDMV/index.bdmv") || has("BDMV/MovieObject.bdmv"))
 	{
@@ -798,16 +1026,17 @@ void Classify(Media& m, DriveState& st)
 }
 
 // reads a disc that was put in: its size, its file system, what it is
-void Mount(Media& m, DriveState& st)
+void Mount(const std::shared_ptr<Media>& mp, DriveState& st)
 {
+	Media& m = *mp;
 	uint64_t bytes = 0;
 #ifdef __PROSPERO__
 	off_t mb = 0;
-	if (ioctl(m.fd, DIOCGMEDIASIZE, &mb) == 0 && mb > 0)
+	if (ioctl(m.Fd(), DIOCGMEDIASIZE, &mb) == 0 && mb > 0)
 		bytes = uint64_t(mb);
 #else
 	struct stat sb = {};
-	if (fstat(m.fd, &sb) == 0)
+	if (fstat(m.Fd(), &sb) == 0)
 		bytes = uint64_t(sb.st_size);
 #endif
 	m.sectors = bytes / kSector;
@@ -817,7 +1046,7 @@ void Mount(Media& m, DriveState& st)
 	std::string iso_label, jol_label;
 	bool udf = false;
 	uint64_t vol_sectors = 0;
-	for (uint64_t sec = 16; sec < 16 + 64; sec++)
+	for (uint64_t sec = 16; sec < 16 + 64 && !WalkStop(); sec++)
 	{
 		if (!m.Read(sec, 1, s))
 			break;
@@ -857,7 +1086,8 @@ void Mount(Media& m, DriveState& st)
 		m.sectors = vol_sectors;
 	m.nodes.clear();
 	m.nodes.push_back(Node{"", true, 0, 0, {}, {}});
-	if (udf)
+	WalkBudget budget;
+	if (udf && !WalkStop())
 	{
 		UdfInput* in = new UdfInput;
 		in->in.close = UdfClose;
@@ -870,7 +1100,8 @@ void Mount(Media& m, DriveState& st)
 			m.fs = "UDF";
 			const char* v = udfread_get_volume_id(m.udf);
 			m.label = v ? TrimRight(v) : "";
-			UdfWalk(m, "", 0, 0);
+			std::lock_guard<std::mutex> l(m.udf_mu);
+			UdfWalk(m, "", 0, 0, budget);
 		}
 		else
 		{
@@ -881,23 +1112,27 @@ void Mount(Media& m, DriveState& st)
 			m.udf = nullptr;
 		}
 	}
-	if (!m.udf && (jol_root || iso_root))
+	if (!m.udf && (jol_root || iso_root) && !WalkStop())
 	{
 		const bool j = jol_root != 0;
 		m.fs = j ? "ISO 9660 + Joliet" : "ISO 9660";
 		m.label = j && !jol_label.empty() ? jol_label : iso_label;
-		IsoWalk(m, j ? jol_root : iso_root, j ? jol_root_len : iso_root_len, 0, j, 0);
+		IsoWalk(m, j ? jol_root : iso_root, j ? jol_root_len : iso_root_len, 0, j, 0, budget);
 	}
 	st.fs = m.fs;
 	st.label = m.label;
 	st.sectors = m.sectors;
+	st.cut = m.cut;
 	if (m.fs.empty())
 	{
 		st.kind = Kind::Unreadable;
 		OrbisLog("[disc] %s: no file system this player reads (%llu sectors)", m.id.c_str(), (unsigned long long)m.sectors);
 		return;
 	}
-	Classify(m, st);
+	if (m.cut)
+		OrbisLog("[disc] %s: its file system was read in part (%zu entries, %llu KiB of directories): too big or damaged",
+			m.id.c_str(), m.nodes.size() - 1, (unsigned long long)(budget.dir_bytes >> 10));
+	Classify(mp, st);
 	static const char* const kKinds[] = {"no disc", "reading", "data", "DVD-Video", "Blu-ray", "encrypted", "unreadable"};
 	OrbisLog("[disc] %s: \"%s\", %s, %llu sectors, %zu entries%s: %s%s%s", m.id.c_str(), m.label.c_str(), m.fs.c_str(),
 		(unsigned long long)m.sectors, m.nodes.size() - 1, m.cut ? " (cut)" : "", kKinds[int(st.kind)],
@@ -966,31 +1201,37 @@ void FindDrives()
 		}
 	}
 #endif
-	std::lock_guard<std::mutex> l(g_mu);
-	// keep what is known about the drives still there
-	std::vector<Slot> next;
-	for (auto& f : found)
+	std::vector<std::shared_ptr<Media>> drop; // let go of after the lock (never destroyed while it is held)
 	{
-		bool kept = false;
-		for (auto& s : g_slots)
-			if (s.id == f.id)
-			{
-				next.push_back(std::move(s));
-				kept = true;
-				break;
-			}
-		if (!kept)
+		std::lock_guard<std::mutex> l(g_mu);
+		// keep what is known about the drives still there
+		std::vector<Slot> next;
+		for (auto& f : found)
 		{
-			f.state.id = f.id;
-			f.state.usb = f.usb;
-			OrbisLog("[disc] drive %s (%s): %s", f.id.c_str(), f.dev.c_str(), f.usb ? "USB" : "the console's own");
-			next.push_back(std::move(f));
+			bool kept = false;
+			for (auto& s : g_slots)
+				if (s.id == f.id)
+				{
+					next.push_back(std::move(s));
+					kept = true;
+					break;
+				}
+			if (!kept)
+			{
+				f.state.id = f.id;
+				f.state.usb = f.usb;
+				OrbisLog("[disc] drive %s (%s): %s", f.id.c_str(), f.dev.c_str(), f.usb ? "USB" : "the console's own");
+				next.push_back(std::move(f));
+			}
 		}
+		for (auto& s : g_slots)
+			if (s.media)
+			{
+				s.media->gone = true; // a USB drive unplugged
+				drop.push_back(std::move(s.media));
+			}
+		g_slots = std::move(next);
 	}
-	for (auto& s : g_slots)
-		if (s.media && std::none_of(next.begin(), next.end(), [&](const Slot& n) { return n.id == s.id; }))
-			s.media->gone = true; // a USB drive unplugged
-	g_slots = std::move(next);
 }
 
 void WatchOnce()
@@ -1004,6 +1245,8 @@ void WatchOnce()
 	}
 	for (const std::string& id : ids)
 	{
+		if (g_stop)
+			return;
 		Slot copy;
 		{
 			std::lock_guard<std::mutex> l(g_mu);
@@ -1025,24 +1268,28 @@ void WatchOnce()
 				there = false;
 #else
 			// a disc being read (a film playing) is there; otherwise ask the drive now and then
-			if (there && Now() - copy.media->last_io > 5 && !copy.media->Probe())
+			if (there && Now() - copy.media->LastIo() > 5 && !copy.media->Probe())
 				there = false;
 #endif
 			if (!there)
 			{
 				copy.media->gone = true;
-				std::lock_guard<std::mutex> l(g_mu);
-				for (auto& s : g_slots)
-					if (s.id == id && s.media == copy.media)
-					{
-						s.media.reset();
-						s.state.kind = Kind::NoDisc;
-						s.state.label.clear();
-						s.state.fs.clear();
-						s.state.protection.clear();
-						s.state.generation = 0;
-						s.state.sectors = 0;
-					}
+				std::shared_ptr<Media> drop;
+				{
+					std::lock_guard<std::mutex> l(g_mu);
+					for (auto& s : g_slots)
+						if (s.id == id && s.media == copy.media)
+						{
+							drop = std::move(s.media);
+							s.state.kind = Kind::NoDisc;
+							s.state.label.clear();
+							s.state.fs.clear();
+							s.state.protection.clear();
+							s.state.generation = 0;
+							s.state.sectors = 0;
+							s.state.damaged = s.state.cut = false;
+						}
+				}
 				OrbisLog("[disc] %s: the disc was taken out", id.c_str());
 			}
 			continue;
@@ -1064,7 +1311,21 @@ void WatchOnce()
 		auto m = std::make_shared<Media>(id, copy.dev, fd, gen);
 		DriveState st = copy.state;
 		st.generation = gen;
-		Mount(*m, st);
+		st.damaged = st.cut = false;
+		st.protection.clear();
+		try
+		{
+			Mount(m, st);
+		}
+		catch (const std::bad_alloc&)
+		{
+			OrbisLog("[disc] %s: out of memory reading its file system", id.c_str());
+			m->nodes.clear();
+			m->nodes.push_back(Node{"", true, 0, 0, {}, {}});
+			st.kind = Kind::Unreadable;
+		}
+		if (g_stop)
+			return;
 		std::lock_guard<std::mutex> l(g_mu);
 		for (auto& s : g_slots)
 			if (s.id == id)
@@ -1080,6 +1341,7 @@ void WatchOnce()
 void WatchThread()
 {
 	OrbisLog("[disc] watching the disc drives");
+	CancelScope stop_reads(&g_stop); // Stop(): a disc being read gives up at once
 	std::unique_lock<std::mutex> l(g_mu);
 	while (!g_stop)
 	{
@@ -1112,66 +1374,11 @@ bool SplitDiscUrl(const std::string& url, std::string& id, std::string& path)
 	return !id.empty();
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// files on a data disc, to FFmpeg
-struct FileReader
+// a path inside an encrypted disc's film structure (its VOBs, its M2TS)
+bool InFilmStructure(const std::string& path)
 {
-	std::shared_ptr<Media> m;
-	std::vector<Extent> ext;
-	std::vector<uint8_t> mem; // a file read whole (UDF data inside its entry)
-	bool in_mem = false;
-	uint64_t size = 0, pos = 0;
-	std::vector<uint8_t> tmp;
-};
-
-int FileRead(void* opaque, uint8_t* buf, int len)
-{
-	FileReader* f = static_cast<FileReader*>(opaque);
-	if (f->pos >= f->size)
-		return AVERROR_EOF;
-	if (f->m->gone)
-		return AVERROR(EIO);
-	size_t want = size_t(std::min<uint64_t>(uint64_t(len), f->size - f->pos));
-	if (f->in_mem)
-	{
-		memcpy(buf, f->mem.data() + f->pos, want);
-		f->pos += want;
-		return int(want);
-	}
-	const Extent* e = nullptr;
-	for (const Extent& x : f->ext)
-		if (f->pos >= x.file_off && f->pos < x.file_off + x.bytes)
-		{
-			e = &x;
-			break;
-		}
-	if (!e)
-		return AVERROR(EIO);
-	const uint64_t in = f->pos - e->file_off;
-	want = size_t(std::min<uint64_t>(want, e->bytes - in));
-	const uint64_t first = e->lba + in / kSector;
-	const uint32_t skip = uint32_t(in % kSector);
-	const uint32_t count = uint32_t(std::min<uint64_t>((skip + want + kSector - 1) / kSector, 128));
-	want = std::min<size_t>(want, size_t(count) * kSector - skip);
-	f->tmp.resize(size_t(count) * kSector);
-	if (!f->m->Read(first, count, f->tmp.data()))
-		return AVERROR(EIO);
-	memcpy(buf, f->tmp.data() + skip, want);
-	f->pos += want;
-	return int(want);
-}
-
-int64_t FileSeek(void* opaque, int64_t offset, int whence)
-{
-	FileReader* f = static_cast<FileReader*>(opaque);
-	if (whence == AVSEEK_SIZE)
-		return int64_t(f->size);
-	whence &= ~AVSEEK_FORCE;
-	const int64_t p = whence == SEEK_SET ? offset : whence == SEEK_CUR ? int64_t(f->pos) + offset : int64_t(f->size) + offset;
-	if (p < 0)
-		return AVERROR(EINVAL);
-	f->pos = uint64_t(p);
-	return p;
+	const std::string l = Lower(path);
+	return StartsWith(l, "video_ts/") || StartsWith(l, "bdmv/") || StartsWith(l, "aacs/") || StartsWith(l, "bdsvm/");
 }
 
 bool OpenFileReader(const std::string& url, FileReader& f, std::string* error)
@@ -1179,55 +1386,86 @@ bool OpenFileReader(const std::string& url, FileReader& f, std::string* error)
 	std::string id, path;
 	if (!SplitDiscUrl(url, id, path))
 		return false;
-	f.m = MediaOf(id);
-	if (!f.m)
+	auto m = MediaOf(id);
+	DriveState d;
+	if (!m || !GetDrive(id, &d) || d.generation != m->gen)
 	{
 		if (error)
 			*error = "No disc";
 		return false;
 	}
-	if (FileExtents(*f.m, path, f.ext, &f.size))
-		return true;
-	if (f.m->udf)
+	// an encrypted disc's films aren't read as files either (scrambled data would go to FFmpeg)
+	if (d.kind == Kind::Encrypted && InFilmStructure(path))
 	{
-		const int n = FindNode(*f.m, path);
-		if (n >= 0 && !f.m->nodes[n].dir && UdfReadAll(*f.m, path, f.mem, 16u << 20))
-		{
-			f.in_mem = true;
-			f.size = f.mem.size();
-			return true;
-		}
+		OrbisLog("[disc] %s: %s is on an encrypted disc (%s): refused", id.c_str(), path.c_str(), d.protection.c_str());
+		if (error)
+			*error = EncryptedText();
+		return false;
 	}
+	if (OpenReaderOn(m, path, f))
+		return true;
 	if (error)
 		*error = "The file can't be opened from the disc.";
 	return false;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// libdvdread reads "mpcdisc:cd0" through the sector reader; anything else (a VIDEO_TS folder on a drive) as files
+// libdvdread reads "mpcdisc:cd0:<generation>" through the sector reader -- a UDF disc as an image, an ISO 9660-only
+// one as a folder of files -- and anything else (a VIDEO_TS folder on a drive) as files. A disc swapped since the
+// URL was made isn't read (its generation is another).
 struct DvdHandle
 {
 	std::shared_ptr<Media> m;
+	std::unique_ptr<FileReader> file; // a file on the disc (folder mode)
 	uint64_t pos = 0;
 	int fd = -1;
 };
 
-std::shared_ptr<Media> DvdMedia(const char* path)
+struct DvdDir
+{
+	DIR* d = nullptr;
+	std::vector<std::string> names; // a folder on the disc
+	size_t i = 0;
+};
+
+// "mpcdisc:cd0:7/VIDEO_TS/VTS_01_1.VOB" -> the disc (when it is still generation 7) and "VIDEO_TS/VTS_01_1.VOB"
+std::shared_ptr<Media> DvdMedia(const char* path, std::string* sub = nullptr)
 {
 	if (strncmp(path, "mpcdisc:", 8) != 0)
 		return nullptr;
-	return MediaOf(path + 8);
+	std::string p = path + 8;
+	const size_t slash = p.find('/');
+	const std::string root = p.substr(0, slash);
+	if (sub)
+		*sub = slash == std::string::npos ? "" : p.substr(slash + 1);
+	const size_t colon = root.find(':');
+	if (colon == std::string::npos)
+		return nullptr;
+	auto m = MediaOf(root.substr(0, colon));
+	if (!m || std::to_string(m->gen) != root.substr(colon + 1))
+		return nullptr;
+	return m;
 }
 
 int DvdStat(dvd_reader_filesystem_h*, const char* path, dvdstat_t* st)
 {
 	if (strncmp(path, "mpcdisc:", 8) == 0)
 	{
-		auto m = DvdMedia(path);
+		std::string sub;
+		auto m = DvdMedia(path, &sub);
 		if (!m)
 			return -1;
-		st->size = m->sectors * kSector;
-		st->st_mode = DVD_S_IFBLK;
+		if (sub.empty() && m->udf)
+		{
+			st->size = m->sectors * kSector;
+			st->st_mode = DVD_S_IFBLK;
+			return 0;
+		}
+		const int n = FindNode(*m, sub);
+		if (n < 0)
+			return -1;
+		st->size = m->nodes[n].size;
+		st->st_mode = m->nodes[n].dir ? DVD_S_IFDIR : DVD_S_IFREG;
 		return 0;
 	}
 	struct stat sb;
@@ -1240,13 +1478,38 @@ int DvdStat(dvd_reader_filesystem_h*, const char* path, dvdstat_t* st)
 
 void* DvdDirOpen(dvd_reader_filesystem_h*, const char* dirname)
 {
-	return opendir(dirname);
+	DvdDir* d = new DvdDir;
+	if (strncmp(dirname, "mpcdisc:", 8) == 0)
+	{
+		std::string sub;
+		auto m = DvdMedia(dirname, &sub);
+		const int n = m ? FindNode(*m, sub) : -1;
+		if (n >= 0 && m->nodes[n].dir)
+		{
+			for (int k : m->nodes[n].kids)
+				d->names.push_back(m->nodes[k].name);
+			return d;
+		}
+	}
+	else if ((d->d = opendir(dirname)) != nullptr)
+		return d;
+	delete d;
+	return nullptr;
 }
 
 int DvdDirRead(void* dir, dvd_dirent_t* entry)
 {
+	DvdDir* d = static_cast<DvdDir*>(dir);
+	if (!d->d)
+	{
+		if (d->i >= d->names.size())
+			return 1;
+		strncpy(entry->d_name, d->names[d->i++].c_str(), sizeof(entry->d_name) - 1);
+		entry->d_name[sizeof(entry->d_name) - 1] = 0;
+		return 0;
+	}
 	errno = 0;
-	dirent* e = readdir(static_cast<DIR*>(dir));
+	dirent* e = readdir(d->d);
 	if (!e)
 		return errno ? -errno : 1;
 	strncpy(entry->d_name, e->d_name, sizeof(entry->d_name) - 1);
@@ -1256,8 +1519,10 @@ int DvdDirRead(void* dir, dvd_dirent_t* entry)
 
 void DvdDirClose(void* dir)
 {
-	if (dir)
-		closedir(static_cast<DIR*>(dir));
+	DvdDir* d = static_cast<DvdDir*>(dir);
+	if (d && d->d)
+		closedir(d->d);
+	delete d;
 }
 
 void* DvdFileOpen(dvd_reader_filesystem_h*, const char* name)
@@ -1265,9 +1530,16 @@ void* DvdFileOpen(dvd_reader_filesystem_h*, const char* name)
 	DvdHandle* h = new DvdHandle;
 	if (strncmp(name, "mpcdisc:", 8) == 0)
 	{
-		h->m = DvdMedia(name);
-		if (h->m)
-			return h;
+		std::string sub;
+		h->m = DvdMedia(name, &sub);
+		if (h->m && sub.empty() && h->m->udf)
+			return h; // the disc as an image
+		if (h->m && !sub.empty())
+		{
+			h->file.reset(new FileReader);
+			if (OpenReaderOn(h->m, sub, *h->file))
+				return h;
+		}
 	}
 	else
 	{
@@ -1284,6 +1556,20 @@ ssize_t DvdFileRead(void* file, char* buf, size_t size)
 	DvdHandle* h = static_cast<DvdHandle*>(file);
 	if (h->fd >= 0)
 		return read(h->fd, buf, size);
+	if (h->file)
+	{
+		size_t done = 0;
+		while (done < size)
+		{
+			const int r = FileRead(h->file.get(), reinterpret_cast<uint8_t*>(buf) + done, int(std::min<size_t>(size - done, 1u << 20)));
+			if (r == AVERROR_EOF)
+				break;
+			if (r < 0)
+				return done ? ssize_t(done) : -1;
+			done += size_t(r);
+		}
+		return ssize_t(done);
+	}
 	const uint64_t end = h->m->sectors * kSector;
 	if (h->pos >= end || size == 0)
 		return 0;
@@ -1319,6 +1605,11 @@ off64_t DvdFileSeek(void* file, off64_t offset, int whence)
 	DvdHandle* h = static_cast<DvdHandle*>(file);
 	if (h->fd >= 0)
 		return lseek(h->fd, offset, whence);
+	if (h->file)
+	{
+		const int64_t r = FileSeek(h->file.get(), offset, whence);
+		return r < 0 ? -1 : r;
+	}
 	const int64_t p = whence == SEEK_SET ? offset : whence == SEEK_CUR ? int64_t(h->pos) + offset : int64_t(h->m->sectors * kSector) + offset;
 	if (p < 0)
 		return -1;
@@ -1483,7 +1774,7 @@ bool OpenBluray(const std::string& where, const std::shared_ptr<Media>& m, int w
 	if (!out.io)
 	{
 		av_free(buf);
-		return fail("out of memory");
+		return fail("Out of memory.");
 	}
 	out.owner = t;
 	out.format = av_find_input_format("mpegts");
@@ -1518,6 +1809,9 @@ void Start()
 		g_started = true;
 		g_stop = false;
 	}
+#ifndef __PROSPERO__
+	ReadFaultSetting();
+#endif
 	DVDSetFilesystemFactory(MakeDvdFs);
 	// libbluray's messages to the log, its serious ones only
 	bd_set_debug_handler(BdLog);
@@ -1536,9 +1830,22 @@ void Stop()
 	}
 	if (g_thread.joinable())
 		g_thread.join();
-	std::lock_guard<std::mutex> l(g_mu);
-	g_slots.clear();
-	g_started = false;
+	std::vector<Slot> drop; // the discs let go of after the lock (never destroyed while it is held)
+	{
+		std::lock_guard<std::mutex> l(g_mu);
+		drop.swap(g_slots);
+		g_started = false;
+	}
+}
+
+CancelScope::CancelScope(const std::atomic<bool>* flag) : prev_(t_cancel)
+{
+	t_cancel = flag;
+}
+
+CancelScope::~CancelScope()
+{
+	t_cancel = prev_;
 }
 
 std::vector<DriveState> Drives()
@@ -1605,6 +1912,8 @@ std::string DriveMessage(const DriveState& d)
 		case Kind::Encrypted:
 			return EncryptedMessage();
 		case Kind::Unreadable:
+			if (d.damaged)
+				return T("This disc can't be read (scratched or damaged?).");
 			return d.usb ? T("This disc can't be read: an audio CD (audio CDs can't be played here), or a blank or damaged disc.")
 						 : T("This disc can't be read: the PS5's own drive doesn't read CDs (a USB drive does; audio CDs "
 							 "can't be played here), or the disc is blank or damaged.");
@@ -1772,7 +2081,7 @@ AVIOContext* OpenAvio(const std::string& url, void** owner, std::string* error)
 		av_free(buf);
 		delete f;
 		if (error)
-			*error = "out of memory";
+			*error = "Out of memory.";
 		return nullptr;
 	}
 	*owner = f;
@@ -1812,6 +2121,11 @@ bool OpenTitle(const std::string& url, TitleOpen& out)
 			out.error = "Reading the disc...";
 			return false;
 		}
+		if (d.kind == Kind::Unreadable && d.damaged)
+		{
+			out.error = "This disc can't be read (scratched or damaged?).";
+			return false;
+		}
 		if (d.kind == Kind::Encrypted)
 		{
 			OrbisLog("[disc] %s: encrypted (%s): refused", id.c_str(), d.protection.c_str());
@@ -1844,7 +2158,8 @@ bool OpenTitle(const std::string& url, TitleOpen& out)
 		return OpenBluray(m ? id : folder, m, want, out);
 
 	// DVD-Video: the titles from the IFOs (libdvdread), the main one the longest
-	const std::string path = m ? "mpcdisc:" + id : folder;
+	// a disc: "mpcdisc:<drive>:<generation>" (a UDF disc read as an image, an ISO 9660-only one as a folder of files)
+	const std::string path = m ? "mpcdisc:" + id + ":" + std::to_string(m->gen) : folder;
 	dvd_logger_cb log = {DvdQuietLog};
 	dvd_reader_t* dvdr = DVDOpen2(nullptr, &log, path.c_str());
 	ifo_handle_t* vmg = dvdr ? ifoOpen(dvdr, 0) : nullptr;
@@ -1876,9 +2191,10 @@ bool OpenTitle(const std::string& url, TitleOpen& out)
 				if (dvd_file_t* f = DVDOpenFile(dvdr, ti.title_set_nr, DVD_READ_TITLE_VOBS))
 				{
 					const uint64_t secs = uint64_t(std::max<ssize_t>(0, DVDFileSize(f)));
+					int attempts = 0, failures = 0;
 					scrambled = VobScrambled(secs, [&](uint64_t s, uint32_t n, uint8_t* b) {
 						return DVDReadBlocks(f, int(s), n, b) == ssize_t(n);
-					});
+					}, &attempts, &failures);
 					DVDCloseFile(f);
 				}
 		}
@@ -1915,7 +2231,7 @@ bool OpenTitle(const std::string& url, TitleOpen& out)
 	out.format = av_find_input_format("dvdvideo");
 	if (!out.format)
 	{
-		out.error = "FFmpeg was built without its DVD-Video demuxer";
+		out.error = "This build can't play DVD-Video (FFmpeg without its DVD-Video demuxer).";
 		return false;
 	}
 	out.ffmpeg_url = path;

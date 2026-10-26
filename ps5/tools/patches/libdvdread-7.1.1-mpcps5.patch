@@ -185,7 +185,27 @@ diff -ruN a/src/dvd_reader.c b/src/dvd_reader.c
    if (!ctx->fs)
    {
      free(ctx);
-@@ -614,7 +627,10 @@
+@@ -575,11 +588,15 @@
+     {
+         new_path = realpath( path_copy, NULL );
+         if( new_path == NULL ) {
+-          goto DVDOpen_error;
++          /* Media Player Classic PS5: not a path of the system's: a folder of the filesystem
++           * DVDSetFilesystemFactory() gave (its stat said it is one), taken as it is */
++          if( !filesystem_factory )
++            goto DVDOpen_error;
++        } else {
++          free(path_copy);
++          path_copy = new_path;
++          new_path = NULL;
+         }
+-        free(path_copy);
+-        path_copy = new_path;
+-        new_path = NULL;
+     }
+ #endif
+ 
+@@ -614,7 +631,10 @@
          goto DVDOpen_error;
      }
  
@@ -197,7 +217,7 @@ diff -ruN a/src/dvd_reader.c b/src/dvd_reader.c
      struct statfs s[128];
      int r = getfsstat(NULL, 0, MNT_NOWAIT);
      if (r > 0) {
-@@ -698,7 +714,7 @@
+@@ -698,7 +718,7 @@
  
  #if !defined(_WIN32) && !defined(__OS2__)
      if( !dev_name ) {
@@ -206,7 +226,7 @@ diff -ruN a/src/dvd_reader.c b/src/dvd_reader.c
      } else if( !ctx->rd ) {
        Log0(ctx, "Device %s inaccessible, "
                  "CSS authentication not available.", dev_name );
-@@ -763,7 +779,7 @@
+@@ -763,7 +783,7 @@
      return ret;
  
    /* the builtin input reads through ctx->fs so set it before probing */
@@ -232,3 +252,87 @@ diff -ruN a/src/dvdread/dvd_reader.h b/src/dvdread/dvd_reader.h
  DVDREAD_API dvd_reader_t *DVDOpenFiles( void *priv, const dvd_logger_cb *logcb, const char * path, dvd_reader_filesystem_h *fs);
  
  /**
+diff -ruN a/src/ifo_read.c b/src/ifo_read.c
+--- a/src/ifo_read.c
++++ b/src/ifo_read.c
+@@ -2010,58 +2010,49 @@
+   CHECK_VALUE(nr_cmds * COMMAND_DATA_SIZE + PGC_COMMAND_TBL_SIZE
+               <= (uint32_t)cmd_tbl->last_byte + 1U);
+ 
++  /* Media Player Classic PS5: on a failure every table read so far is freed and its pointer cleared, as
++   * ifoFree_PGC() (the caller's clean-up) frees them again otherwise -- a double free on a damaged IFO */
+   if(cmd_tbl->nr_of_pre != 0) {
+     unsigned int pre_cmds_size  = cmd_tbl->nr_of_pre * COMMAND_DATA_SIZE;
+     cmd_tbl->pre_cmds = malloc(pre_cmds_size);
+     if(!cmd_tbl->pre_cmds)
+-      return 0;
++      goto fail;
+ 
+-    if(!(DVDReadBytes(ifop->file, cmd_tbl->pre_cmds, pre_cmds_size))) {
+-      free(cmd_tbl->pre_cmds);
+-      return 0;
+-    }
++    if(!(DVDReadBytes(ifop->file, cmd_tbl->pre_cmds, pre_cmds_size)))
++      goto fail;
+   }
+ 
+   if(cmd_tbl->nr_of_post != 0) {
+     unsigned int post_cmds_size = cmd_tbl->nr_of_post * COMMAND_DATA_SIZE;
+     cmd_tbl->post_cmds = malloc(post_cmds_size);
+-    if(!cmd_tbl->post_cmds) {
+-      if(cmd_tbl->pre_cmds)
+-        free(cmd_tbl->pre_cmds);
+-      return 0;
+-    }
+-    if(!(DVDReadBytes(ifop->file, cmd_tbl->post_cmds, post_cmds_size))) {
+-      if(cmd_tbl->pre_cmds)
+-        free(cmd_tbl->pre_cmds);
+-      free(cmd_tbl->post_cmds);
+-      return 0;
+-    }
++    if(!cmd_tbl->post_cmds)
++      goto fail;
++    if(!(DVDReadBytes(ifop->file, cmd_tbl->post_cmds, post_cmds_size)))
++      goto fail;
+   }
+ 
+   if(cmd_tbl->nr_of_cell != 0) {
+     unsigned int cell_cmds_size = cmd_tbl->nr_of_cell * COMMAND_DATA_SIZE;
+     cmd_tbl->cell_cmds = malloc(cell_cmds_size);
+-    if(!cmd_tbl->cell_cmds) {
+-      if(cmd_tbl->pre_cmds)
+-        free(cmd_tbl->pre_cmds);
+-      if(cmd_tbl->post_cmds)
+-        free(cmd_tbl->post_cmds);
+-      return 0;
+-    }
+-    if(!(DVDReadBytes(ifop->file, cmd_tbl->cell_cmds, cell_cmds_size))) {
+-      if(cmd_tbl->pre_cmds)
+-        free(cmd_tbl->pre_cmds);
+-      if(cmd_tbl->post_cmds)
+-        free(cmd_tbl->post_cmds);
+-      free(cmd_tbl->cell_cmds);
+-      return 0;
+-    }
++    if(!cmd_tbl->cell_cmds)
++      goto fail;
++    if(!(DVDReadBytes(ifop->file, cmd_tbl->cell_cmds, cell_cmds_size)))
++      goto fail;
+   }
+ 
+   /*
+    * Make a run over all the commands and see that we can interpret them all?
+    */
+   return 1;
++
++fail:
++  free(cmd_tbl->pre_cmds);
++  cmd_tbl->pre_cmds = NULL;
++  free(cmd_tbl->post_cmds);
++  cmd_tbl->post_cmds = NULL;
++  free(cmd_tbl->cell_cmds);
++  cmd_tbl->cell_cmds = NULL;
++  return 0;
+ }
+ 
+ 

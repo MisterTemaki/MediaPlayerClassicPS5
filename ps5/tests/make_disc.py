@@ -14,6 +14,14 @@ ffmpeg for the DVD's MPEG-2 program streams). They stand in for discs in the dri
         a Blu-ray structure (BDMV: index.bdmv, MovieObject.bdmv, PLAYLIST/00000.mpls, CLIPINF/00000.clpi,
         STREAM/00000.m2ts); "aacs": with AACS/Unit_Key_RO.inf and AACS/MKB_RO.inf as on an AACS disc, "bdplus":
         BDSVM/00000.svm as on a BD+ disc (dummy bytes: nothing is encrypted)
+  make_disc.py dvd <out.iso> <label> damaged|iso
+        the same DVD-Video with one byte of VIDEO_TS.IFO changed (its backup whole), or without UDF (ISO 9660 only)
+  make_disc.py loop <out.iso> <dir bytes> <records> <sectors>
+        a hostile ISO 9660 image: a root directory that contains itself (sparse)
+  make_disc.py multiext <out.iso>
+        ISO 9660: a file in two extents and a file in two versions (<out.iso>.big: the first one's bytes)
+  make_disc.py frag <out.iso> <file>
+        UDF: <file> as FRAG.BIN in three extents: blocks 0-9 at X, 12- at X+12 (junk at X+10), 10-11 elsewhere
 """
 import os
 import struct
@@ -107,6 +115,7 @@ class Image:
         self.dirs = {"": []}  # path -> child names (in the order added)
         self.files = {}  # path -> bytes
         self.order = []  # files, in the order their data goes on the disc
+        self.frag = set()  # files whose blocks 10-11 go elsewhere (UDF only: a fragmented file)
         self.t = 1700000000
 
     def add_dir(self, path):
@@ -191,9 +200,24 @@ class Image:
                 self.fid_data[d] = data
                 lb += (len(data) + SECTOR - 1) // SECTOR
         data_lb = {}
+        pieces = {}  # file -> [(file block, blocks, partition block)]
         for f in self.order:
             data_lb[f] = lb
-            lb += max(1, (len(self.files[f]) + SECTOR - 1) // SECTOR)
+            nb = max(1, (len(self.files[f]) + SECTOR - 1) // SECTOR)
+            if f in self.frag:
+                # blocks 0-9 here, 12- where they would be if the file were in one piece (two other blocks between:
+                # junk), 10-11 at the end of the partition: a run whose two ends line up but whose middle doesn't
+                pieces[f] = [(0, 10, lb), (10, 2, None), (12, nb - 12, lb + 12)]
+                self.junk = lb + 10
+                lb += nb
+            else:
+                pieces[f] = [(0, nb, lb)]
+                lb += nb
+        for f in self.order:
+            for i, (fb, n, at) in enumerate(pieces[f]):
+                if at is None:
+                    pieces[f][i] = (fb, n, lb)
+                    lb += n
         part_len = lb
         total = part_start + part_len + (1 if self.udf else 0)
         img = bytearray(total * SECTOR)
@@ -203,7 +227,10 @@ class Image:
 
         self.file_sector = {f: part_start + data_lb[f] for f in self.order}
         for f in self.order:
-            put(self.file_sector[f], self.files[f])
+            for fb, n, at in pieces[f]:
+                put(part_start + at, self.files[f][fb * SECTOR:(fb + n) * SECTOR])
+        if self.frag:
+            put(part_start + self.junk, b"\xee" * (2 * SECTOR))
         if self.iso:
             self.write_iso(put, dirs, total, False)
             if self.joliet:
@@ -243,7 +270,9 @@ class Image:
                 put(P(self.fe[d]), udf_tag(261, fe, self.fe[d]))
             for f in self.order:
                 parent = f.rpartition("/")[0]
-                fe = self.file_entry(5, self.fe[parent], len(self.files[f]), data_lb[f], uid, 1)
+                fe = self.file_entry(5, self.fe[parent], len(self.files[f]), data_lb[f], uid, 1,
+                                     [(min(n * SECTOR, len(self.files[f]) - fb * SECTOR), at) for fb, n, at in pieces[f]]
+                                     if f in self.frag else None)
                 uid += 1
                 put(P(self.fe[f]), udf_tag(261, fe, self.fe[f]))
         with open(out, "wb") as fo:
@@ -251,11 +280,14 @@ class Image:
         return self
 
     # ---- UDF ----
-    def file_entry(self, ftype, parent_lb, size, data_lb, uid, links):
+    def file_entry(self, ftype, parent_lb, size, data_lb, uid, links, extents=None):
         icb = struct.pack("<IHHHBB", 0, 4, 0, 1, 0, ftype) + struct.pack("<IH", parent_lb, 0) + struct.pack("<H", 0)
         ads = b""
         left, at = size, data_lb
-        while True:
+        if extents:
+            ads = b"".join(struct.pack("<II", n, a) for n, a in extents)
+            left = 0
+        while left > 0 or not ads:
             n = min(left, (1 << 30) - SECTOR)
             ads += struct.pack("<II", n, at)
             left -= n
@@ -545,7 +577,7 @@ def pad(b):
     return b + bytes(sectors(b) * SECTOR - len(b))
 
 
-def make_dvd(out, label, css):
+def make_dvd(out, label, css, damaged=False, iso_only=False):
     work = tempfile.mkdtemp(prefix="mpcdvd-", dir=os.path.dirname(os.path.abspath(out)))
     try:
         intro = ffmpeg_vob(os.path.join(work, "intro.vob"), ["white"], [440, 880], 3)
@@ -634,9 +666,16 @@ def make_dvd(out, label, css):
     vmg_ifo = bytes(vmat) + pad(tt) + pad(atrt)
     assert sectors(vmg_ifo) == vmg_ifo_sectors
     struct.pack_into(">I", bytearray(tt), 8 + 8, 0)  # (title_set_sector: unused by players)
-    img = Image(label, udf=True, iso=True)
+    img = Image(label, udf=not iso_only, iso=True)
     img.add_dir("AUDIO_TS")
-    img.add_file("VIDEO_TS/VIDEO_TS.IFO", vmg_ifo)
+    if damaged:
+        # one byte changed, as a scratch could: the first-play PGC's post-command count 0x4A00 (its table can't be
+        # read: libdvdread's error path freed it twice before 1.4's patch); the backup (VIDEO_TS.BUP) stays whole
+        bad = bytearray(vmg_ifo)
+        bad[0x400 + 236 + 2] = 0x4A
+        img.add_file("VIDEO_TS/VIDEO_TS.IFO", bytes(bad))
+    else:
+        img.add_file("VIDEO_TS/VIDEO_TS.IFO", vmg_ifo)
     img.add_file("VIDEO_TS/VIDEO_TS.BUP", vmg_ifo)
     img.add_file("VIDEO_TS/VTS_01_0.IFO", vts_ifo)
     img.add_file("VIDEO_TS/VTS_01_1.VOB", title_vobs)
@@ -783,6 +822,111 @@ def make_bd(out, label, protection):
     img.write(out)
 
 
+def make_loop(out, dirbytes, records, sectors_of_records):
+    """a hostile ISO 9660 image: a root directory dirbytes long whose records are itself ("A", "B"...): either
+    sectors_of_records sectors full of one record (records = 1), or `records` different names in one sector"""
+    def b32(v):
+        return struct.pack("<I", v) + struct.pack(">I", v)
+
+    def rec(name, lba, size, flags):
+        nl = len(name)
+        l = 33 + nl + ((33 + nl) % 2)
+        r = bytearray(l)
+        r[0] = l
+        r[2:10] = b32(lba)
+        r[10:18] = b32(size)
+        r[25] = flags
+        r[28:32] = b"\x01\x00\x00\x01"
+        r[32] = nl
+        r[33:33 + nl] = name
+        return bytes(r)
+    root = 20
+    total = root + dirbytes // SECTOR + 16
+    with open(out, "wb") as f:
+        f.truncate(total * SECTOR)  # sparse
+        pvd = bytearray(SECTOR)
+        pvd[0] = 1
+        pvd[1:6] = b"CD001"
+        pvd[6] = 1
+        pvd[40:72] = b"LOOP".ljust(32)
+        pvd[80:88] = b32(total)
+        pvd[156:156 + 34] = rec(b"\0", root, dirbytes, 2)
+        f.seek(16 * SECTOR)
+        f.write(pvd)
+        term = bytearray(SECTOR)
+        term[0] = 255
+        term[1:6] = b"CD001"
+        f.seek(17 * SECTOR)
+        f.write(term)
+        f.seek(root * SECTOR)
+        if records == 1:
+            sec = bytearray(SECTOR)
+            r = rec(b"A", root, dirbytes, 2)
+            p = 0
+            while p + len(r) <= SECTOR:
+                sec[p:p + len(r)] = r
+                p += len(r)
+            for _ in range(sectors_of_records):
+                f.write(sec)
+        else:
+            f.write(b"".join(rec(bytes([65 + i]), root, dirbytes, 2) for i in range(records)))
+
+
+def make_multiext(out):
+    """ISO 9660 only: BIG.BIN in two extents (flag 0x80 on the first record, ECMA-119 9.1.6), and A.TXT;1 and
+    A.TXT;2 (two versions: two files, not one in two parts)"""
+    def b32(v):
+        return struct.pack("<I", v) + struct.pack(">I", v)
+
+    def rec(name, lba, size, flags):
+        nl = len(name)
+        l = 33 + nl + ((33 + nl) % 2)
+        r = bytearray(l)
+        r[0] = l
+        r[2:10] = b32(lba)
+        r[10:18] = b32(size)
+        r[18:25] = iso_date7(1700000000)
+        r[25] = flags
+        r[28:32] = b"\x01\x00\x00\x01"
+        r[32] = nl
+        r[33:33 + nl] = name
+        return bytes(r)
+    part1 = bytes((i * 7) & 0xFF for i in range(3 * SECTOR))
+    part2 = bytes((i * 13 + 1) & 0xFF for i in range(2 * SECTOR + 100))
+    v1, v2 = b"version one\n", b"version two, longer\n"
+    root, d1, d2, d3, d4 = 20, 22, 30, 40, 41
+    total = 50
+    img = bytearray(total * SECTOR)
+    dirrec = rec(b"\0", root, SECTOR, 2) + rec(b"\1", root, SECTOR, 2)
+    dirrec += rec(b"A.TXT;1", d3, len(v1), 0) + rec(b"A.TXT;2", d4, len(v2), 0)
+    dirrec += rec(b"BIG.BIN;1", d1, len(part1), 0x80) + rec(b"BIG.BIN;1", d2, len(part2), 0)
+    img[root * SECTOR:root * SECTOR + len(dirrec)] = dirrec
+    img[d1 * SECTOR:d1 * SECTOR + len(part1)] = part1
+    img[d2 * SECTOR:d2 * SECTOR + len(part2)] = part2
+    img[d3 * SECTOR:d3 * SECTOR + len(v1)] = v1
+    img[d4 * SECTOR:d4 * SECTOR + len(v2)] = v2
+    pvd = bytearray(SECTOR)
+    pvd[0:7] = b"\x01CD001\x01"
+    pvd[40:72] = b"MULTI".ljust(32)
+    pvd[80:88] = b32(total)
+    pvd[156:156 + 34] = rec(b"\0", root, SECTOR, 2)
+    img[16 * SECTOR:17 * SECTOR] = pvd
+    img[17 * SECTOR:17 * SECTOR + 7] = b"\xffCD001\x01"
+    open(out, "wb").write(img)
+    open(out + ".big", "wb").write(part1 + part2)
+
+
+def make_frag(out, src):
+    """UDF only: src as FRAG.BIN in three extents -- blocks 0-9 at X, 12- at X+12 (junk at X+10), 10-11 elsewhere:
+    a run whose two ends line up but whose middle doesn't"""
+    data = open(src, "rb").read()
+    assert len(data) > 14 * SECTOR
+    img = Image("FRAG", udf=True, iso=False)
+    img.add_file("FRAG.BIN", data)
+    img.frag.add("FRAG.BIN")
+    img.write(out)
+
+
 def make_data(out, folder, label, kind):
     img = Image(label, udf=kind == "udf", iso=True, joliet=kind == "joliet")
     for root, dirs, files in os.walk(folder):
@@ -801,7 +945,14 @@ if __name__ == "__main__":
     if what == "data" and len(sys.argv) == 6:
         make_data(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
     elif what == "dvd" and len(sys.argv) in (4, 5):
-        make_dvd(sys.argv[2], sys.argv[3], len(sys.argv) == 5 and sys.argv[4] == "css")
+        opt = sys.argv[4] if len(sys.argv) == 5 else ""
+        make_dvd(sys.argv[2], sys.argv[3], opt == "css", damaged=opt == "damaged", iso_only=opt == "iso")
+    elif what == "loop" and len(sys.argv) == 6:
+        make_loop(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]))
+    elif what == "multiext" and len(sys.argv) == 3:
+        make_multiext(sys.argv[2])
+    elif what == "frag" and len(sys.argv) == 4:
+        make_frag(sys.argv[2], sys.argv[3])
     elif what == "bd" and len(sys.argv) in (4, 5):
         make_bd(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) == 5 else "")
     else:

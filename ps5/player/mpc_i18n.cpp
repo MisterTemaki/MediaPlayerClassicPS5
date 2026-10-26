@@ -1033,8 +1033,8 @@ const Entry kTable[] = {
 		"ou danificado.",
 		"Ce disque ne peut pas être lu : un CD audio (les CD audio ne peuvent pas être lus ici), ou un disque vierge ou "
 		"endommagé.",
-		"Diese Disc kann nicht gelesen werden: eine Audio-CD (Audio-CDs können hier nicht abgespielt werden) oder ein "
-		"eine leere oder beschädigte Disc."},
+		"Diese Disc kann nicht gelesen werden: eine Audio-CD (Audio-CDs können hier nicht abgespielt werden) oder eine "
+		"leere oder beschädigte Disc."},
 	{"This disc can't be read: the PS5's own drive doesn't read CDs (a USB drive does; audio CDs can't be played here), "
 	 "or the disc is blank or damaged.",
 		"No se puede leer este disco: la unidad de la propia PS5 no lee CD (una unidad USB sí; los CD de audio no se "
@@ -1083,6 +1083,15 @@ const Entry kTable[] = {
 	{"Open Disc", "Abrir disco", "Abrir disco", "Ouvrir un disque", "Disc öffnen"},
 	{"&Titles", "&Títulos", "&Títulos", "&Titres", "&Titel"},
 	{"Title %d", "Título %d", "Título %d", "Titre %d", "Titel %d"},
+	{"This disc can't be read (scratched or damaged?).", "No se puede leer este disco (¿rayado o dañado?).",
+		"Não é possível ler este disco (riscado ou danificado?).", "Ce disque ne peut pas être lu (rayé ou endommagé ?).",
+		"Diese Disc kann nicht gelesen werden (zerkratzt oder beschädigt?)."},
+	{"Out of memory.", "No queda memoria.", "Memória insuficiente.", "Mémoire insuffisante.", "Nicht genug Speicher."},
+	{"This build can't play DVD-Video (FFmpeg without its DVD-Video demuxer).",
+		"Esta versión no puede reproducir DVD-Video (FFmpeg sin su demultiplexor de DVD-Video).",
+		"Esta versão não reproduz DVD-Video (FFmpeg sem o demultiplexador de DVD-Video).",
+		"Cette version ne peut pas lire de DVD-Vidéo (FFmpeg sans son démultiplexeur DVD-Vidéo).",
+		"Diese Version kann keine DVD-Video abspielen (FFmpeg ohne seinen DVD-Video-Demuxer)."},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};
