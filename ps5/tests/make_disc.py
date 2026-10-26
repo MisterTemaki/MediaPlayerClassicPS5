@@ -181,6 +181,7 @@ class Image:
                 self.joliet_ext = dir_extents(True)
         # the UDF partition: FSD, TD, then one File Entry per directory and file, the directories' FIDs, the data
         part_start = next_sector
+        self.part_start = part_start
         lb = 0
         if self.udf:
             fsd_lb, td_lb = 0, 1
@@ -927,6 +928,101 @@ def make_frag(out, src):
     img.write(out)
 
 
+def make_isoloop(out):
+    """ISO 9660 only: the root holds A (the root again: a directory inside itself) and then Z with AFTER.TXT -- only
+    A's branch is to be passed over"""
+    def b32(v):
+        return struct.pack("<I", v) + struct.pack(">I", v)
+
+    def rec(name, lba, size, flags):
+        nl = len(name)
+        l = 33 + nl + ((33 + nl) % 2)
+        r = bytearray(l)
+        r[0] = l
+        r[2:10] = b32(lba)
+        r[10:18] = b32(size)
+        r[18:25] = iso_date7(1700000000)
+        r[25] = flags
+        r[28:32] = b"\x01\x00\x00\x01"
+        r[32] = nl
+        r[33:33 + nl] = name
+        return bytes(r)
+    after = b"after the loop\n"
+    root, z, f = 20, 22, 24
+    total = 30
+    img = bytearray(total * SECTOR)
+    dirrec = rec(b"\0", root, SECTOR, 2) + rec(b"\1", root, SECTOR, 2) + rec(b"A", root, SECTOR, 2) + rec(b"Z", z, SECTOR, 2)
+    img[root * SECTOR:root * SECTOR + len(dirrec)] = dirrec
+    zrec = rec(b"\0", z, SECTOR, 2) + rec(b"\1", root, SECTOR, 2) + rec(b"AFTER.TXT;1", f, len(after), 0)
+    img[z * SECTOR:z * SECTOR + len(zrec)] = zrec
+    img[f * SECTOR:f * SECTOR + len(after)] = after
+    pvd = bytearray(SECTOR)
+    pvd[0:7] = b"\x01CD001\x01"
+    pvd[40:72] = b"ISOLOOP".ljust(32)
+    pvd[80:88] = b32(total)
+    pvd[156:156 + 34] = rec(b"\0", root, SECTOR, 2)
+    img[16 * SECTOR:17 * SECTOR] = pvd
+    img[17 * SECTOR:17 * SECTOR + 7] = b"\xffCD001\x01"
+    open(out, "wb").write(img)
+
+
+def make_udfloop(out, filler):
+    """UDF only: D holds A and B, both D again (a directory inside itself, twice: libudfread reads each as a new
+    directory), and `filler` nameless entries (each directory read is that much bigger)"""
+    class Loop(Image):
+        def fids(self, d, first_lb):
+            if d != "D":
+                return super().fids(d, first_lb)
+            body_out = bytearray()
+
+            def fid(chars, name_bytes, icb_lb):
+                body = struct.pack("<HBB", 1, chars, len(name_bytes)) + struct.pack("<IIH6s", SECTOR, icb_lb, 0, bytes(6))
+                body += struct.pack("<H", 0) + name_bytes
+                body += bytes((4 - (16 + len(body)) % 4) % 4)
+                return udf_tag(257, body, first_lb + len(body_out) // SECTOR)
+            body_out += fid(0x0A, b"", self.fe[""])
+            body_out += fid(0x02, dchars("A"), self.fe["D"])
+            body_out += fid(0x02, dchars("B"), self.fe["D"])
+            one = fid(0x00, b"", self.fe["D"])  # nameless: libudfread skips it
+            body_out += one * filler
+            return bytes(body_out)
+    img = Loop("UDFLOOP", udf=True, iso=False)
+    img.add_dir("D")
+    img.add_file("Z/AFTER.TXT", b"after the loop\n")
+    img.write(out)
+
+
+def make_manyext(out, nblocks):
+    """UDF only: MANY.BIN, nblocks blocks each in an extent of its own (allocation extent descriptors chained from its
+    file entry), every other one on one of two blocks: a file in a great many pieces"""
+    in_fe, per_aed = 200, (SECTOR - 24) // 8 - 1  # data extents in the entry, in each descriptor (+ the next's place)
+    n_aed = max(0, -(-(nblocks - in_fe) // per_aed))
+    img = Image("MANYEXT", udf=True, iso=False)
+    img.add_file("MANY.BIN", bytes((4 + n_aed) * SECTOR))
+    img.write(out)
+    data = bytearray(open(out, "rb").read())
+    P = img.part_start
+    d0 = img.file_sector["MANY.BIN"] - P
+
+    def put(lb, b):
+        data[(P + lb) * SECTOR:(P + lb) * SECTOR + len(b)] = b
+    put(d0, b"A" * SECTOR)
+    put(d0 + 2, b"B" * SECTOR)
+    exts = [(SECTOR, d0 + 2 * (i % 2)) for i in range(nblocks)]
+    aed = [d0 + 4 + k for k in range(n_aed)]
+    nxt = (3 << 30) | SECTOR  # "the next allocation descriptors are there"
+    fe_ext = exts[:in_fe] + ([(nxt, aed[0])] if n_aed else [])
+    rest = exts[in_fe:]
+    for k in range(n_aed):
+        ads = b"".join(struct.pack("<II", n, a) for n, a in rest[k * per_aed:(k + 1) * per_aed])
+        if k + 1 < n_aed:
+            ads += struct.pack("<II", nxt, aed[k + 1])
+        put(aed[k], udf_tag(258, struct.pack("<II", 0, len(ads)) + ads, aed[k]))
+    fe = img.file_entry(5, img.fe[""], nblocks * SECTOR, 0, 17, 1, fe_ext)
+    put(img.fe["MANY.BIN"], udf_tag(261, fe, img.fe["MANY.BIN"]))
+    open(out, "wb").write(data)
+
+
 def make_data(out, folder, label, kind):
     img = Image(label, udf=kind == "udf", iso=True, joliet=kind == "joliet")
     for root, dirs, files in os.walk(folder):
@@ -953,6 +1049,12 @@ if __name__ == "__main__":
         make_multiext(sys.argv[2])
     elif what == "frag" and len(sys.argv) == 4:
         make_frag(sys.argv[2], sys.argv[3])
+    elif what == "isoloop" and len(sys.argv) == 3:
+        make_isoloop(sys.argv[2])
+    elif what == "udfloop" and len(sys.argv) == 4:
+        make_udfloop(sys.argv[2], int(sys.argv[3]))
+    elif what == "manyext" and len(sys.argv) == 4:
+        make_manyext(sys.argv[2], int(sys.argv[3]))
     elif what == "bd" and len(sys.argv) in (4, 5):
         make_bd(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) == 5 else "")
     else:

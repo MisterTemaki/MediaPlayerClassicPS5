@@ -1,0 +1,53 @@
+diff -ruN a/src/udfread.c b/src/udfread.c
+--- a/src/udfread.c
++++ b/src/udfread.c
+@@ -1566,6 +1566,25 @@
+     return 1;
+ }
+ 
++int udfread_file_extent(UDFFILE *p, uint32_t index, uint32_t *lba, uint32_t *blocks)
++{
++    const struct long_ad *ad;
++
++    if (!p || !p->fe || p->fe->content_inline || !lba || !blocks) {
++        return 0;
++    }
++    if (index >= p->fe->u.ads.num_ad) {
++        return 0;
++    }
++
++    /* as _file_lba(): normal recorded extents, in the first partition */
++    ad      = &p->fe->u.ads.ad[index];
++    *blocks = (ad->length + UDF_BLOCK_SIZE - 1) / UDF_BLOCK_SIZE;
++    *lba    = (ad->extent_type == ECMA_AD_EXTENT_NORMAL && ad->lba) ? p->udf->part.p[0].lba + ad->lba : 0;
++
++    return 1;
++}
++
+ uint32_t udfread_file_lba(UDFFILE *p, uint32_t file_block)
+ {
+     if (!_file_lba_exists(p)) {
+diff -ruN a/src/udfread.h b/src/udfread.h
+--- a/src/udfread.h
++++ b/src/udfread.h
+@@ -250,6 +250,20 @@
+ UDF_PUBLIC uint32_t udfread_file_lba (UDFFILE *, uint32_t file_block);
+ 
+ /**
++ *  Get a file's allocation extent (Media Player Classic PS5)
++ *
++ *  The file's blocks, an extent at a time, in order, without reading the disc: a file mapped whole in one pass
++ *  (udfread_file_lba() walks the extents from the first on every call).
++ *
++ * @param p  file object
++ * @param index  extent number, from 0
++ * @param lba  its absolute block address, 0 when it isn't recorded (a hole, or an extent this library can't map)
++ * @param blocks  its length in blocks
++ * @return 1, 0 past the last extent (or an inline file)
++ */
++UDF_PUBLIC int udfread_file_extent (UDFFILE *, uint32_t index, uint32_t *lba, uint32_t *blocks);
++
++/**
+  *  Read blocks from a file
+  *
+  * @param p  file object

@@ -19,7 +19,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/data-big.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/manyext.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -1199,7 +1199,7 @@ r=$(MPCPS5_HOST_DISC_FAULT=fail=1,from=$sec $DT mount $MEDIA/dvd.iso 5 300 2>&1)
 expect "echo \"\$r\" | grep -q \"kind 6 cut 0 damaged 1 protection ''\"" "unreadable title VOBs: unreadable (scratched?), not called encrypted"
 T=$(newroot t26f)
 rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso MPCPS5_HOST_DISC_FAULT=fail=1,from=$sec run "$T" "0:0" "30:cmd disc0;31:open dvd://cd0;60:key enter;70:quit" "")
-expect "[ $rc = 0 ] && log $T \"\\[ui\\] message: .*This disc can't be read (scratched or damaged?)\"" "... and the app says so"
+expect "[ $rc = 0 ] && log $T \"\\[ui\\] message: .*This disc can't be read: it is scratched or damaged, or it is an encrypted film\\.\"" "... and the app says so"
 nosan "$T"
 # g: a DVD-Video on an ISO 9660-only disc (no UDF): libdvdread reads it as a folder of files through the player
 T=$(newroot t26g)
@@ -1211,6 +1211,43 @@ nosan "$T"
 expect "$DT read $MEDIA/frag.iso disc://cd0/FRAG.BIN $MEDIA/red.mp4 >/dev/null 2>&1" "a fragmented UDF file (blocks 0-9, 12- in line, 10-11 elsewhere) reads as itself"
 r=$($DT list $MEDIA/multi.iso disc://cd0 2>&1)
 expect "[ \"\$(echo \"\$r\" | grep -c '^A.TXT ')\" = 2 ] && echo \"\$r\" | grep -q '^BIG.BIN 10340$' && $DT read $MEDIA/multi.iso disc://cd0/BIG.BIN $MEDIA/multi.iso.big >/dev/null 2>&1" "ISO 9660: A.TXT;1 and A.TXT;2 two files, BIG.BIN's two extents one file (read whole)"
+fi
+
+if want 27; then
+echo "== 27. 1.4 re-check: a drive that doesn't say the disc's size, deep and looping trees, // paths, UDF budgets, files in many pieces, a hung drive"
+DT="env ASAN_OPTIONS=detect_leaks=0 $PWD/build/host/mpc-disc-test"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+# a: no size from the drive (5S2CD's DVD structure / TOC / DIOCGMEDIASIZE all failing): the discs read all the same
+NS="env MPCPS5_HOST_DISC_FAULT=nosize=1"
+r=$($NS $DT mount $MEDIA/dvd.iso 5 300 2>&1; $NS $DT mount $MEDIA/dvd-iso.iso 5 300 2>&1; $NS $DT mount $MEDIA/data-big.iso 5 300 2>&1; $NS $DT mount $MEDIA/data-bigiso.iso 5 300 2>&1)
+expect "[ \"\$(echo \"\$r\" | grep -c '^mounted 1 kind 3 ')\" = 2 ] && [ \"\$(echo \"\$r\" | grep -c '^mounted 1 kind 2 ')\" = 2 ]" "no size from the drive: the DVD-Videos (UDF, ISO 9660-only) and the data discs (UDF, Joliet) are read"
+r=$($NS $DT title $MEDIA/dvd.iso dvd://cd0 2>&1; $NS $DT title $MEDIA/dvd-iso.iso dvd://cd0 2>&1)
+expect "[ \"\$(echo \"\$r\" | grep -c '^ffmpeg 0 packets 783$')\" = 2 ] && $NS $DT read $MEDIA/data-big.iso disc://cd0/big.bin $MEDIA/data-big.ref >/dev/null 2>&1 && $NS $DT read $MEDIA/data-bigiso.iso disc://cd0/big.bin $MEDIA/data-big.ref >/dev/null 2>&1" "... the titles play to their end, the files read whole"
+T=$(newroot t27a)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso MPCPS5_HOST_DISC_FAULT=nosize=1 run "$T" "0:0" "30:cmd disc0;90:state;100:quit" "85")
+expect "[ $rc = 0 ] && log $T \"the drive doesn't say the disc's size\" && log $T 'disc title 2 of 2: 3 chapter(s)' && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "... in the app: File > Open Disc plays the DVD's main title"
+nosan "$T"
+# b: a branch too deep (a/d1/.../d26) or inside itself (ISO 9660: A is the root): passed over, the rest read
+r=$($DT list $MEDIA/deep-udf.iso disc://cd0/z 2>&1; $DT list $MEDIA/deep-iso.iso disc://cd0/z 2>&1; $DT list $MEDIA/isoloop.iso disc://cd0/Z 2>&1)
+expect "[ \"\$(echo \"\$r\" | grep -ci '^after.txt ')\" = 3 ]" "a too deep branch (UDF, Joliet), a directory inside itself (ISO 9660): only that branch passed over, z/after.txt listed"
+# c: an encrypted disc's film with // or ./ in its path: refused as well
+r=$($DT open $MEDIA/dvd-css.iso disc://cd0//VIDEO_TS/VTS_01_1.VOB 2>&1; $DT open $MEDIA/dvd-css.iso disc://cd0/VIDEO_TS//VTS_01_1.VOB 2>&1; $DT open $MEDIA/dvd-css.iso disc://cd0/./video_ts/VTS_01_1.VOB 2>&1)
+expect "[ \"\$(echo \"\$r\" | grep -c '^This disc is encrypted')\" = 3 ]" "disc://cd0//VIDEO_TS/..., .../VIDEO_TS//..., ./video_ts/...: refused on the CSS DVD"
+# d: UDF directories within the budgets: one over 4 MiB passed over (its sibling read), directories inside themselves
+# stop at 32 MiB read
+r=$($DT list $MEDIA/udfbig.iso disc://cd0/Z 2>&1; $DT list $MEDIA/udfbig.iso disc://cd0/D 2>&1)
+expect "echo \"\$r\" | grep -q '^AFTER.TXT ' && ! echo \"\$r\" | grep -q '^A 0 dir'" "a UDF directory of 4.8 MB: passed over (not read), its sibling Z read"
+r=$(DISC_TEST_LOG=1 $DT mount $MEDIA/udfloop.iso 5 300 2>&1)
+expect "echo \"\$r\" | grep -q '^mounted 1 kind 2 cut 1 ' && echo \"\$r\" | grep -q 'entries, 327[0-9][0-9] KiB of directories'" "UDF directories inside themselves (800 KB each): read up to 32 MiB, in under 5 s and 300 MiB ($(echo $r | grep -o 'in [0-9.]* s, stop.*'))"
+# e: a UDF file of 60000 blocks each in an extent of its own: mapped once, read whole quickly
+r=$($DT scan $MEDIA/manyext.iso disc://cd0/MANY.BIN 5 2>&1)
+expect "echo \"\$r\" | grep -q \"^read 122880000 of 122880000 bytes in .*, 'A' 61440000, 'B' 61440000\$\"" "a UDF file in 60000 pieces: read whole, in order, in under 5 s ($(echo $r | grep -o 'in [0-9.]* s'))"
+# f: File > Load Subtitle on a slow drive (2.5 s a read): the UI waits 1 s at most here (5 s in the app); a drive that
+# doesn't answer (a FIFO no one writes to): Stop() waits 2 s, not forever
+expect "$DT ui-read $MEDIA/data-big.iso disc://cd0/big.bin >/dev/null 2>&1" "a disc file read from the UI thread on a slow drive: given up in time"
+rm -f "$WORK/hung.fifo" && mkfifo "$WORK/hung.fifo"
+expect "timeout 20 $DT stop-hung $WORK/hung.fifo >/dev/null 2>&1" "a drive that doesn't answer: Stop() (the app's exit) returns in 2 s"
+rm -f "$WORK/hung.fifo"
 fi
 
 echo

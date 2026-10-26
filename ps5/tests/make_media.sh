@@ -188,5 +188,22 @@ python3 "$(dirname "$0")/make_disc.py" frag "$D/frag.iso" "$D/red.mp4"
 mkdir -p "$D/discbig"
 python3 -c "import random, sys; random.seed(14); sys.stdout.buffer.write(bytes(random.getrandbits(8) for _ in range(6000000)))" >"$D/discbig/big.bin"
 python3 "$(dirname "$0")/make_disc.py" data "$D/data-big.iso" "$D/discbig" "BIG" udf
+python3 "$(dirname "$0")/make_disc.py" data "$D/data-bigiso.iso" "$D/discbig" "BIGISO" joliet
+cp "$D/discbig/big.bin" "$D/data-big.ref"
 rm -rf "$D/discbig"
+# the re-check's cases: a/d1/.../d26/f.txt (too deep) then z/after.txt, as UDF and as ISO 9660; an ISO 9660 root
+# holding itself and then Z/AFTER.TXT; UDF directories inside themselves (800 KB each), one of 4.8 MB; a UDF file of
+# 60000 blocks each in an extent of its own (allocation extent descriptors)
+p="$D/discdeep/a"
+for i in $(seq 1 26); do p="$p/d$i"; done
+mkdir -p "$p" "$D/discdeep/z"
+echo deep >"$p/f.txt"
+echo after >"$D/discdeep/z/after.txt"
+python3 "$(dirname "$0")/make_disc.py" data "$D/deep-udf.iso" "$D/discdeep" "DEEP" udf
+python3 "$(dirname "$0")/make_disc.py" data "$D/deep-iso.iso" "$D/discdeep" "DEEP" joliet
+rm -rf "$D/discdeep"
+python3 "$(dirname "$0")/make_disc.py" isoloop "$D/isoloop.iso"
+python3 "$(dirname "$0")/make_disc.py" udfloop "$D/udfloop.iso" 20000
+python3 "$(dirname "$0")/make_disc.py" udfloop "$D/udfbig.iso" 120000
+python3 "$(dirname "$0")/make_disc.py" manyext "$D/manyext.iso" 60000
 echo "media in $D"

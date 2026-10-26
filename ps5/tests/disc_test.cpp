@@ -13,6 +13,11 @@
 //   mpc-disc-test cancel <image> <disc://cd0/file>         a read stuck on a slow drive gives up when cancelled
 //                                                          (the file: over 4 MiB)
 //   mpc-disc-test negcache <image> <disc://cd0/file>       a part that can't be read isn't read again
+//   mpc-disc-test scan <image> <disc://cd0/file> <max s>    the file read in order, whole, within max seconds
+//   mpc-disc-test ui-read <image> <disc://cd0/file>        the UI's read of a disc file (File > Load Subtitle) on a
+//                                                          drive that takes 2.5 s a read: given up after 1 s
+//   mpc-disc-test stop-hung <fifo>                         Stop() while the watcher waits for a drive that doesn't
+//                                                          answer (opening a FIFO no one writes to): within 3 s
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -112,6 +117,14 @@ int main(int argc, char** argv)
 	Start();
 	DriveState d;
 	const double t0 = Now();
+	if (mode == "stop-hung")
+	{
+		usleep(300000); // the watcher is in the drive now
+		const double ts = Now();
+		Stop();
+		printf("stopped in %.2f s\n", Now() - ts);
+		return Now() - ts < 3 ? 0 : 1;
+	}
 	if (mode == "mount")
 	{
 		const double max_s = argc > 3 ? atof(argv[3]) : 10, max_mib = argc > 4 ? atof(argv[4]) : 512;
@@ -306,6 +319,54 @@ int main(int argc, char** argv)
 		g_fault_from = -1;
 		g_fault_fail = false;
 		rc = one > 0 && two == 0 ? 0 : 1;
+	}
+	else if (mode == "scan" && argc > 4)
+	{
+		FileReader f;
+		std::string err;
+		if (!OpenFileReader(argv[3], f, &err))
+		{
+			printf("open: %s\n", err.c_str());
+			return 1;
+		}
+		std::vector<uint8_t> buf(65536);
+		uint64_t total = 0;
+		std::map<uint8_t, uint64_t> bytes;
+		const double ts = Now();
+		for (;;)
+		{
+			const int r = FileRead(&f, buf.data(), int(buf.size()));
+			if (r <= 0)
+				break;
+			for (int i = 0; i < r; i += kSector)
+				bytes[buf[size_t(i)]] += kSector;
+			total += uint64_t(r);
+		}
+		const double t = Now() - ts;
+		printf("read %llu of %llu bytes in %.2f s (%zu extents)", (unsigned long long)total, (unsigned long long)f.size, t,
+			f.ext.size());
+		for (const auto& b : bytes)
+			printf(", '%c' %llu", b.first, (unsigned long long)b.second);
+		printf("\n");
+		rc = total == f.size && t < atof(argv[4]) ? 0 : 1;
+	}
+	else if (mode == "ui-read" && argc > 3)
+	{
+		std::string id, path;
+		FileReader f;
+		auto m = SplitDiscUrl(argv[3], id, path) ? MediaOf(id) : nullptr;
+		const Extent* e = m && OpenReaderOn(m, path, f) ? f.Locate(0) : nullptr;
+		if (!e)
+			return 1;
+		g_fault_from = int64_t(e->lba);
+		g_fault_slow_ms = 2500;
+		std::vector<uint8_t> out;
+		const double ts = Now();
+		const bool ok = ReadFileWithin(argv[3], out, 16u << 20, 1.0);
+		const double t = Now() - ts;
+		printf("read %d, back in %.2f s\n", int(ok), t);
+		g_fault_from = -1;
+		rc = !ok && t < 1.5 ? 0 : 1;
 	}
 	else
 		rc = 2;

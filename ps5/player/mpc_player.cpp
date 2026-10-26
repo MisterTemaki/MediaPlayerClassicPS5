@@ -397,7 +397,7 @@ bool ReadWholeFile(const std::string& path, std::vector<uint8_t>& out, size_t ma
 	if (path.compare(0, 6, "smb://") == 0)
 		return smb::ReadFile(path, out, max_bytes);
 	if (path.compare(0, 7, "disc://") == 0)
-		return disc::ReadFile(path, out, max_bytes);
+		return disc::ReadFileWithin(path, out, max_bytes, 5); // (File > Load Subtitle: on the UI thread)
 	FILE* f = fopen(path.c_str(), "rb");
 	if (!f)
 		return false;

@@ -28,7 +28,8 @@
 //
 // Host builds: MPCPS5_HOST_DISC=<image>[,<image2>...] puts a disc image in drive cd0 (the console's), cd1 (USB)...;
 // a missing file is an empty drive; the test script's "eject cdN" / "insert cdN" take it out and put it back;
-// MPCPS5_HOST_DISC_FAULT=slow=<ms>,from=<sector>[,fail=1] makes the drive slow (and failing) from that sector on.
+// MPCPS5_HOST_DISC_FAULT=slow=<ms>,from=<sector>[,fail=1] makes the drive slow (and failing) from that sector on;
+// nosize=1: the drive doesn't say the disc's size.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
@@ -124,6 +125,9 @@ bool List(const std::string& url, std::vector<Entry>& out, std::string* error);
 bool Exists(const std::string& url);
 bool IsDir(const std::string& url);
 bool ReadFile(const std::string& url, std::vector<uint8_t>& out, size_t max_bytes);
+// the same from a thread that mustn't wait for a slow disc (the UI's): the read gives up after max_seconds (or when
+// this thread's reads are cancelled)
+bool ReadFileWithin(const std::string& url, std::vector<uint8_t>& out, size_t max_bytes, double max_seconds);
 AVIOContext* OpenAvio(const std::string& url, void** owner, std::string* error);
 void CloseAvio(AVIOContext* io, void* owner);
 

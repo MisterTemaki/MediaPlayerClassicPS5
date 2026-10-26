@@ -19,7 +19,8 @@
 #   libass 0.17.5        https://github.com/libass/libass (ISC): ASS/SSA subtitles; no fontconfig (no font provider
 #                        on the console: the fonts are the app's own, the MKV's attachments and /data/mpcps5/fonts)
 #   (1.4, disc drives -- VideoLAN's release tarballs, https://download.videolan.org/pub/videolan/<name>/, SHA-256 below)
-#   libudfread 1.2.0     UDF file systems (LGPL-2.1-or-later)
+#   libudfread 1.2.0     UDF file systems (LGPL-2.1-or-later); tools/patches/libudfread-1.2.0-mpcps5.patch:
+#                        udfread_file_extent() (a file's extents one by one: a file in many pieces mapped once)
 #   libbluray 1.5.0      Blu-ray (LGPL-2.1-or-later): no BD-J (no Java), no libxml2 / fontconfig / FreeType;
 #                        tools/patches/libbluray-1.5.0-mpcps5.patch: it loads nothing at run time (no libaacs,
 #                        libbdplus, libmmbd, Java VM: dl_dlopen() finds nothing)

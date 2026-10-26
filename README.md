@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 375 host tests
+> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 386 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -294,8 +294,9 @@ its sandbox. A disc put in or taken out while the app runs is seen within a few 
   Such a disc is recognised -- a DVD by the drive's copyright information or packs marked scrambled, a Blu-ray by
   its AACS / BD+ files -- and refused with a message. **On a PS5 with a disc drive, the console's own player plays
   them.** A DVD whose films' sectors don't read at all is not called encrypted on that alone: it gets *This disc
-  can't be read (scratched or damaged?)* (a drive that won't read a film without the authentication this app never
-  does looks the same; only a PS5 with a commercial disc can tell which message it gets).
+  can't be read: it is scratched or damaged, or it is an encrypted film.* (a drive that won't read a film without the
+  authentication this app never does looks the same as a scratched disc; only a PS5 with a commercial disc can tell
+  which message such a disc gets).
 - **Disc menus** (1.4): the main title plays; Navigate > Titles picks another. The menu commands stay greyed.
 - **Audio CDs**: FreeBSD's cd(4) can't read audio tracks (5S2CD found the same); such a disc shows as unreadable.
 - **CDs in the PS5's own drive**: it doesn't read CDs at all (5S2CD); a USB drive does.
@@ -539,8 +540,10 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   the core only: no glib, ICU or cairo) and **FriBidi** 1.0.16 (LGPL-2.1), all static, built without fontconfig
   by `tools/build-deps.sh` (`tools/build-deps.sh subs` -- `make deps-subs` -- builds only these four).
 - **5S2CD** (by The7mirrors, a fork of PS5SX2, GPL-3.0) -- disc reading after it: the drives as FreeBSD cd(4) devices
-  (`/dev/cd0` the console's own, `/dev/cd1` a USB drive), whole 2048-byte sectors with `pread()`, `DIOCGMEDIASIZE`,
-  `DVDIOCREADSTRUCTURE`, `CDIOREADTOCHEADER`, a disc being there when its sector 16 reads, the read-ahead; and what it
+  (`/dev/cd0` the console's own, `/dev/cd1` a USB drive), whole 2048-byte sectors with `pread()`, the disc's size
+  from `DVDIOCREADSTRUCTURE` (a DVD's physical format), the table of contents or `DIOCGMEDIASIZE`, in that order
+  (when none answers, reads aren't held to an end), `CDIOREADTOCHEADER`, a disc being there when its sector 16
+  reads, the read-ahead; and what it
   found (the console's drive reads no CDs, cd(4) no audio tracks). 1.4, see [Discs](#discs).
 - **libdvdread** 7.1.1 and **libdvdnav** 7.0.0 -- DVD-Video (FFmpeg's DVD-Video demuxer uses them); GPL-2.0-or-later;
   VideoLAN and the libdvdread/libdvdnav authors. Built **without libdvdcss**, and with
@@ -549,7 +552,9 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   reader).
 - **libbluray** 1.5.0 -- Blu-ray; LGPL-2.1-or-later; VideoLAN and the libbluray authors. No BD-J (Java), libxml2,
   fontconfig or FreeType; `tools/patches/libbluray-1.5.0-mpcps5.patch`: nothing is loaded at run time (no libaacs,
-  libbdplus, libmmbd or Java VM). **libudfread** 1.2.0 -- UDF; LGPL-2.1-or-later; VideoLAN. All four static, from
+  libbdplus, libmmbd or Java VM). **libudfread** 1.2.0 -- UDF; LGPL-2.1-or-later; VideoLAN;
+  `tools/patches/libudfread-1.2.0-mpcps5.patch`: `udfread_file_extent()` (a file's extents listed, so a file in many
+  pieces is mapped once). All four static, from
   VideoLAN's release tarballs (SHA-256 in `tools/build-deps.sh`); FFmpeg's DVD-Video demuxer with
   `tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch` (a seek once the title's end was read).
 - **Mbed TLS** 3.6.7 (Apache-2.0), **zlib**, **Mozilla's CA list** (MPL-2.0, via certifi).
