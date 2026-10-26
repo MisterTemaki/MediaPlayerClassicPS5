@@ -723,7 +723,14 @@ struct Player::Impl
 		if (r < 0)
 		{
 			ic = nullptr; // freed by avformat_open_input
-			SetFailed(AvErr(r));
+			// a title on a disc in a drive whose structure FFmpeg's demuxer (libdvdnav) can't follow: a damaged disc
+			if (r != AVERROR_EXIT && !quit && disc::IsTitleUrl(url) && !disc::DriveOf(url).empty())
+			{
+				OrbisLog("[player] the disc's title can't be opened: %s", AvErr(r).c_str());
+				SetFailed(disc::DamagedText());
+			}
+			else
+				SetFailed(AvErr(r));
 			return;
 		}
 		ic->flags |= AVFMT_FLAG_GENPTS;

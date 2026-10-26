@@ -19,7 +19,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/manyext.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/aedloop.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -1248,6 +1248,19 @@ expect "$DT ui-read $MEDIA/data-big.iso disc://cd0/big.bin >/dev/null 2>&1" "a d
 rm -f "$WORK/hung.fifo" && mkfifo "$WORK/hung.fifo"
 expect "timeout 20 $DT stop-hung $WORK/hung.fifo >/dev/null 2>&1" "a drive that doesn't answer: Stop() (the app's exit) returns in 2 s"
 rm -f "$WORK/hung.fifo"
+# g: a DVD whose main title's PGC can't be read (UDF; ISO 9660-only): libdvdnav (patched) refuses to play it instead
+# of following a NULL PGC; the app says the disc can't be read
+r=$($DT title $MEDIA/dvd-nullpgc.iso dvd://cd0 2>&1; $DT title $MEDIA/dvd-nullpgc-iso.iso dvd://cd0 2>&1)
+expect "! echo \"\$r\" | grep -q AddressSanitizer && [ \"\$(echo \"\$r\" | grep -c '^ffmpeg -[0-9]* packets 0$')\" = 2 ]" "a DVD-Video whose main title's PGC can't be read (UDF, ISO 9660-only): no crash, FFmpeg's open refused"
+T=$(newroot t27g)
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd-nullpgc.iso run "$T" "0:0" "30:cmd disc0;60:key enter;70:quit" "")
+expect "[ $rc = 0 ] && grep -a -A1 '\\[ui\\] message: Failed to open \"NULLPGC\"' $T/root/logs/boot.log | grep -q \"This disc can't be read: it is scratched or damaged, or it is an encrypted film\\.\" && ! log $T '\\[player\\] opened'" "... in the app: the damaged-disc message"
+nosan "$T"
+# h: an allocation extent descriptor pointing at itself (BDMV/index.bdmv): libbluray's open of the disc ends
+r=$(timeout 30 $DT title $MEDIA/aedloop.iso bluray://cd0 2>&1)
+expect "echo \"\$r\" | grep -q '^open 0 '" "UDF allocation extents in a loop (libudfread patched): the Blu-ray open ends, refused"
+# i: the size: a DVD's physical end, or the medium's size when larger (a recordable DVD); the TOC's; the medium's
+expect "$DT size - >/dev/null 2>&1" "the disc's size from the drive's answers: the larger of the DVD structure's and the medium's"
 fi
 
 echo

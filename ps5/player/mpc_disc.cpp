@@ -1143,11 +1143,23 @@ void Classify(const std::shared_ptr<Media>& mp, DriveState& st)
 
 // reads a disc that was put in: its size, its file system, what it is
 // the disc's size in sectors, as 5S2CD finds it: a DVD's physical format (its data area starts at 0x30000 -- the
-// PS5's drive answers for CDs too), else a CD's table of contents (its lead-out), else the medium's size; 0 when none
-// says (reads then aren't held to an end)
+// PS5's drive answers for CDs too; the medium's size when larger), else a CD's table of contents (its lead-out), else
+// the medium's size; 0 when none says (reads then aren't held to an end)
+// which size: a DVD's physical format's, or the medium's when larger (a recordable DVD may give a physical end
+// short of what was written); else the table of contents'; else the medium's (0: none known)
+uint64_t PickSectors(uint64_t dvd, uint64_t toc, uint64_t media)
+{
+	if (dvd)
+		return std::max(dvd, media);
+	return toc ? toc : media;
+}
+
 uint64_t DiscSectors(int fd)
 {
 #ifdef __PROSPERO__
+	off_t mb = 0;
+	const uint64_t media = ioctl(fd, DIOCGMEDIASIZE, &mb) == 0 && mb > 0 ? uint64_t(mb) / kSector : 0;
+	uint64_t dvd = 0;
 	dvd_struct ds = {};
 	ds.format = DVD_STRUCT_PHYSICAL;
 	ds.layer_num = 0;
@@ -1159,8 +1171,8 @@ uint64_t DiscSectors(int fd)
 		if (end && end >= start && start == 0x30000)
 		{
 			if (l0.nlayers == 0)
-				return uint64_t(end - start) + 1;
-			if (l0.track_path == 0)
+				dvd = uint64_t(end - start) + 1;
+			else if (l0.track_path == 0)
 			{
 				// parallel track path: layer 1's own range
 				dvd_struct ds1 = {};
@@ -1171,7 +1183,7 @@ uint64_t DiscSectors(int fd)
 					dvd_layer l1;
 					memcpy(&l1, ds1.data, sizeof l1);
 					if (l1.end_sector >= l1.start_sector)
-						return uint64_t(end - start) + 1 + uint64_t(l1.end_sector - l1.start_sector) + 1;
+						dvd = uint64_t(end - start) + 1 + uint64_t(l1.end_sector - l1.start_sector) + 1;
 				}
 			}
 			else
@@ -1179,10 +1191,11 @@ uint64_t DiscSectors(int fd)
 				// opposite track path: layer 1 runs from the complement of layer 0's end
 				const uint32_t end0 = l0.end_sector_l0, start1 = ~end0 & 0xFFFFFFu;
 				if (end0 >= start && end >= start1)
-					return uint64_t(end0 - start) + 1 + uint64_t(end - start1) + 1;
+					dvd = uint64_t(end0 - start) + 1 + uint64_t(end - start1) + 1;
 			}
 		}
 	}
+	uint64_t toc = 0;
 	ioc_toc_header th = {};
 	if (ioctl(fd, CDIOREADTOCHEADER, &th) == 0 && th.ending_track >= th.starting_track && th.starting_track > 0)
 	{
@@ -1201,18 +1214,15 @@ uint64_t DiscSectors(int fd)
 					const uint32_t raw = uint32_t(e.addr.lba), sw = ntohl(raw);
 					const uint32_t lba = sw < 0x1000000 ? sw : raw;
 					if (lba > 0 && lba < 0x1000000)
-						return lba;
+						toc = lba;
 				}
 	}
-	off_t mb = 0;
-	if (ioctl(fd, DIOCGMEDIASIZE, &mb) == 0 && mb > 0)
-		return uint64_t(mb) / kSector;
-	return 0;
+	return PickSectors(dvd, toc, media);
 #else
 	if (g_fault_nosize)
 		return 0;
 	struct stat sb = {};
-	return fstat(fd, &sb) == 0 && sb.st_size > 0 ? uint64_t(sb.st_size) / kSector : 0;
+	return PickSectors(0, 0, fstat(fd, &sb) == 0 && sb.st_size > 0 ? uint64_t(sb.st_size) / kSector : 0);
 #endif
 }
 
@@ -2120,6 +2130,11 @@ std::string DriveName(const DriveState& d)
 	return Fmt(d.usb ? T("USB disc drive (%s)") : T("Disc drive (%s)"), what.c_str());
 }
 
+const char* DamagedText()
+{
+	return "This disc can't be read: it is scratched or damaged, or it is an encrypted film.";
+}
+
 const char* EncryptedText()
 {
 	return "This disc is encrypted (a commercial film) and can't be played here: Media Player Classic PS5 doesn't "
@@ -2143,7 +2158,7 @@ std::string DriveMessage(const DriveState& d)
 			return EncryptedMessage();
 		case Kind::Unreadable:
 			if (d.damaged)
-				return T("This disc can't be read: it is scratched or damaged, or it is an encrypted film.");
+				return T(DamagedText());
 			return d.usb ? T("This disc can't be read: an audio CD (audio CDs can't be played here), or a blank or damaged disc.")
 						 : T("This disc can't be read: the PS5's own drive doesn't read CDs (a USB drive does; audio CDs "
 							 "can't be played here), or the disc is blank or damaged.");
@@ -2387,7 +2402,7 @@ bool OpenTitle(const std::string& url, TitleOpen& out)
 		}
 		if (d.kind == Kind::Unreadable && d.damaged)
 		{
-			out.error = "This disc can't be read: it is scratched or damaged, or it is an encrypted film.";
+			out.error = DamagedText();
 			return false;
 		}
 		if (d.kind == Kind::Encrypted)

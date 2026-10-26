@@ -206,4 +206,9 @@ python3 "$(dirname "$0")/make_disc.py" isoloop "$D/isoloop.iso"
 python3 "$(dirname "$0")/make_disc.py" udfloop "$D/udfloop.iso" 20000
 python3 "$(dirname "$0")/make_disc.py" udfloop "$D/udfbig.iso" 120000
 python3 "$(dirname "$0")/make_disc.py" manyext "$D/manyext.iso" 60000
+# the second re-check's: the main title's PGC unreadable (UDF and ISO 9660-only DVDs: libdvdnav played the NULL PGC
+# left), files mapped by an allocation extent descriptor pointing at itself (on a Blu-ray's structure)
+python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-nullpgc.iso" "NULLPGC" nullpgc
+python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-nullpgc-iso.iso" "NULLPGC" nullpgc-iso
+python3 "$(dirname "$0")/make_disc.py" aedloop "$D/aedloop.iso"
 echo "media in $D"

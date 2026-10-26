@@ -16,6 +16,7 @@
 //   mpc-disc-test scan <image> <disc://cd0/file> <max s>    the file read in order, whole, within max seconds
 //   mpc-disc-test ui-read <image> <disc://cd0/file>        the UI's read of a disc file (File > Load Subtitle) on a
 //                                                          drive that takes 2.5 s a read: given up after 1 s
+//   mpc-disc-test size -                                   the disc's size picked from the drive's answers
 //   mpc-disc-test stop-hung <fifo>                         Stop() while the watcher waits for a drive that doesn't
 //                                                          answer (opening a FIFO no one writes to): within 3 s
 //
@@ -115,6 +116,25 @@ int main(int argc, char** argv)
 	const std::string mode = argv[1];
 	setenv("MPCPS5_HOST_DISC", argv[2], 1);
 	Start();
+	if (mode == "size")
+	{
+		// the disc's size from what the drive says: (DVD structure, TOC, medium) -> sectors
+		struct Case
+		{
+			uint64_t dvd, toc, media, want;
+		} cases[] = {{2295104, 0, 2298496, 2298496}, {2298496, 0, 2295104, 2298496}, {2295104, 2295104, 0, 2295104},
+			{0, 333000, 400000, 333000}, {0, 0, 400000, 400000}, {0, 0, 0, 0}};
+		int bad = 0;
+		for (const Case& c : cases)
+		{
+			const uint64_t got = PickSectors(c.dvd, c.toc, c.media);
+			printf("dvd %llu toc %llu media %llu -> %llu%s\n", (unsigned long long)c.dvd, (unsigned long long)c.toc,
+				(unsigned long long)c.media, (unsigned long long)got, got == c.want ? "" : " WRONG");
+			bad += got != c.want;
+		}
+		Stop();
+		return bad ? 1 : 0;
+	}
 	DriveState d;
 	const double t0 = Now();
 	if (mode == "stop-hung")

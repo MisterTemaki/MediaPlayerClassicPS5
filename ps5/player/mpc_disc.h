@@ -99,6 +99,8 @@ std::string DriveName(const DriveState& d);
 std::string DriveMessage(const DriveState& d);
 // the message for an encrypted disc: in English (the player's error, translated where it is shown) and translated
 const char* EncryptedText();
+// a disc whose structure or films don't read (the message's English; T() translates it)
+const char* DamagedText();
 std::string EncryptedMessage();
 
 // disc://, dvd://, bluray://

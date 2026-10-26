@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 386 host tests
+> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 391 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -541,7 +541,8 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   by `tools/build-deps.sh` (`tools/build-deps.sh subs` -- `make deps-subs` -- builds only these four).
 - **5S2CD** (by The7mirrors, a fork of PS5SX2, GPL-3.0) -- disc reading after it: the drives as FreeBSD cd(4) devices
   (`/dev/cd0` the console's own, `/dev/cd1` a USB drive), whole 2048-byte sectors with `pread()`, the disc's size
-  from `DVDIOCREADSTRUCTURE` (a DVD's physical format), the table of contents or `DIOCGMEDIASIZE`, in that order
+  from `DVDIOCREADSTRUCTURE` (a DVD's physical format; `DIOCGMEDIASIZE` when larger), the table of contents or
+  `DIOCGMEDIASIZE`, in that order
   (when none answers, reads aren't held to an end), `CDIOREADTOCHEADER`, a disc being there when its sector 16
   reads, the read-ahead; and what it
   found (the console's drive reads no CDs, cd(4) no audio tracks). 1.4, see [Discs](#discs).
@@ -549,12 +550,14 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   VideoLAN and the libdvdread/libdvdnav authors. Built **without libdvdcss**, and with
   `tools/patches/libdvdread-7.1.1-mpcps5.patch`: no decryption of any kind (libdvdcss neither linked nor loaded), no
   device looked up behind a mount point, `DVDSetFilesystemFactory()` (the drives read through the player's sector
-  reader).
+  reader); `tools/patches/libdvdnav-7.0.0-mpcps5.patch`: a PGC a damaged disc's IFO leaves unreadable is never
+  played (the title's open fails with *This disc can't be read* instead of a crash).
 - **libbluray** 1.5.0 -- Blu-ray; LGPL-2.1-or-later; VideoLAN and the libbluray authors. No BD-J (Java), libxml2,
   fontconfig or FreeType; `tools/patches/libbluray-1.5.0-mpcps5.patch`: nothing is loaded at run time (no libaacs,
   libbdplus, libmmbd or Java VM). **libudfread** 1.2.0 -- UDF; LGPL-2.1-or-later; VideoLAN;
   `tools/patches/libudfread-1.2.0-mpcps5.patch`: `udfread_file_extent()` (a file's extents listed, so a file in many
-  pieces is mapped once). All four static, from
+  pieces is mapped once), at most 256 allocation extent descriptors followed for a file (one pointing at itself
+  looped forever). All four static, from
   VideoLAN's release tarballs (SHA-256 in `tools/build-deps.sh`); FFmpeg's DVD-Video demuxer with
   `tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch` (a seek once the title's end was read).
 - **Mbed TLS** 3.6.7 (Apache-2.0), **zlib**, **Mozilla's CA list** (MPL-2.0, via certifi).

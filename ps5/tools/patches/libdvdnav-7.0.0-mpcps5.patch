@@ -1,0 +1,224 @@
+diff -ruN a/src/navigation.c b/src/navigation.c
+--- a/src/navigation.c
++++ b/src/navigation.c
+@@ -201,7 +201,12 @@
+   }
+   if (!this->started) {
+     /* don't report an error but be nice */
+-    vm_start(this->vm);
++    /* MPC PS5: unless the VM couldn't start (a damaged disc): it would only stop at the first block */
++    if (!vm_start(this->vm)) {
++      printerr("Encrypted or faulty DVD");
++      pthread_mutex_unlock(&this->vm_lock);
++      return DVDNAV_STATUS_ERR;
++    }
+     this->started = 1;
+   }
+   if (!this->vm->state.pgc) {
+@@ -234,7 +239,12 @@
+   }
+   if (!this->started) {
+     /* don't report an error but be nice */
+-    vm_start(this->vm);
++    /* MPC PS5: unless the VM couldn't start (a damaged disc): it would only stop at the first block */
++    if (!vm_start(this->vm)) {
++      printerr("Encrypted or faulty DVD");
++      pthread_mutex_unlock(&this->vm_lock);
++      return DVDNAV_STATUS_ERR;
++    }
+     this->started = 1;
+   }
+   if (!this->vm->state.pgc) {
+diff -ruN a/src/vm/getset.c b/src/vm/getset.c
+--- a/src/vm/getset.c
++++ b/src/vm/getset.c
+@@ -49,6 +49,9 @@
+ 
+ int set_PTT(vm_t *vm, int tt, int ptt) {
+   assert(tt <= vm->vmgi->tt_srpt->nr_of_srpts);
++  /* MPC PS5: a damaged disc's numbers aren't trusted (asserts are off in release builds) */
++  if (tt < 1 || tt > vm->vmgi->tt_srpt->nr_of_srpts)
++    return 0;
+   return set_VTS_PTT(vm, vm->vmgi->tt_srpt->title[tt - 1].title_set_nr,
+                      vm->vmgi->tt_srpt->title[tt - 1].vts_ttn, ptt);
+ }
+@@ -91,6 +94,8 @@
+ 
+ int set_PROG(vm_t *vm, int tt, int pgcn, int pgn) {
+   assert(tt <= vm->vmgi->tt_srpt->nr_of_srpts);
++  if (tt < 1 || tt > vm->vmgi->tt_srpt->nr_of_srpts)
++    return 0;
+   return set_VTS_PROG(vm, vm->vmgi->tt_srpt->title[tt - 1].title_set_nr,
+                      vm->vmgi->tt_srpt->title[tt - 1].vts_ttn, pgcn, pgn);
+ }
+@@ -114,6 +119,8 @@
+   (vm->state).TT_PGCN_REG = pgcN;
+   (vm->state).TTN_REG     = get_TT(vm, vtsN, vts_ttn);
+   assert( (vm->state.TTN_REG) != 0 );
++  if ((vm->state.TTN_REG) == 0)
++    return 0;
+   (vm->state).VTS_TTN_REG = vts_ttn;
+   (vm->state).vtsN        = vtsN;  /* Not sure about this one. We can get to it easily from TTN_REG */
+   /* Any other registers? */
+@@ -132,6 +139,8 @@
+   if (!vm->vmgi->first_play_pgc) {
+     return set_PGCN(vm, 1);
+   }
++  if (!vm->vmgi->vmgi_mat)
++    return 0;
+   (vm->state).pgc = vm->vmgi->first_play_pgc;
+   (vm->state).pgcN = vm->vmgi->vmgi_mat->first_play_pgc;
+   return 1;
+@@ -156,6 +165,11 @@
+ #endif
+     return 0;
+   }
++  /* MPC PS5: a PGC libdvdread couldn't read ("Unable to read invalid PGC") is left NULL: not one to play */
++  if (!pgcit->pgci_srp || !pgcit->pgci_srp[pgcN - 1].pgc) {
++    Log1(vm, "** pgcN %d couldn't be read", pgcN);
++    return 0;
++  }
+ 
+   (vm->state).pgc = pgcit->pgci_srp[pgcN - 1].pgc;
+   (vm->state).pgcN = pgcN;
+@@ -317,6 +331,8 @@
+     Log0(vm, "*** pgci_ut handle is NULL ***");
+     return NULL; /*  error? */
+   }
++  if(h->pgci_ut->nr_of_lus == 0 || h->pgci_ut->lu == NULL)
++    return NULL; /* MPC PS5: no menu language unit */
+ 
+   i = 0;
+   while(i < h->pgci_ut->nr_of_lus
+diff -ruN a/src/vm/play.c b/src/vm/play.c
+--- a/src/vm/play.c
++++ b/src/vm/play.c
+@@ -46,6 +46,12 @@
+ link_t play_PGC(vm_t *vm) {
+   link_t link_values;
+ 
++  /* MPC PS5: no PGC (a damaged disc): stop, don't dereference it */
++  if (!(vm->state).pgc) {
++    link_t stop = { Exit, 0, 0, 0 };
++    return stop;
++  }
++
+ #ifdef TRACE
+   if((vm->state).domain != DVD_DOMAIN_FirstPlay) {
+     Log3(vm, "play_PGC: (vm->state).pgcN (%i)", get_PGCN(vm));
+@@ -100,6 +106,12 @@
+ link_t play_PGC_PG(vm_t *vm, int pgN) {
+   link_t link_values;
+ 
++  /* MPC PS5: no PGC (a damaged disc): stop, don't dereference it */
++  if (!(vm->state).pgc) {
++    link_t stop = { Exit, 0, 0, 0 };
++    return stop;
++  }
++
+ #ifdef TRACE
+   if((vm->state).domain != DVD_DOMAIN_FirstPlay) {
+     Log3(vm, "play_PGC_PG: (vm->state).pgcN (%i)", get_PGCN(vm));
+@@ -139,6 +151,12 @@
+ link_t play_PGC_post(vm_t *vm) {
+   link_t link_values = { LinkNoLink, 0, 0, 0 };
+ 
++  /* MPC PS5: no PGC (a damaged disc): stop, don't dereference it */
++  if (!(vm->state).pgc) {
++    link_t stop = { Exit, 0, 0, 0 };
++    return stop;
++  }
++
+ #ifdef TRACE
+   Log3(vm, "play_PGC_post:");
+ #endif
+@@ -167,6 +185,12 @@
+ }
+ 
+ link_t play_PG(vm_t *vm) {
++
++  /* MPC PS5: no PGC (a damaged disc): stop, don't dereference it */
++  if (!(vm->state).pgc) {
++    link_t stop = { Exit, 0, 0, 0 };
++    return stop;
++  }
+ #ifdef TRACE
+   Log3(vm, "play_PG: (vm->state).pgN (%i)", (vm->state).pgN);
+ #endif
+@@ -193,6 +217,12 @@
+ link_t play_Cell(vm_t *vm) {
+   static const link_t play_this = {PlayThis, /* Block in Cell */ 0, 0, 0};
+ 
++  /* MPC PS5: no PGC (a damaged disc): stop, don't dereference it */
++  if (!(vm->state).pgc) {
++    link_t stop = { Exit, 0, 0, 0 };
++    return stop;
++  }
++
+ #ifdef TRACE
+   Log3(vm, "play_Cell: (vm->state).cellN (%i)", (vm->state).cellN);
+ #endif
+@@ -270,10 +300,20 @@
+ link_t play_Cell_post(vm_t *vm) {
+   const cell_playback_t *cell;
+ 
++  /* MPC PS5: no PGC (a damaged disc): stop, don't dereference it */
++  if (!(vm->state).pgc) {
++    link_t stop = { Exit, 0, 0, 0 };
++    return stop;
++  }
++
+ #ifdef TRACE
+   Log3(vm, "play_Cell_post: (vm->state).cellN (%i)", (vm->state).cellN);
+ #endif
+ 
++  if ((vm->state).cellN < 1 || (vm->state).cellN > (vm->state).pgc->nr_of_cells) {
++    link_t stop = { Exit, 0, 0, 0 };
++    return stop;
++  }
+   cell = &(vm->state).pgc->cell_playback[(vm->state).cellN - 1];
+ 
+   /* Still time is already taken care of before we get called. */
+diff -ruN a/src/vm/vm.c b/src/vm/vm.c
+--- a/src/vm/vm.c
++++ b/src/vm/vm.c
+@@ -340,7 +340,11 @@
+     vm->stopped = 0;
+   }
+   /* Set pgc to FP (First Play) pgc */
+-  set_FP_PGC(vm);
++  /* MPC PS5: none to start from (a damaged disc): stopped, not a NULL PGC played */
++  if (!set_FP_PGC(vm) || !vm->state.pgc) {
++    vm->stopped = 1;
++    return 0;
++  }
+   process_command(vm, play_PGC(vm));
+   return !vm->stopped;
+ }
+@@ -660,6 +664,8 @@
+ }
+ 
+ int vm_jump_next_pg(vm_t *vm) {
++  if (!vm->state.pgc)
++    return 0;
+   if(vm->state.pgN >= vm->state.pgc->nr_of_programs) {
+     /* last program -> move to TailPGC */
+     process_command(vm, play_PGC_post(vm));
+@@ -671,6 +677,8 @@
+ }
+ 
+ int vm_jump_prev_pg(vm_t *vm) {
++  if (!vm->state.pgc)
++    return 0;
+   if (vm->state.pgN <= 1) {
+     /* first program -> move to last program of previous PGC */
+     if (vm->state.pgc->prev_pgc_nr && set_PGCN(vm, vm->state.pgc->prev_pgc_nr)) {
+@@ -686,6 +694,8 @@
+ }
+ 
+ int vm_jump_up(vm_t *vm) {
++  if (!vm->state.pgc)
++    return 0;
+   if(vm->state.pgc->goup_pgc_nr && set_PGCN(vm, vm->state.pgc->goup_pgc_nr)) {
+     process_command(vm, play_PGC(vm));
+     return 1;

@@ -578,7 +578,7 @@ def pad(b):
     return b + bytes(sectors(b) * SECTOR - len(b))
 
 
-def make_dvd(out, label, css, damaged=False, iso_only=False):
+def make_dvd(out, label, css, damaged=False, iso_only=False, nullpgc=False):
     work = tempfile.mkdtemp(prefix="mpcdvd-", dir=os.path.dirname(os.path.abspath(out)))
     try:
         intro = ffmpeg_vob(os.path.join(work, "intro.vob"), ["white"], [440, 880], 3)
@@ -609,6 +609,10 @@ def make_dvd(out, label, css, damaged=False, iso_only=False):
     ptt = ptt[:4] + struct.pack(">I", len(ptt) - 1) + ptt[8:]
     p1 = pgc(1, cells_intro, 2, [1])
     p2 = pgc(3, cells_main, 2, [1, 2, 3])
+    if nullpgc:
+        # the main title's PGC with its program map far past the IFO's end (in the IFO and its backup): libdvdread
+        # leaves that PGC out ("Unable to read invalid PCG"), and libdvdnav 7.0.0 played the NULL left (a crash)
+        p2 = p2[:230] + b"\xff\xf0" + p2[232:]
     pgcit = struct.pack(">HHI", 2, 0, 0)
     start1 = 8 + 16
     start2 = start1 + len(p1)
@@ -1023,6 +1027,30 @@ def make_manyext(out, nblocks):
     open(out, "wb").write(data)
 
 
+def make_aedloop(out):
+    """UDF only: BDMV/index.bdmv and big.bin each mapped by an allocation extent descriptor that points at itself (a
+    file entry's extents read forever before 1.4's libudfread patch -- libbluray's open of the disc hung)"""
+    def aed(pos):
+        ad = struct.pack("<II", SECTOR | (3 << 30), pos)  # "the next allocation descriptors are there": itself
+        return (udf_tag(258, struct.pack("<II", 0, len(ad)) + ad, pos) + bytes(SECTOR))[:SECTOR]
+
+    class Loop(Image):
+        def file_entry(self, ftype, parent_lb, size, data_lb, uid, links, extents=None):
+            if ftype == 5 and size == SECTOR:
+                extents = [(SECTOR | (3 << 30), data_lb)]
+            return super().file_entry(ftype, parent_lb, size, data_lb, uid, links, extents)
+
+    def build(where):
+        img = Loop("AEDLOOP", udf=True, iso=False)
+        img.add_file("BDMV/index.bdmv", aed(where.get("BDMV/index.bdmv", 0)))
+        img.add_file("BDMV/MovieObject.bdmv", b"x" * 100)
+        img.add_file("big.bin", aed(where.get("big.bin", 0)))
+        img.write(out)
+        return {f: img.file_sector[f] - img.part_start for f in ("BDMV/index.bdmv", "big.bin")}
+    where = build({})
+    assert build(where) == where
+
+
 def make_data(out, folder, label, kind):
     img = Image(label, udf=kind == "udf", iso=True, joliet=kind == "joliet")
     for root, dirs, files in os.walk(folder):
@@ -1042,7 +1070,8 @@ if __name__ == "__main__":
         make_data(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5])
     elif what == "dvd" and len(sys.argv) in (4, 5):
         opt = sys.argv[4] if len(sys.argv) == 5 else ""
-        make_dvd(sys.argv[2], sys.argv[3], opt == "css", damaged=opt == "damaged", iso_only=opt == "iso")
+        make_dvd(sys.argv[2], sys.argv[3], opt == "css", damaged=opt == "damaged", iso_only=opt in ("iso", "nullpgc-iso"),
+                 nullpgc=opt.startswith("nullpgc"))
     elif what == "loop" and len(sys.argv) == 6:
         make_loop(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5]))
     elif what == "multiext" and len(sys.argv) == 3:
@@ -1053,6 +1082,8 @@ if __name__ == "__main__":
         make_isoloop(sys.argv[2])
     elif what == "udfloop" and len(sys.argv) == 4:
         make_udfloop(sys.argv[2], int(sys.argv[3]))
+    elif what == "aedloop" and len(sys.argv) == 3:
+        make_aedloop(sys.argv[2])
     elif what == "manyext" and len(sys.argv) == 4:
         make_manyext(sys.argv[2], int(sys.argv[3]))
     elif what == "bd" and len(sys.argv) in (4, 5):

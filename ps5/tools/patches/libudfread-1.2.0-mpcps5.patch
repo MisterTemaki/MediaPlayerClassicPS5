@@ -1,10 +1,38 @@
 diff -ruN a/src/udfread.c b/src/udfread.c
 --- a/src/udfread.c
 +++ b/src/udfread.c
-@@ -1566,6 +1566,25 @@
-     return 1;
+@@ -848,6 +848,9 @@
+     return buf;
  }
  
++/* MPC PS5: allocation extent descriptors followed for one file (each up to ~250 extents) */
++#define UDF_MAX_ALLOC_EXTENTS 256
++
+ static struct file_entry *_read_file_entry(udfread *udf,
+                                            const struct long_ad *icb)
+ {
+@@ -879,9 +882,16 @@
+ 
+     /* read possible additional allocation extents */
+     if (fe && !fe->content_inline) {
++        /* MPC PS5: a bounded number of them (one pointing at itself, or a chain of them, made this loop forever) */
++        unsigned aed_count = 0;
+         while (fe->u.ads.num_ad > 0 &&
+                fe->u.ads.ad[fe->u.ads.num_ad - 1].extent_type == ECMA_AD_EXTENT_AD) {
+ 
++            if (++aed_count > UDF_MAX_ALLOC_EXTENTS) {
++                udf_error("_read_file_entry: over %u allocation extents: the rest not read\n", UDF_MAX_ALLOC_EXTENTS);
++                break;
++            }
++
+             /* drop pointer to this extent from the end of AD list */
+             fe->u.ads.num_ad--;
+ 
+@@ -1565,6 +1575,25 @@
+ 
+     return 1;
+ }
++
 +int udfread_file_extent(UDFFILE *p, uint32_t index, uint32_t *lba, uint32_t *blocks)
 +{
 +    const struct long_ad *ad;
@@ -23,10 +51,9 @@ diff -ruN a/src/udfread.c b/src/udfread.c
 +
 +    return 1;
 +}
-+
+ 
  uint32_t udfread_file_lba(UDFFILE *p, uint32_t file_block)
  {
-     if (!_file_lba_exists(p)) {
 diff -ruN a/src/udfread.h b/src/udfread.h
 --- a/src/udfread.h
 +++ b/src/udfread.h

@@ -20,7 +20,8 @@
 #                        on the console: the fonts are the app's own, the MKV's attachments and /data/mpcps5/fonts)
 #   (1.4, disc drives -- VideoLAN's release tarballs, https://download.videolan.org/pub/videolan/<name>/, SHA-256 below)
 #   libudfread 1.2.0     UDF file systems (LGPL-2.1-or-later); tools/patches/libudfread-1.2.0-mpcps5.patch:
-#                        udfread_file_extent() (a file's extents one by one: a file in many pieces mapped once)
+#                        udfread_file_extent() (a file's extents one by one: a file in many pieces mapped once), at
+#                        most 256 allocation extent descriptors followed for a file (one pointing at itself looped)
 #   libbluray 1.5.0      Blu-ray (LGPL-2.1-or-later): no BD-J (no Java), no libxml2 / fontconfig / FreeType;
 #                        tools/patches/libbluray-1.5.0-mpcps5.patch: it loads nothing at run time (no libaacs,
 #                        libbdplus, libmmbd, Java VM: dl_dlopen() finds nothing)
@@ -28,7 +29,9 @@
 #                        tools/patches/libdvdread-7.1.1-mpcps5.patch: no decryption of any kind (no libdvdcss, linked
 #                        or loaded), a folder read as files (no device looked up behind a mount point: that was for CSS),
 #                        DVDSetFilesystemFactory() (the player reads the drives through its own sector reader)
-#   libdvdnav 7.0.0      DVD navigation (GPL-2.0-or-later), for FFmpeg's dvdvideo demuxer
+#   libdvdnav 7.0.0      DVD navigation (GPL-2.0-or-later), for FFmpeg's dvdvideo demuxer;
+#                        tools/patches/libdvdnav-7.0.0-mpcps5.patch: a PGC libdvdread couldn't read (left NULL) is
+#                        never played, and a VM that can't start fails the title's open (a damaged disc, not a crash)
 #   FFmpeg's dvdvideo demuxer: tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch (a seek after the title's end
 #   was read goes back into the title first)
 # Fetched into build/deps/src at the pinned versions; built with the ps5-payload-dev SDK's prospero-* tools
