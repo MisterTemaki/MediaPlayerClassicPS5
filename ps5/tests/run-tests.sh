@@ -310,6 +310,18 @@ a = array.array('h'); a.frombytes(open('$1', 'rb').read())
 n = $2
 print(*[round((sum(x * x for x in a[c::n]) / max(1, len(a[c::n]))) ** 0.5) for c in range(n)])"; }
 ini() { mkdir -p "$1/root" && printf '[Settings]\n%s\n' "$2" >"$1/root/mpc-hc.ini"; }
+# el dir A B: the seconds between the script's frames A and B (their boot.log lines): the flips run at 60 a second
+# only on a fast machine (with the sanitizers, 1080p, they can be half that), so a position after a seek is checked
+# against the time that really passed. at dir base A B nominal: base + that time - (B - A) / 60 + nominal
+el() { python3 -c "
+import re
+t = {}
+for l in open('$1/root/logs/boot.log', errors='replace'):
+    m = re.match(r'\[\s*([0-9.]+)\] \[test\] frame (\d+):', l)
+    if m and m.group(2) not in t:
+        t[m.group(2)] = float(m.group(1))
+print('%.3f' % (t['$3'] - t['$2']))"; }
+at() { python3 -c "print('%.3f' % ($2 + $(el $1 $3 $4)))"; }
 
 if want 13; then
 echo "== 13. the PS5's video decoder (a stand-in on the host): H.264 / HEVC on it, seeking, handing back to FFmpeg"
@@ -325,7 +337,7 @@ expect "grep -q \"frame_format 2 with 2-byte samples isn't on the confirmed list
 expect "$CHECK $T/dump/flip00045.ppm 960 400 255 0 255 12 >/dev/null" "its picture: magenta"
 expect "grep -q 'video decoder: H.264 640x360 (console decoder)' $T/root/logs/boot.log && state $T 2 | grep -q ' hw 1$'" "H.264 on it too"
 expect "$CHECK $T/dump/flip00115.ppm 960 400 red >/dev/null" "its picture: red"
-expect "near \$(field $T 3 2) 4.5 1.2 && grep -q 'going on from a keyframe' $T/root/logs/boot.log" "a seek: on from the next keyframe"
+expect "near \$(field $T 3 2) \$(at $T 3.5 130 190) 1.2 && grep -q 'going on from a keyframe' $T/root/logs/boot.log" "a seek: on from the next keyframe (\$(field $T 3 2) s)"
 expect "$CHECK $T/dump/flip00185.ppm 960 400 red >/dev/null" "the picture after the seek"
 expect "grep -q 'video decoder: FFmpeg (not H.264 or HEVC)' $T/root/logs/boot.log && state $T 4 | grep -q ' hw 0$'" "AV1 stays with FFmpeg"
 expect "$CHECK $T/dump/flip00245.ppm 960 400 255 255 0 60 >/dev/null" "its picture: yellow"
@@ -436,10 +448,10 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 u16run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
-release v1.4 01.040.000
+release v1.5 01.050.000
 rc=$(u16run "$T" "0:0" "150:cmd 601;250:key enter;300:quit" "")
 expect "[ $rc = 0 ] && grep -q '\[update\] daily check' $T/root/logs/boot.log && [ -f $T/root/update-check.txt ]" "the daily check at start"
-expect "[ \$(grep -c '\[update\] up to date (1.4)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
+expect "[ \$(grep -c '\[update\] up to date (1.5)' $T/root/logs/boot.log) = 2 ]" "this version is the newest: up to date (at start, then from the Help menu)"
 # b: a newer release whose download isn't what GitHub says: refused, nothing changed
 echo gone >"$T/homebrew/PPSA99015/sce_sys/old.bin"
 printf '%s *sce_sys/old.bin\n' "$(sha256sum <"$T/homebrew/PPSA99015/sce_sys/old.bin" | cut -c1-64)" >"$T/homebrew/PPSA99015/manifest.sha256"
@@ -523,7 +535,7 @@ echo 0 >"$T/root/update-check.txt"
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "200:key enter;450:key enter;520:key enter;560:quit" "300")
 expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/logs/boot.log" "the daily check offers 9.9"
-expect "grep -q '\[update\] 9.9 installed: offering the restart' $T/root/logs/boot.log && grep -q \"the release's Ed25519 signature checks out\" $T/root/logs/boot.log" "Yes: downloaded, signature and every file checked, installed"
+expect "grep -q '\[update\] 9.9 installed (in .*): offering the restart' $T/root/logs/boot.log && grep -q \"the release's Ed25519 signature checks out\" $T/root/logs/boot.log" "Yes: downloaded, signature and every file checked, installed"
 expect "grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $T/homebrew/PPSA99015/sce_sys/param.json" "the new eboot.bin and param.json in place"
 expect "[ -f $T/homebrew/PPSA99015/sce_sys/extra.bin ] && [ ! -e $T/homebrew/PPSA99015/sce_sys/old.bin ] && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old.*' -o -name 'update.journal*')\" ]" "a new file added, a gone one removed, the home screen's art refreshed (no .new, .old or journal left)"
 expect "grep -q 'sceSystemServiceLoadExec($T/homebrew/PPSA99015/eboot.bin)' $T/out.txt" "Yes again: the app restarts into the new eboot.bin"
@@ -535,6 +547,59 @@ for i in $(seq 1 80); do grep -q 'a newer version is installed' $T/inst2.txt 2>/
 expect "grep -q 'a newer version is installed' $T/inst2.txt && grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png" "an older payload sent again leaves the update (and its art) alone"
 expect "! grep -q 'runtime error\|AddressSanitizer' $T/inst.txt $T/inst2.txt" "the payload: no sanitizer reports"
 stop16
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+sleep 0.5
+# 1.5 (Sulfurico-One64, #1): after "Close & Restart" the app was still the old version.
+# e: the start after c: still 1.5 although 9.9 was installed: the app says so and what to do (once a start, three times)
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:key enter;80:quit" "")
+expect "[ $rc = 0 ] && grep -q '\[update\] after the update to 9.9 (in $T/homebrew/PPSA99015): this is 1.5: still the old version' $T/root/logs/boot.log && grep -q '\[ui\] message: Media Player Classic PS5 9.9 was installed in $T/homebrew/PPSA99015, but this is still 1.5' $T/root/logs/boot.log" "the next start: still the old version: the app says so (close it, ShadowMount+ again, or restart)"
+printf '1.5\n/x\n0\n' >$T/root/update-pending.txt
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:quit" "")
+expect "[ $rc = 0 ] && grep -q 'this is 1.5: the new version runs' $T/root/logs/boot.log && grep -q '\[osd\] Media Player Classic PS5 updated to 1.5.' $T/root/logs/boot.log && [ ! -e $T/root/update-pending.txt ]" "an update seen running: said once (the OSD), the note gone"
+# f: ShadowMount+ runs the app from another folder (a USB drive's homebrew), nullfs-mounted on /system_ex/app: the
+# update goes there, through the mount; /data/homebrew isn't touched; the restart opens the eboot the console runs
+SX=$T/sysex; U=$T/usb0/homebrew/PPSA99015
+rm -rf $SX $T/usb0 && mkdir -p $SX/app $T/usb0/homebrew && cp -r $T/homebrew/PPSA99015 $U
+echo "eboot usb 1.5" >$U/eboot.bin; rm -f $U/manifest.sha256 $U/update.journal
+ln -s $U $SX/app/PPSA99015
+( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) >$T/home.sums
+MNT="$SX/app/PPSA99015|nullfs|$U|rw;$T/usb0|exfatfs|/dev/da0s1|rw"
+release v9.9 99.000.000
+rm -f $T/root/logs/boot.log $T/root/update-pending.txt
+rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$MNT" u16run "$T" "0:0" "100:cmd 601;200:key enter;450:key enter;520:quit" "")
+expect "grep -q \"\[update\] $SX/app/PPSA99015 is a nullfs mount of $U (on $T/usb0, exfatfs, from /dev/da0s1): files go through $SX/app/PPSA99015\" $T/root/logs/boot.log" "the app runs from a USB drive's folder (a nullfs mount): found, written through the mount"
+expect "grep -q 'eboot v9.9' $U/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $U/sce_sys/param.json && [ -z \"\$(find $U -name '*.new' -o -name '*.old.*' -o -name 'update.journal*')\" ]" "... the update is in that folder (eboot.bin, param.json)"
+expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/home.sums" "... /data/homebrew's copy untouched (no second copy written)"
+expect "grep -q 'sceSystemServiceLoadExec($SX/app/PPSA99015/eboot.bin)' $T/out.txt && grep -q '^9.9$' $T/root/update-pending.txt" "... the restart opens the eboot the console runs (the mount); the next start checks the version"
+# g: from an image ShadowMount+ mounted (.ffpkg, read-only): Check for updates says so before downloading; nothing written
+I=$T/shadowmnt/img1/PPSA99015
+rm -rf $T/shadowmnt $SX/app/PPSA99015 && mkdir -p $T/shadowmnt/img1 && cp -r $U $I && ln -s $I $SX/app/PPSA99015
+( cd $I && find . -type f | sort | xargs sha256sum ) >$T/img.sums
+release v9.9 99.000.000
+rm -f $T/root/logs/boot.log $T/root/update-pending.txt
+rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|ufs|/dev/lvd2|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
+expect "grep -q '\[ui\] message: Media Player Classic PS5 9.9 is available (you have 1.5).' $T/root/logs/boot.log && grep -q 'This copy runs from an image that ShadowMount+ mounted ($I)' $T/root/logs/boot.log" "an image: Check for updates says it can't be written, before downloading"
+expect "! grep -q 'Downloading\|9.9 installed\|GET .*\.zip' $T/root/logs/boot.log && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums" "... nothing downloaded, nothing written"
+# h: a read-only USB folder: the same, in its words
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|exfatfs|/dev/da1s1|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
+expect "grep -q \"This copy runs from $I, where the app can't write\" $T/root/logs/boot.log && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums" "a read-only folder: said before downloading, nothing written"
+# i: the payload with ShadowMount+ running the app from that USB folder: it brings that copy up to date (through the
+# mount), not a second one in /data/homebrew; from the image: it says so, writes nothing, and the helper still runs
+rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015
+echo "eboot usb old" >$U/eboot.bin; sed -i 's/"contentVersion": "[0-9.]*"/"contentVersion": "01.040.000"/' $U/sce_sys/param.json
+stop16
+MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$MNT" MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst3.txt" 2>&1 &
+for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $T/inst3.txt 2>/dev/null && break; sleep 0.1; done
+stop16
+expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst3.txt && ! grep -q 'eboot usb old' $U/eboot.bin && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $T/hb2 ]" "the payload: the copy ShadowMount+ runs (a USB folder) updated through the mount, no second copy"
+MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|ufs|/dev/lvd2|ro" MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst4.txt" 2>&1 &
+for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $T/inst4.txt 2>/dev/null && break; sleep 0.1; done
+stop16
+expect "grep -q 'runs from an image that ShadowMount+ mounted ($I): an update can.t be written into it' $T/inst4.txt && grep -q 'listening on 127.0.0.1' $T/inst4.txt && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "the payload and an image: says so, writes nothing, the helper runs"
+expect "! grep -q 'runtime error\|AddressSanitizer' $T/inst3.txt $T/inst4.txt" "the payload: no sanitizer reports"
 fi
 
 if want 17; then
@@ -836,7 +901,7 @@ expect "[ $rc = 0 ] && $REGION $T/dump/flip00060.ppm 300 750 1620 977 255 0 0 30
 expect "! $REGION $T/dump/flip00060.ppm 300 750 1620 977 0 0 0 20 50 >/dev/null" "... no outline (black) around the letters"
 nosan "$T"
 # f: Keys: R2 = subtitle delay + (the interval 200 ms) chosen on the page; R2: the delay and MPC-HC's OSD; Default puts
-# R2's 20 s jump back
+# R2's 20 s jump back (Options opens again at Keys, the page it was left on, as MPC-HC)
 T=$(newroot t22f)
 srt22 $T "Delay line"
 ini "$T" "SubDelayInterval=200"
@@ -844,11 +909,11 @@ P="30:cmd options;40:key down;50:key r1"
 f=55; for i in $(seq 1 11); do P="$P;$f:key down"; f=$((f + 3)); done
 P="$P;95:key r1"
 f=100; for i in $(seq 1 14); do P="$P;$f:key right"; f=$((f + 3)); done
-P="$P;150:key menu;165:key r2;200:cmd options;210:key down;215:key r1;220:key r1;225:key r1;230:key enter;235:key menu;250:key r2;270:quit"
+P="$P;150:key menu;165:key r2;200:cmd options;215:key r1;220:key r1;225:key r1;230:key enter;235:key menu;250:key r2;270:quit"
 rc=$(run "$T" "0:0" "$P" "92,170" "$T/root/media/movie.mp4")
 expect "[ $rc = 0 ] && grep -q '\[ui\] R2: SubDelayUp' $T/root/logs/boot.log && grep -q '\[osd\] Subtitle delay: 200 ms' $T/root/logs/boot.log" "Keys: R2 set to Subtitle delay +; R2 adds the interval (200 ms), the OSD says so"
 expect "$REGION $T/dump/flip00170.ppm 150 65 800 140 224 224 224 20 150 >/dev/null" "... the OSD on the picture"
-expect "$REGION $T/dump/flip00092.ppm 790 632 1400 656 204 232 255 4 8000 >/dev/null" "the Keys page drawn, R2's row selected (scrolled to)"
+expect "$REGION $T/dump/flip00092.ppm 790 572 1400 596 204 232 255 4 8000 >/dev/null" "the Keys page drawn, R2's row selected (scrolled to)"
 expect "grep -q '\[ui\] R2: JumpForwardLarge' $T/root/logs/boot.log && grep -q '^KeyR2=JumpForwardLarge$' $T/root/mpc-hc.ini && grep -q '^SubDelay=200$' $T/root/mpc-hc.ini" "Default: R2 jumps 20 s again (saved); the delay kept"
 nosan "$T"
 # g: the keys from mpc-hc.ini: Triangle = next audio track (MPC-HC's OSD "Audio: ..."), Square = next subtitle (off, on);
@@ -1099,11 +1164,11 @@ log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
 # a: the Open dialog: the drives with their discs' names; a data disc (UDF) listed; a file on it plays and seeks
 T=$(newroot t25)
 ini "$T" "LastDir=disc://cd1/Filmes"
-rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso,$MEDIA/data-udf.iso,$WORK/no-disc.iso run "$T" "0:0" "30:cmd quickopen;60:key enter;150:state;160:seek 4;230:state;250:quit" "55,140,225")
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso,$MEDIA/data-udf.iso,$WORK/no-disc.iso run "$T" "0:0" "30:cmd quickopen;60:key enter;150:state;160:seek 4;230:state;250:quit" "55,140,185")
 expect "[ $rc = 0 ] && log $T '\[ui\] file browser: Disc drive (TEST_DVD) (disc://cd0)' && log $T '\[ui\] file browser: USB disc drive (MPC DATA) (disc://cd1)' && log $T '\[ui\] file browser: USB disc drive (No disc) (disc://cd2)'" "the Open dialog's navigation pane: Disc drive (TEST_DVD), USB disc drive (MPC DATA), USB disc drive (No disc)"
 expect "log $T '\[disc\] cd1: \"MPC DATA\", UDF, ' && log $T '\[ui\] file browser at disc://cd1/Filmes: chapters.mkv$'" "the data disc read (UDF) and its folder listed: chapters.mkv"
 expect "log $T '\[disc\] opened disc://cd1/Filmes/chapters.mkv' && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00140.ppm 960 400 red >/dev/null" "Cross: it plays from the disc (red)"
-expect "near \$(field $T 2 2) 5 1 && $CHECK $T/dump/flip00225.ppm 960 400 green >/dev/null" "it seeks: 4 s, green"
+expect "near \$(field $T 2 2) \$(at $T 3.83 160 230) 1 && $CHECK $T/dump/flip00185.ppm 960 400 green >/dev/null" "it seeks: 4 s, green"
 nosan "$T"
 # b: ISO 9660 + Joliet: the long, accented name as Joliet keeps it
 T=$(newroot t25b)
@@ -1112,12 +1177,13 @@ expect "[ $rc = 0 ] && log $T '\[disc\] cd0: \"MPC_JOLIET\", ISO 9660 + Joliet, 
 expect "near \$(field $T 2 2) 7.9 1 && $CHECK $T/dump/flip00225.ppm 960 400 blue >/dev/null" "another file, seeking to 7 s: blue"
 nosan "$T"
 # c: a DVD-Video: File > Open Disc plays the longest title (2 of 2) with its chapters and audio tracks; Next goes to the next
-# chapter, the Portuguese track, a seek, Navigate > Titles: title 1 (white)
+# chapter (early: within a second of the next chapter Next skips it, as MPC-HC), the Portuguese track, a seek,
+# Navigate > Titles: title 1 (white)
 T=$(newroot t25c)
-rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso run "$T" "0:0" "30:cmd disc0;90:state;100:cmd next;170:state;180:cmd 2002;220:state;230:seek 6.5;300:state;310:cmd title1;390:state;400:quit" "85,165,295,385")
+rc=$(MPCPS5_HOST_DISC=$MEDIA/dvd.iso run "$T" "0:0" "30:cmd disc0;58:state;60:cmd next;130:state;180:cmd 2002;220:state;230:seek 6.5;300:state;310:cmd title1;390:state;400:quit" "55,125,295,385")
 expect "[ $rc = 0 ] && log $T 'DVD-Video mpcdisc:cd0:[0-9]*: 2 title(s), playing title 2 (9.0 s), the longest' && log $T 'disc title 2 of 2: 3 chapter(s); #1 audio eng, #2 audio por'" "File > Open Disc: the DVD's main title (the longest, 2 of 2): 3 chapters, audio English and Portuguese"
-expect "[ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 1 3) 9 0.1 && [ \"\$(field $T 1 5)\" = 1 ] && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "it plays: 9 s, the first audio track, red"
-expect "near \$(field $T 2 2) 4.4 1.3 && $CHECK $T/dump/flip00165.ppm 960 400 green >/dev/null" "Next: chapter 2 (3 s, green)"
+expect "[ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 1 3) 9 0.1 && [ \"\$(field $T 1 5)\" = 1 ] && $CHECK $T/dump/flip00055.ppm 960 400 red >/dev/null" "it plays: 9 s, the first audio track, red"
+expect "near \$(field $T 2 2) \$(at $T 3.23 60 130) 1.3 && $CHECK $T/dump/flip00125.ppm 960 400 green >/dev/null" "Next: chapter 2 (3 s, green)"
 expect "[ \"\$(field $T 3 5)\" = 2 ]" "Play > Audio Track: the Portuguese one"
 expect "near \$(field $T 4 2) 7.6 1.2 && $CHECK $T/dump/flip00295.ppm 960 400 blue >/dev/null" "a seek to 6.5 s: blue"
 expect "log $T 'playing title 1 (3.0 s)' && near \$(field $T 5 3) 3 0.1 && $CHECK $T/dump/flip00385.ppm 960 400 255 255 255 12 >/dev/null" "Navigate > Titles > Title 1: the other title (3 s, white)"
@@ -1125,10 +1191,10 @@ nosan "$T"
 # d: a Blu-ray (BDMV): libbluray reads it through the sector reader; its main title, chapters, the tracks' languages from
 # the playlist; Next, a seek
 T=$(newroot t25d)
-rc=$(MPCPS5_HOST_DISC=$MEDIA/bd.iso run "$T" "0:0" "30:cmd disc0;90:state;100:cmd next;170:state;180:seek 6.5;250:state;260:quit" "85,165,245")
+rc=$(MPCPS5_HOST_DISC=$MEDIA/bd.iso run "$T" "0:0" "30:cmd disc0;58:state;60:cmd next;130:state;180:seek 6.5;250:state;260:quit" "55,125,245")
 expect "[ $rc = 0 ] && log $T '\[disc\] cd0: \"TEST_BD\", UDF, .*: Blu-ray$' && log $T 'Blu-ray title 1 of 1: playlist 00000.mpls, 9.0 s, 3 chapters' && log $T 'disc title 1 of 1: 3 chapter(s); #1 audio eng, #2 audio por'" "File > Open Disc: the Blu-ray's title: 3 chapters, audio English and Portuguese (from the playlist)"
-expect "[ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 1 3) 9 0.1 && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "it plays: 9 s, red"
-expect "near \$(field $T 2 2) 4.4 1.3 && $CHECK $T/dump/flip00165.ppm 960 400 green >/dev/null" "Next: chapter 2 (green)"
+expect "[ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 1 3) 9 0.1 && $CHECK $T/dump/flip00055.ppm 960 400 red >/dev/null" "it plays: 9 s, red"
+expect "near \$(field $T 2 2) \$(at $T 3.23 60 130) 1.3 && $CHECK $T/dump/flip00125.ppm 960 400 green >/dev/null" "Next: chapter 2 (green)"
 expect "near \$(field $T 3 2) 7.6 1.2 && $CHECK $T/dump/flip00245.ppm 960 400 blue >/dev/null" "a seek to 6.5 s: blue"
 nosan "$T"
 # e: encrypted discs: a DVD whose packs are marked scrambled (CSS) and a Blu-ray with AACS: recognised, refused with the
@@ -1261,6 +1327,86 @@ r=$(timeout 30 $DT title $MEDIA/aedloop.iso bluray://cd0 2>&1)
 expect "echo \"\$r\" | grep -q '^open 0 '" "UDF allocation extents in a loop (libudfread patched): the Blu-ray open ends, refused"
 # i: the size: a DVD's physical end, or the medium's size when larger (a recordable DVD); the TOC's; the medium's
 expect "$DT size - >/dev/null 2>&1" "the disc's size from the drive's answers: the larger of the DVD structure's and the medium's"
+fi
+
+if want 28; then
+echo "== 28. 1.5 (Sulfurico-One64, #1): Options and the right stick bindable, speed and Options keys, the touchpad, moving dialogs"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+# a: Options given "Options: Keys": pressed and let go it opens Options at Keys; held half a second it still opens
+# the menu bar (nobody locks themselves out)
+T=$(newroot t28a)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeyOptions=OptionsKeys"
+rc=$(run "$T" "0:0;40:$OPTIONS;44:0;100:$OPTIONS;160:0" "90:key escape;200:quit" "60,150" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && log $T '\[ui\] Options: OptionsKeys' && log $T '\[ui\] Options at \"Keys\"'" "Options = Options: Keys: a press opens Options at the Keys page"
+expect "$REGION $T/dump/flip00060.ppm 790 330 1400 360 255 255 255 2 5000 >/dev/null" "... the Keys page drawn (its list)"
+expect "log $T '\[ui\] Options held: the menu bar' && $REGION $T/dump/flip00150.ppm 10 70 240 580 240 240 240 6 50000 >/dev/null" "held half a second: the menu bar (File open) all the same"
+nosan "$T"
+# b: an old mpc-hc.ini whose [Keys] hasn't the new rows: their defaults (Options the menu bar, the right stick's left /
+# right 1 s jumps), kept when saved; the right stick left held repeats, right pushed once jumps once
+T=$(newroot t28b)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeyL2=SubDelayDown"
+rc=$(run "$T" "0:0;60:0,128,128,0,128;100:0,128,128,128,128;130:0,128,128,255,128;133:0,128,128,128,128;150:$OPTIONS;152:0" "50:seek 6;55:state;120:state;145:state;175:key escape;180:quit" "170" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && grep -q '^KeyOptions=MenuBar$' $T/root/mpc-hc.ini && grep -q '^KeyStickLeft=JumpBackSmall$' $T/root/mpc-hc.ini && grep -q '^KeyStickRight=JumpForwardSmall$' $T/root/mpc-hc.ini && grep -q '^KeyL2=SubDelayDown$' $T/root/mpc-hc.ini" "an old [Keys]: the new rows at their defaults (saved), L2 as it was"
+expect "log $T '\[ui\] Right stick left: JumpBackSmall' && python3 -c \"import sys; a, b = float('\$(field $T 1 2)'), float('\$(field $T 2 2)'); sys.exit(0 if a - b > 2.5 else 1)\"" "the right stick left held: 1 s jumps, repeating ($(field $T 1 2) s -> $(field $T 2 2) s)"
+expect "log $T '\[ui\] Right stick right: JumpForwardSmall' && python3 -c \"import sys; a, b = float('\$(field $T 2 2)'), float('\$(field $T 3 2)'); sys.exit(0 if 0.5 < b - a < 2.0 else 1)\"" "the right stick right pushed once: one 1 s jump"
+expect "$REGION $T/dump/flip00170.ppm 10 70 240 580 240 240 240 6 50000 >/dev/null" "Options (its default): the menu bar at once"
+nosan "$T"
+# c: the speed: the right stick left / right as Slower / Faster, L3 as Normal speed: MPC-HC's steps (half, twice) and
+# its OSD ("Speed: 2.00x"), as Play > Increase / Decrease / Reset Rate; under 0.125x it pauses
+T=$(newroot t28c)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeyStickLeft=Slower
+KeyStickRight=Faster
+KeyL3=NormalSpeed"
+P="0:0;40:0,128,128,255,128;42:0,128,128,128,128;50:0,128,128,255,128;52:0,128,128,128,128;60:2;62:0"
+f=70; for i in 1 2 3 4; do P="$P;$f:0,128,128,0,128;$((f + 2)):0,128,128,128,128"; f=$((f + 8)); done
+rc=$(run "$T" "$P" "58:state;68:state;110:state;120:cmd faster;125:state;130:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && log $T '\[osd\] Speed: 2.00x' && log $T '\[osd\] Speed: 4.00x' && log $T '\[ui\] Right stick right: Faster'" "Faster: 2x, 4x (MPC-HC's OSD)"
+expect "log $T '\[ui\] L3: NormalSpeed' && log $T '\[osd\] Speed: 1.00x' && log $T '\[osd\] Speed: 0.50x' && log $T '\[osd\] Speed: 0.12x'" "Normal speed: 1x; Slower: 0.5x ... 0.125x"
+expect "[ \"\$(field $T 3 1)\" = 3 ] && log $T '\[osd\] Speed: 0.25x'" "Slower under 0.125x: paused (as MPC-HC)"
+expect "[ \"\$(field $T 4 1)\" = 2 ]" "Play > Increase Rate (the menu's command) plays again, at 0.25x"
+nosan "$T"
+# d: the touchpad: a finger moves the pointer (to the corner, then onto File), its click clicks there: the File menu;
+# with the touchpad off (Options > Player > Keys) the same strokes do nothing
+PAD=$(python3 - <<'PY'
+steps = ["0:0"]
+f = 40
+for k in range(3):
+    for i in range(16):
+        steps.append("%d:0,128,128,128,128,%d,%d" % (f, 1800 - i * 100, 1000 - i * 60)); f += 1
+    steps.append("%d:0" % f); f += 3
+x, y = 500, 500
+steps.append("%d:0,128,128,128,128,%d,%d" % (f, x, y)); f += 1
+for i in range(10):
+    x += 2; y += 4
+    steps.append("%d:0,128,128,128,128,%d,%d" % (f, x, y)); f += 1
+steps.append("%d:100000,128,128,128,128,%d,%d" % (f + 5, x, y))
+steps.append("%d:0,128,128,128,128,%d,%d" % (f + 10, x, y))
+steps.append("%d:0" % (f + 12))
+print(";".join(steps))
+PY
+)
+T=$(newroot t28d)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "$PAD" "200:quit" "150" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && $REGION $T/dump/flip00150.ppm 10 70 240 580 240 240 240 6 50000 >/dev/null" "the touchpad moved the pointer onto File, its click opened the menu"
+T=$(newroot t28d2)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "TouchpadPointer=0"
+rc=$(run "$T" "$PAD" "200:quit" "150" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && ! $REGION $T/dump/flip00150.ppm 10 70 240 580 240 240 240 6 50000 >/dev/null && grep -q '^TouchpadPointer=0$' $T/root/mpc-hc.ini" "the touchpad off: nothing moved or clicked"
+nosan "$T"
+# e: Options dragged by its title bar (Cross held, the stick): it moves, stops at the screen's edge, opens there next
+# time (mpc-hc.ini); its controls still work where it is (Show OSD clicked off, OK)
+T=$(newroot t28e)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0;60:$CROSS;62:$CROSS,0,128;100:$CROSS,128,128;102:0" "40:cmd options;50:mouse 700,187;120:mouse 609,348;125:click;140:key menu;160:cmd options;190:key escape;200:quit" "110,180" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && log $T '\[ui\] \"Options\" moved to 0,' && grep -q '^OptionsX=0$' $T/root/mpc-hc.ini" "dragged left by its title bar: it stops at the screen's edge (kept in mpc-hc.ini)"
+expect "$REGION $T/dump/flip00110.ppm 0 200 40 800 240 240 240 6 2000 >/dev/null && $REGION $T/dump/flip00180.ppm 0 200 40 800 240 240 240 6 2000 >/dev/null" "... drawn there, and opened there again"
+expect "grep -q '^ShowOSD=0$' $T/root/mpc-hc.ini" "... its controls work where it is (Show OSD clicked off, OK)"
+nosan "$T"
 fi
 
 echo

@@ -12,6 +12,7 @@
 #include <zlib.h>
 
 #include "OrbisPaths.h"
+#include "ProsperoAppPlace.h"
 #include "ProsperoUpdate.h"
 
 #include <fcntl.h>
@@ -89,10 +90,20 @@ bool WriteAtomically(const std::string& path, const unsigned char* data, size_t 
 }
 } // namespace
 
+const AppPlace& AppInstallPlace()
+{
+	static const AppPlace place = [] {
+		const char* env = getenv("MPCPS5_PS5_HOMEBREW");
+		const AppPlace p = FindAppPlace(MPCPS5_TITLE_ID, std::string(env && *env ? env : "/data/homebrew") + "/" MPCPS5_TITLE_ID);
+		OrbisLog("[install] %s", p.log.c_str());
+		return p;
+	}();
+	return place;
+}
+
 std::string AppInstallDir()
 {
-	const char* env = getenv("MPCPS5_PS5_HOMEBREW");
-	return std::string(env && *env ? env : "/data/homebrew") + "/" MPCPS5_TITLE_ID;
+	return AppInstallPlace().dir;
 }
 
 namespace
@@ -159,6 +170,15 @@ InstallResult InstallApp()
 	if (!files)
 		return InstallResult::NothingEmbedded;
 
+	const AppPlace& place = AppInstallPlace();
+	if (!place.writable)
+	{
+		OrbisLog("[install] not installed: %s", place.reason.c_str());
+		return InstallResult::CantWrite;
+	}
+	if (!place.mount.empty())
+		OrbisLog("[install] the console runs the app from %s: that copy is the one brought up to date (through %s)",
+			place.source.c_str(), place.dir.c_str());
 	const std::string dir = AppInstallDir();
 	// an in-app update left half done (its journal still there, see ProsperoUpdate.cpp): whatever version the files
 	// say, the payload repairs the app: every file written again from its own copy, the update's leftovers removed

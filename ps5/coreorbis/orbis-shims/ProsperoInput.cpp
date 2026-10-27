@@ -12,6 +12,7 @@
 #include "OrbisPaths.h"
 #include "ProsperoSce.h"
 
+#include <algorithm>
 #include <cstring>
 #include <ctime>
 #include <mutex>
@@ -259,6 +260,14 @@ void Poll()
 		p.l2 = data.analogButtons.l2;
 		p.r2 = data.analogButtons.r2;
 		p.buttons = data.buttons | StickToDpad(p.lx, p.ly);
+		// the touchpad, as zvlc / Porpoise read it (the count's top bit is not a finger)
+		p.touches = uint8_t(std::min(2, int(data.touch.fingers & 0x7f)));
+		for (int i = 0; i < 2; i++)
+		{
+			p.touch_id[i] = data.touch.touch[i].finger;
+			p.touch_x[i] = data.touch.touch[i].x;
+			p.touch_y[i] = data.touch.touch[i].y;
+		}
 	}
 	const uint32_t cur = s_slots[0].state.buttons;
 	s_pressed_p1 = cur & ~s_prev_p1;

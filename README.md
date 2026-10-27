@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 391 host tests
+> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 424 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -27,6 +27,28 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.5:** what Sulfurico-One64 asked for in a new comment on
+[#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1), and the in-app update fixed for ShadowMount+:
+- **More buttons and actions in Options > Player > Keys**: **Options** and the **right stick's four directions** (up,
+  down, left, right) are rows of their own. New actions: **Faster / Slower / Normal speed** (MPC-HC's Increase /
+  Decrease / Reset Rate: twice / half as fast, "Speed: 2.00x"), **Options...** and **Options at a page** (Player, Keys,
+  Playback, Output, Fullscreen, Subtitles, Default Style, Audio Switcher, Miscellaneous), Frame Step, Open File...,
+  Playlist on/off, Next aspect ratio. By default the right stick left / right jumps 1 s back / forward, so L2 / R2 can
+  be the speed, as he suggested. Options given another action still opens the menu bar when held half a second.
+- **The DualSense touchpad is the pointer** (as DS4Windows makes it on a PC): a finger moves it (relative, as a laptop's
+  touchpad, faster for a quick stroke), pressing the touchpad clicks (with two fingers on it: a right-click). On by
+  default; off in Options > Player > Keys.
+- **Windows can be moved**: drag a dialog -- Options, Properties, Go To, Open... -- by its title bar with the pointer
+  (Cross or the touchpad's click held), as on Windows; it stays on the screen, and Options opens where it was left
+  (kept in `mpc-hc.ini`) and at the page it was left on, as MPC-HC. Handy for tuning the subtitles or the picture with
+  the film visible.
+- **Updates with ShadowMount+**: he found that after the in-app update and Close & Restart the app was still the old
+  version. ShadowMount+ runs the app from a mount of its folder (`/system_ex/app/PPSA99015`), which can be another
+  folder than `/data/homebrew/PPSA99015` (a USB drive's, an image...): the update now goes into the folder the console
+  really runs, written through that mount; an image or a read-only folder is said before anything is downloaded; the
+  restart opens the eboot the console runs, and the next start checks the version and says what to do if it is still
+  the old one. See [Updates](#updates).
 
 **1.4:** what MachoMan1988 asked for ([#2](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/2)): "attach my
 external blu ray disc drive to enjoy my movies in the same way they are doing with PS2 disc games". **Disc drives**
@@ -146,9 +168,10 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.4.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.4.elf`).
-2. It installs the app (`/data/homebrew/PPSA99015`, with its icon) and a notification says so. Open
+1. Send `MediaPlayerClassicPS5-v1.5.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.elf`).
+2. It installs the app (`/data/homebrew/PPSA99015`, with its icon -- or, 1.5, updates the folder ShadowMount+
+   already runs it from, see [Updates](#updates)) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
 3. The payload keeps running as the helper that lets the app read `/data` and USB drives. After a reboot the
    app starts the helper itself (through the ELF loader); if it can't, it says so: send the payload again.
@@ -185,9 +208,10 @@ MPC-HC 1.7.13 maximized on Windows 10, at 150 % scale (Options > Miscellaneous c
 
 ## Controls
 
-The DualSense is MPC-HC's mouse and keyboard. Move the **left stick** and the pointer appears: then **Cross**
-clicks and **Square** right-clicks (the context menu), as with a mouse; it hides after 3 seconds still. Without
-the pointer the buttons are keys:
+The DualSense is MPC-HC's mouse and keyboard. Move the **left stick** -- or a finger on the **touchpad** (1.5) --
+and the pointer appears: then **Cross** (or pressing the touchpad) clicks and **Square** (or pressing the touchpad
+with two fingers) right-clicks (the context menu), as with a mouse; it hides after 3 seconds still. Holding Cross
+(or the touchpad pressed) on a window's title bar drags the window (1.5). Without the pointer the buttons are keys:
 
 | Button | In the window (by default: Options > Player > Keys) | In a menu / dialog |
 |---|---|---|
@@ -195,27 +219,36 @@ the pointer the buttons are keys:
 | Circle | Leave full screen | Cancel / close |
 | Triangle | Full screen on/off | (file browser: up one folder) |
 | Square | The context menu (right-click, with the pointer) | -- |
-| Options | The menu bar (File...), as Alt | OK |
+| Options | The menu bar (File...), as Alt (given another action: held half a second) | OK |
 | D-pad Left / Right | Jump back / forward 5 s | Move between controls, change a value |
 | D-pad Up / Down | Volume up / down | Move between controls, lists |
 | L2 / R2 (+ Left/Right: 20 s / 1 s) | Jump back / forward 20 s | Page up / down in lists |
 | L1 / R1 | Previous / next chapter, then file | Previous / next control |
 | L3 | Go To... | -- |
 | R3 | Mute (R3 + Square: renderer statistics) | -- |
-| Right stick | Volume (the mouse wheel) | Scroll lists |
+| Right stick up / down | Volume (the mouse wheel) | Scroll lists |
+| Right stick left / right | Jump back / forward 1 s | -- |
+| Touchpad | The pointer (press: click; two fingers: right-click) | The pointer |
 
 That is the default mapping. **View > Options > Player > Keys** (MPC-HC's Keys page, for the controller) changes
-what each button does in the window: choose a button, Cross, and pick its action -- Play/Pause, Stop, jump back /
-forward 5 s, 20 s or 1 s, previous / next chapter or file, volume up / down, mute, full screen on/off, leave full
-screen, Go To..., the context menu, the menu bar, subtitle delay - / + (by Options > Subtitles' Delay interval), next
-subtitle track (after the last one: off), next audio track, audio delay - / + (10 ms), display statistics, or
-nothing. **Default** puts the table above back; the choice is kept in `mpc-hc.ini` (`[Keys]`). The menus show the
+what each button does in the window -- the face buttons, the D-pad, L1/R1, L2/R2, L3/R3, **Options** and the
+**right stick's up, down, left and right** (1.5): choose a button, Cross, and pick its action -- Play/Pause, Stop,
+jump back / forward 5 s, 20 s or 1 s, previous / next chapter or file, volume up / down, mute, full screen on/off,
+leave full screen, Go To..., the context menu, the menu bar, subtitle delay - / + (by Options > Subtitles' Delay
+interval), next subtitle track (after the last one: off), next audio track, audio delay - / + (10 ms), display
+statistics, and (1.5) **faster / slower / normal speed** (MPC-HC's Increase / Decrease / Reset Rate: twice / half as
+fast, from 0.125x to 8x, the sound keeping its pitch; under 0.125x it pauses, as MPC-HC), frame step, Open File...,
+playlist on/off, next aspect ratio, **Options...** (at the page it was left on) or **Options at a page** (Player,
+Keys, Playback, Output, Fullscreen, Subtitles, Default Style, Audio Switcher, Miscellaneous), or nothing. The
+touchpad as the pointer is turned off and on on the same page. **Default** puts the table above back; the choice is kept in `mpc-hc.ini` (`[Keys]`). The menus show the
 button doing each command, and each action shows MPC-HC's OSD message. For example L2 / R2 as subtitle delay - / +
-instead of the 20 s jumps. What stays fixed: **Options** always opens the menu bar, the pointer's Cross / Square
-clicks, and the buttons in menus, dialogs and the keyboard. The combinations work while their buttons keep their
+instead of the 20 s jumps, or L2 / R2 as slower / faster. **Options** given another action does it when let go,
+and still opens the menu bar when **held half a second**, so the menus (and Options > Player > Keys' Default) are
+always reachable; the pointer can click the menu bar too, and Square's context menu (MPC-HC's) has File, View, Navigate and Options... What stays
+fixed: the pointer's Cross / Square / touchpad clicks, and the buttons in menus, dialogs and the keyboard. The combinations work while their buttons keep their
 default actions: L2 or R2 held with Left / Right jumps 20 s / 1 s, R3 held with Square shows the statistics; an L2,
 R2 or R3 given another action does that action instead. Held down, Cross, the D-pad, L1/R1, L2/R2 and the right
-stick repeat their action when it is a jump, the volume, a chapter or a delay (L2/R2 with their default 20 s jumps
+stick (its four directions) repeat their action when it is a jump, the volume, a chapter, a delay or a frame step (L2/R2 with their default 20 s jumps
 don't repeat, as before; as subtitle delay - / + they do); Circle, Triangle, Square, L3 and R3 never repeat.
 
 The menus work as Windows' keyboard menus: Up/Down choose, Right opens a submenu (or the next menu bar menu),
@@ -427,7 +460,7 @@ Honest limits:
   installed unless you answer Yes.
 - The app does it with FFmpeg's HTTPS (the one the network streams use), always with the certificate checked
   against Mozilla's list (`/data/mpcps5/cacert.pem`, written by the app at start): without that list, or over plain
-  HTTP, nothing is fetched. Installing needs the app unlocked by the payload (it writes `/data/homebrew/PPSA99015/`).
+  HTTP, nothing is fetched. Installing needs the app unlocked by the payload (it writes the app's folder).
 - The zip is checked before anything is written: its size and SHA-256 against what GitHub gives (a release
   without GitHub's SHA-256 isn't installed), then every file against the zip's own list
   (`PPSA99015/manifest.sha256`). Each file is written beside the old one; then, with `update.journal` listing them,
@@ -448,6 +481,32 @@ Honest limits:
   ```
   Losing the private key means the builds with its public key can't update themselves any more (send the payload
   of a new build instead).
+- **With ShadowMount+ (1.5).** ShadowMount+ registers the app by mounting its folder on `/system_ex/app/PPSA99015`
+  (nullfs), and the console runs it from there. That folder is wherever ShadowMount+ found the app:
+  `/data/homebrew/PPSA99015` (where the payload installs it), `/data/etaHEN/games/...`, a USB or extended drive's
+  `homebrew` folder, a nested `PS5/<any>/PPSA99015`, a path in its `manual.lst`, or an image (`.ffpkg`, `.exfat`,
+  `.ffpfs`) it mounted under `/mnt/shadowmnt`. Up to 1.4 the update (and the payload) always wrote
+  `/data/homebrew/PPSA99015`, so when the app ran from another folder the new files landed where the console doesn't
+  look, and Close & Restart started the old version again -- found by **Sulfurico-One64**
+  ([#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1)). Now the app (and the payload) find the
+  mount's source and update **that** folder, writing **through the mount** (`/system_ex/app/PPSA99015/...`, so the
+  mounted view sees the new files at once; the folder itself if the mount won't take a file); `boot.log` says which
+  (`[update] /system_ex/app/PPSA99015 is a nullfs mount of ...`). With no mount, `/data/homebrew/PPSA99015` as before.
+- **An image or a read-only folder** (an `.ffpkg` / `.exfat` image ShadowMount+ mounted, a read-only drive): the app
+  can't write an update into it. Check for updates says so **before downloading anything**, and the payload leaves it
+  alone too (its notification says so; the helper still runs). Update the image or folder the way you made it, with
+  the new version's folder from the release's zip.
+- **After the restart.** Restart now opens the eboot the console runs (`/app0/eboot.bin`). The next start compares the
+  running version with the one installed: if it is still the old one, the app says what to do -- close the app
+  completely (Options on its card on the home screen, Close Application) and open it again; if it is still old,
+  run ShadowMount+ again from the Payload Manager (it registers the app again) or restart the PS5. Sulfurico-One64's
+  way works too: close the app, uninstall it from the home screen, then run ShadowMount+ again from the Payload
+  Manager -- it installs the app again from its folder, with the new version.
+- **The version on the home screen** (the app's information there) comes from the registration ShadowMount+ makes
+  (the console's app database): it only changes when ShadowMount+ registers the app again. That is cosmetic; the app
+  itself says its version in Help > About. The app doesn't touch that database.
+- Only a PS5 can confirm the ShadowMount+ part: the mount table, writing through `/system_ex/app`, and Restart's
+  `/app0/eboot.bin` have been checked with a faked mount table on the host, not on a console yet.
 - **Your autoload:** the updated app is newer than the ELF in your autoload. The older ELF sees that and leaves the
   app alone (its notification says so). Put the new ELF in your autoload when you can.
 
@@ -459,7 +518,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 
 ```
 /data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback, AudioBoost,
-                             AudioNormalize, AudioMaxNormFactor, AudioNormalizeRecover...), the keys,
+                             AudioNormalize, AudioMaxNormFactor, AudioNormalizeRecover...), the keys ([Keys]),
+                             TouchpadPointer, where Options was moved (OptionsX / OptionsY),
                              Recent Files, file positions, Favorites, network locations (without passwords)
 /data/mpcps5/credentials.ini the passwords of those network addresses (smb://user@server<TAB>password), with the
                              generation of mpc-hc.ini it goes with (credentials.ini.new while a save is half done)
@@ -470,6 +530,7 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
                              boot.prev.log: the run before;
                              installer.log, helper.log)
 /data/mpcps5/update-check.txt  when the app last looked for an update
+/data/mpcps5/update-pending.txt  an update installed, until a start runs it (1.5: the version check after it)
 ```
 
 Network passwords are kept out of `mpc-hc.ini` (so that file can be shared when asking for help) and out of the
@@ -489,7 +550,7 @@ make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib, the su
                    # for the PS5 and the host (once); make deps-disc: only the disc libraries, then FFmpeg again
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.4.elf, the release zip, mpc-ps5-v1.4-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.5.elf, the release zip, mpc-ps5-v1.5-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 

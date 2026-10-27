@@ -284,13 +284,18 @@ const PadButtonInfo kPadButtons[int(PadButton::Count)] = {
 	{"R2", "R2", "R2", PadAction::JumpForwardLarge},
 	{"L3", "L3", "L3", PadAction::GoTo},
 	{"R3", "R3", "R3", PadAction::Mute},
+	{"Options", "Options", "Options", PadAction::MenuBar},
 	{"Right stick up", "Right stick up", "StickUp", PadAction::VolumeUp},
 	{"Right stick down", "Right stick down", "StickDown", PadAction::VolumeDown},
+	{"Right stick left", "Right stick left", "StickLeft", PadAction::JumpBackSmall},
+	{"Right stick right", "Right stick right", "StickRight", PadAction::JumpForwardSmall},
 };
 const char* const kPadActionKeys[int(PadAction::Count)] = {"None", "PlayPause", "Stop", "JumpBack", "JumpForward",
 	"JumpBackLarge", "JumpForwardLarge", "JumpBackSmall", "JumpForwardSmall", "Previous", "Next", "VolumeUp", "VolumeDown",
 	"Mute", "FullScreen", "LeaveFullScreen", "GoTo", "ContextMenu", "MenuBar", "SubDelayDown", "SubDelayUp",
-	"NextSubtitle", "NextAudio", "AudioDelayDown", "AudioDelayUp", "Statistics"};
+	"NextSubtitle", "NextAudio", "AudioDelayDown", "AudioDelayUp", "Statistics", "Faster", "Slower", "NormalSpeed",
+	"FrameStep", "OpenFile", "Playlist", "NextAspectRatio", "Options", "OptionsPlayer", "OptionsKeys", "OptionsPlayback",
+	"OptionsOutput", "OptionsFullscreen", "OptionsSubtitles", "OptionsDefaultStyle", "OptionsAudio", "OptionsMisc"};
 
 // RRGGBB or #RRGGBB (as the Default Style page shows a colour not in its palette)
 uint32_t ParseColor(std::string v, uint32_t def)
@@ -380,6 +385,36 @@ std::string PadActionText(PadAction a)
 			return T("Audio delay +10 ms");
 		case PadAction::Statistics:
 			return T("Display statistics");
+		case PadAction::Faster:
+			return T("Faster (Increase Rate)");
+		case PadAction::Slower:
+			return T("Slower (Decrease Rate)");
+		case PadAction::NormalSpeed:
+			return T("Normal speed (Reset Rate)");
+		case PadAction::FrameStep:
+			return T("Frame Step");
+		case PadAction::OpenFile:
+			return T("Open File...");
+		case PadAction::Playlist:
+			return T("Playlist on/off");
+		case PadAction::NextAspectRatio:
+			return T("Next aspect ratio");
+		case PadAction::OptionsWindow:
+			return T("Options...");
+		case PadAction::OptionsPlayer:
+		case PadAction::OptionsKeys:
+		case PadAction::OptionsPlayback:
+		case PadAction::OptionsOutput:
+		case PadAction::OptionsFullscreen:
+		case PadAction::OptionsSubtitles:
+		case PadAction::OptionsDefaultStyle:
+		case PadAction::OptionsAudio:
+		case PadAction::OptionsMisc:
+		{
+			static const char* const kPages[] = {"Player", "Keys", "Playback", "Output", "Fullscreen", "Subtitles",
+				"Default Style", "Audio Switcher", "Miscellaneous"};
+			return Fmt(T("Options: %s"), T(kPages[int(a) - int(PadAction::OptionsPlayer)]));
+		}
 		default:
 			return "";
 	}
@@ -403,6 +438,7 @@ bool PadActionRepeats(PadAction a)
 		case PadAction::SubDelayUp:
 		case PadAction::AudioDelayDown:
 		case PadAction::AudioDelayUp:
+		case PadAction::FrameStep:
 			return true;
 		default:
 			return false;
@@ -541,6 +577,12 @@ void Settings::Load()
 			dpi = n == 96 || n == 120 || n == 144 || n == 168 || n == 192 ? n : 144;
 		else if (k == "CursorSpeed")
 			cursor_speed = Clamp(n, 1, 5);
+		else if (k == "TouchpadPointer")
+			touchpad_pointer = b;
+		else if (k == "OptionsX")
+			options_x = Clamp(n, -1, 1919);
+		else if (k == "OptionsY")
+			options_y = Clamp(n, -1, 1079);
 		else if (k == "Language")
 			language = Clamp(n, 0, 4);
 		else if (k == "Generation")
@@ -664,6 +706,7 @@ void Settings::Save() const
 	fprintf(f, "SubDelayInterval=%d\n", sub_delay_step);
 	fprintf(f, "Dpi=%d\nCursorSpeed=%d\nLanguage=%d\ndebug_logs=%d\nLastDir=%s\n", dpi, cursor_speed, language,
 		debug_logs ? 1 : 0, bare(last_dir).c_str());
+	fprintf(f, "TouchpadPointer=%d\nOptionsX=%d\nOptionsY=%d\n", touchpad_pointer ? 1 : 0, options_x, options_y);
 	fprintf(f, "[Keys]\n");
 	for (int i = 0; i < int(PadButton::Count); i++)
 		fprintf(f, "Key%s=%s\n", kPadButtons[i].ini, PadActionKey(pad[i]));

@@ -293,7 +293,7 @@ const Entry kTable[] = {
 	{"Default (DAR)", "Predeterminado (DAR)", "Padrão (DAR)", "Par défaut (DAR)", "Standard (DAR)"},
 	{"Square pixels (SAR)", "Píxeles cuadrados (SAR)", "Pixels quadrados (SAR)", "Pixels carrés (SAR)",
 		"Quadratische Pixel (SAR)"},
-	{"Rate: %gx", "Velocidad: %gx", "Velocidade: %gx", "Vitesse : %gx", "Tempo: %gx"},
+	{"Speed: %.2fx", "Velocidad: %.2fx", "Velocidade: %.2fx", "Vitesse : %.2fx", "Geschwindigkeit: %.2fx"},
 	{"Volume: %d%%", "Volumen: %d%%", "Volume: %d%%", "Volume : %d%%", "Lautstärke: %d%%"},
 	{"Volume: Off", "Volumen: silenciado", "Volume: mudo", "Volume : muet", "Lautstärke: stumm"},
 	{"Volume: On", "Volumen: activado", "Volume: ativado", "Volume : activé", "Lautstärke: an"},
@@ -837,21 +837,48 @@ const Entry kTable[] = {
 	{"Action", "Acción", "Ação", "Action", "Aktion"},
 	{"Action:", "Acción:", "Ação:", "Action :", "Aktion:"},
 	{"Default", "Predeterminado", "Padrão", "Par défaut", "Standard"},
-	{"Options always opens the menu bar; the pointer's Cross / Square clicks and the buttons in menus and dialogs "
-	 "stay as they are. While L2, R2 and R3 keep their default actions, L2 or R2 held with Left / Right jumps "
-	 "20 s / 1 s, and R3 held with Square shows the statistics.",
-		"Options siempre abre la barra de menús; los clics de Cruz / Cuadrado con el puntero y los botones en menús y "
-		"diálogos no cambian. Mientras L2, R2 y R3 tengan su acción predeterminada, L2 o R2 pulsado con Izquierda / "
-		"Derecha salta 20 s / 1 s, y R3 pulsado con Cuadrado muestra las estadísticas.",
-		"Options sempre abre a barra de menus; os cliques de X / Quadrado com o ponteiro e os botões em menus e "
-		"diálogos não mudam. Enquanto L2, R2 e R3 tiverem a ação padrão, L2 ou R2 segurado com Esquerda / Direita "
-		"pula 20 s / 1 s, e R3 segurado com Quadrado mostra as estatísticas.",
-		"Options ouvre toujours la barre de menus ; les clics Croix / Carré du pointeur et les boutons des menus et "
-		"dialogues ne changent pas. Tant que L2, R2 et R3 gardent leur action par défaut, L2 ou R2 maintenu avec "
-		"Gauche / Droite saute de 20 s / 1 s, et R3 maintenu avec Carré affiche les statistiques.",
-		"Options öffnet immer die Menüleiste; Kreuz-/Quadrat-Klicks mit dem Zeiger und die Tasten in Menüs und "
-		"Dialogen bleiben gleich. Solange L2, R2 und R3 ihre Standardaktion haben, springt L2 oder R2 gehalten mit "
-		"Links / Rechts 20 s / 1 s, und R3 gehalten mit Quadrat zeigt die Statistiken."},
+	{"Options given another action still opens the menu bar when held half a second. The pointer's clicks (Cross, "
+	 "Square, the touchpad) and the buttons in menus and dialogs stay as they are. While L2, R2 and R3 keep their "
+	 "default actions, L2 or R2 held with D-pad Left / Right jumps 20 s / 1 s, and R3 held with Square shows the "
+	 "statistics.",
+		"Options con otra acción sigue abriendo la barra de menús si se mantiene medio segundo. Los clics del puntero "
+		"(Cruz, Cuadrado, el panel táctil) y los botones en menús y diálogos no cambian. Mientras L2, R2 y R3 tengan su "
+		"acción predeterminada, L2 o R2 pulsado con Cruceta izquierda / derecha salta 20 s / 1 s, y R3 pulsado con "
+		"Cuadrado muestra las estadísticas.",
+		"Options com outra ação ainda abre a barra de menus se for segurado por meio segundo. Os cliques do ponteiro "
+		"(X, Quadrado, o touchpad) e os botões em menus e diálogos não mudam. Enquanto L2, R2 e R3 tiverem a ação "
+		"padrão, L2 ou R2 segurado com Direcional esquerda / direita pula 20 s / 1 s, e R3 segurado com Quadrado mostra "
+		"as estatísticas.",
+		"Options avec une autre action ouvre toujours la barre de menus s'il est maintenu une demi-seconde. Les clics "
+		"du pointeur (Croix, Carré, le pavé tactile) et les boutons des menus et dialogues ne changent pas. Tant que "
+		"L2, R2 et R3 gardent leur action par défaut, L2 ou R2 maintenu avec Flèche gauche / droite saute de 20 s / "
+		"1 s, et R3 maintenu avec Carré affiche les statistiques.",
+		"Options mit einer anderen Aktion öffnet die Menüleiste weiterhin, wenn es eine halbe Sekunde gehalten wird. "
+		"Die Klicks des Zeigers (Kreuz, Quadrat, das Touchpad) und die Tasten in Menüs und Dialogen bleiben gleich. "
+		"Solange L2, R2 und R3 ihre Standardaktion haben, springt L2 oder R2 gehalten mit Steuerkreuz links / rechts "
+		"20 s / 1 s, und R3 gehalten mit Quadrat zeigt die Statistiken."},
+	{"The touchpad as the pointer (press: click; two fingers: right-click)",
+		"Panel táctil como puntero (pulsar: clic; dos dedos: clic derecho)",
+		"Touchpad como ponteiro (pressionar: clique; dois dedos: clique direito)",
+		"Pavé tactile comme pointeur (appui : clic ; deux doigts : clic droit)",
+		"Touchpad als Zeiger (Drücken: Klick; zwei Finger: Rechtsklick)"},
+	{"Right stick left", "Stick derecho izquierda", "Analógico direito à esquerda", "Stick droit gauche",
+		"Rechter Stick links"},
+	{"Right stick right", "Stick derecho derecha", "Analógico direito à direita", "Stick droit droite",
+		"Rechter Stick rechts"},
+	{"Faster (Increase Rate)", "Más rápido (Aumentar velocidad)", "Mais rápido (Aumentar velocidade)",
+		"Plus vite (Augmenter la vitesse)", "Schneller (Geschwindigkeit erhöhen)"},
+	{"Slower (Decrease Rate)", "Más lento (Reducir velocidad)", "Mais lento (Diminuir velocidade)",
+		"Plus lent (Diminuer la vitesse)", "Langsamer (Geschwindigkeit verringern)"},
+	{"Normal speed (Reset Rate)", "Velocidad normal (restablecer)", "Velocidade normal (redefinir)",
+		"Vitesse normale (réinitialiser)", "Normale Geschwindigkeit (zurücksetzen)"},
+	{"Open File...", "Abrir archivo...", "Abrir arquivo...", "Ouvrir un fichier...", "Datei öffnen..."},
+	{"Playlist on/off", "Lista de reproducción sí/no", "Playlist liga/desliga", "Liste de lecture oui/non",
+		"Wiedergabeliste ein/aus"},
+	{"Next aspect ratio", "Siguiente relación de aspecto", "Próxima proporção", "Format d'image suivant",
+		"Nächstes Seitenverhältnis"},
+	{"Options...", "Opciones...", "Opções...", "Options...", "Optionen..."},
+	{"Options: %s", "Opciones: %s", "Opções: %s", "Options : %s", "Optionen: %s"},
 	{"D-pad Left", "Cruceta izquierda", "Direcional esquerda", "Flèche gauche", "Steuerkreuz links"},
 	{"D-pad Right", "Cruceta derecha", "Direcional direita", "Flèche droite", "Steuerkreuz rechts"},
 	{"D-pad Up", "Cruceta arriba", "Direcional cima", "Flèche haut", "Steuerkreuz oben"},
@@ -1094,6 +1121,66 @@ const Entry kTable[] = {
 		"Esta versão não reproduz DVD-Video (FFmpeg sem o demultiplexador de DVD-Video).",
 		"Cette version ne peut pas lire de DVD-Vidéo (FFmpeg sans son démultiplexeur DVD-Vidéo).",
 		"Diese Version kann keine DVD-Video abspielen (FFmpeg ohne seinen DVD-Video-Demuxer)."},
+	// 1.5: updates where ShadowMount+ runs the app from
+	{"Media Player Classic PS5 updated to %s.", "Media Player Classic PS5 actualizado a %s.",
+		"Media Player Classic PS5 atualizado para %s.", "Media Player Classic PS5 mis à jour en %s.",
+		"Media Player Classic PS5 auf %s aktualisiert."},
+	{"Media Player Classic PS5 %s was installed in %s, but this is still %s: the console started the old files.\n\n"
+	 "Close the app completely (on the home screen: Options on its card, Close Application) and open it again. If it "
+	 "still says %s, ShadowMount+ still shows the old files: run ShadowMount+ again from your Payload Manager (it "
+	 "registers the app again), or restart the PS5.\n\nThe version in the home screen's app information only changes "
+	 "when ShadowMount+ registers the app again.",
+		"Media Player Classic PS5 %s se instaló en %s, pero esta sigue siendo la %s: la consola abrió los archivos "
+		"antiguos.\n\nCierra la app del todo (en la pantalla de inicio: Options en su tarjeta, Cerrar aplicación) y "
+		"vuelve a abrirla. Si sigue diciendo %s, ShadowMount+ todavía muestra los archivos antiguos: vuelve a ejecutar "
+		"ShadowMount+ desde tu Payload Manager (registra la app de nuevo) o reinicia la PS5.\n\nLa versión en la "
+		"información de la app de la pantalla de inicio solo cambia cuando ShadowMount+ vuelve a registrar la app.",
+		"O Media Player Classic PS5 %s foi instalado em %s, mas este ainda é o %s: o console abriu os arquivos "
+		"antigos.\n\nFeche o app por completo (na tela inicial: Options no card dele, Fechar aplicativo) e abra-o de "
+		"novo. Se ainda disser %s, o ShadowMount+ ainda mostra os arquivos antigos: execute o ShadowMount+ de novo pelo "
+		"seu Payload Manager (ele registra o app outra vez) ou reinicie o PS5.\n\nA versão nas informações do app na "
+		"tela inicial só muda quando o ShadowMount+ registra o app de novo.",
+		"Media Player Classic PS5 %s a été installé dans %s, mais ceci est encore la %s : la console a lancé les "
+		"anciens fichiers.\n\nFermez complètement l'app (sur l'écran d'accueil : Options sur sa carte, Fermer "
+		"l'application) et rouvrez-la. Si elle indique encore %s, ShadowMount+ montre encore les anciens fichiers : "
+		"relancez ShadowMount+ depuis votre Payload Manager (il enregistre l'app à nouveau) ou redémarrez la PS5.\n\n"
+		"La version dans les informations de l'app de l'écran d'accueil ne change que lorsque ShadowMount+ "
+		"enregistre l'app à nouveau.",
+		"Media Player Classic PS5 %s wurde in %s installiert, aber dies ist noch %s: Die Konsole hat die alten Dateien "
+		"gestartet.\n\nDie App ganz schließen (auf dem Startbildschirm: Options auf ihrer Karte, Anwendung schließen) "
+		"und wieder öffnen. Steht dort noch %s, zeigt ShadowMount+ noch die alten Dateien: ShadowMount+ erneut aus "
+		"deinem Payload Manager starten (es registriert die App neu) oder die PS5 neu starten.\n\nDie Version in den "
+		"App-Informationen des Startbildschirms ändert sich erst, wenn ShadowMount+ die App neu registriert."},
+	{"Media Player Classic PS5 %s is available (you have %s).\n\nThis copy runs from an image that ShadowMount+ "
+	 "mounted (%s): the app can't write an update into it. Update the image the way you made it, with the new "
+	 "version's folder (from the release's zip).",
+		"Media Player Classic PS5 %s está disponible (tienes la %s).\n\nEsta copia se ejecuta desde una imagen que "
+		"montó ShadowMount+ (%s): la app no puede escribir una actualización en ella. Actualiza la imagen como la "
+		"creaste, con la carpeta de la nueva versión (del zip de la versión).",
+		"O Media Player Classic PS5 %s está disponível (você tem o %s).\n\nEsta cópia roda a partir de uma imagem "
+		"montada pelo ShadowMount+ (%s): o app não consegue gravar uma atualização nela. Atualize a imagem do jeito que "
+		"você a criou, com a pasta da nova versão (do zip da versão).",
+		"Media Player Classic PS5 %s est disponible (vous avez la %s).\n\nCette copie fonctionne depuis une image "
+		"montée par ShadowMount+ (%s) : l'app ne peut pas y écrire une mise à jour. Mettez l'image à jour comme vous "
+		"l'avez créée, avec le dossier de la nouvelle version (du zip de la version).",
+		"Media Player Classic PS5 %s ist verfügbar (du hast %s).\n\nDiese Kopie läuft aus einem Image, das "
+		"ShadowMount+ eingebunden hat (%s): Die App kann kein Update hineinschreiben. Aktualisiere das Image so, wie du "
+		"es erstellt hast, mit dem Ordner der neuen Version (aus dem Zip der Version)."},
+	{"Media Player Classic PS5 %s is available (you have %s).\n\nThis copy runs from %s, where the app can't write: "
+	 "it can't be updated from here. Update that folder the way you put it there (with the new version's folder from "
+	 "the release's zip, or its payload).",
+		"Media Player Classic PS5 %s está disponible (tienes la %s).\n\nEsta copia se ejecuta desde %s, donde la app "
+		"no puede escribir: no se puede actualizar desde aquí. Actualiza esa carpeta como la pusiste ahí (con la "
+		"carpeta de la nueva versión del zip de la versión, o con su payload).",
+		"O Media Player Classic PS5 %s está disponível (você tem o %s).\n\nEsta cópia roda a partir de %s, onde o app "
+		"não consegue gravar: não dá para atualizá-lo daqui. Atualize essa pasta do jeito que você a colocou lá (com a "
+		"pasta da nova versão do zip da versão, ou com o payload dela).",
+		"Media Player Classic PS5 %s est disponible (vous avez la %s).\n\nCette copie fonctionne depuis %s, où l'app "
+		"ne peut pas écrire : elle ne peut pas être mise à jour d'ici. Mettez ce dossier à jour comme vous l'y avez mis "
+		"(avec le dossier de la nouvelle version du zip de la version, ou son payload).",
+		"Media Player Classic PS5 %s ist verfügbar (du hast %s).\n\nDiese Kopie läuft aus %s, wo die App nicht "
+		"schreiben kann: Sie lässt sich von hier aus nicht aktualisieren. Aktualisiere diesen Ordner so, wie du ihn "
+		"dorthin gelegt hast (mit dem Ordner der neuen Version aus dem Zip der Version oder mit ihrem Payload)."},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};

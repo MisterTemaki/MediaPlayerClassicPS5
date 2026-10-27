@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "mpc_settings.h"
+
 namespace mpc
 {
 class Player;
@@ -32,7 +34,8 @@ void ShowGoToDialog(double pos, double fps, std::function<void(double)> done);
 void ShowPropertiesDialog(Player& player, const std::string& url);
 void ShowAboutDialog();
 // View > Options...: applied() after OK / Apply
-void ShowOptionsDialog(std::function<void()> applied);
+// page: the page it opens at (OptionsPage::Last: the one it was left on in this session, as MPC-HC)
+void ShowOptionsDialog(std::function<void()> applied, OptionsPage page = OptionsPage::Last);
 // Favorites > Add to Favorites...: done(name, remember_position)
 void ShowAddFavoriteDialog(const std::string& name, std::function<void(const std::string&, bool)> done);
 void ShowOrganizeFavoritesDialog();

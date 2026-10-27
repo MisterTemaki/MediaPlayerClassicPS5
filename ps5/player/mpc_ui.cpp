@@ -118,8 +118,91 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 		e.y = int(cy_);
 		out.push_back(e);
 	}
-	// the right stick: the wheel
-	const double ry = Axis(p.ry);
+	// the touchpad: a finger moving moves the pointer by how far it went (as a laptop's touchpad), faster for a quick
+	// stroke; the first touch only marks where the finger is
+	if (touchpad_ && p.touches > 0)
+	{
+		const double fx = p.touch_x[0], fy = p.touch_y[0];
+		if (touching_ && p.touch_id[0] == touch_id_)
+		{
+			const double dx = fx - touch_x_, dy = fy - touch_y_;
+			const double dist = std::sqrt(dx * dx + dy * dy);
+			if (dist > 0)
+			{
+				const double v = dist / std::max(dt, 1.0 / 120); // touch units a second
+				const double gain = (0.5 + 0.25 * speed_) * (1 + std::min(1.5, std::max(0.0, (v - 400) / 1600)));
+				cx_ = std::max(0.0, std::min(1919.0, cx_ + dx * gain));
+				cy_ = std::max(0.0, std::min(1079.0, cy_ + dy * gain));
+				cursor_t_ = now;
+				input_t_ = now;
+				InputEvent e{InputEvent::MouseMove};
+				e.x = int(cx_);
+				e.y = int(cy_);
+				out.push_back(e);
+			}
+		}
+		touching_ = true;
+		touch_id_ = p.touch_id[0];
+		touch_x_ = fx;
+		touch_y_ = fy;
+	}
+	else
+		touching_ = false;
+	// the touchpad's click: a left click where the pointer is (two fingers on it: a right click); it shows the pointer
+	{
+		const bool down = (cur & SCE_PAD_BUTTON_TOUCH_PAD) != 0 && touchpad_;
+		if (down && !touch_click_)
+		{
+			touch_click_ = p.touches >= 2 ? 2 : 1;
+			cursor_t_ = now;
+			input_t_ = now;
+			InputEvent e{touch_click_ == 2 ? InputEvent::RButtonDown : InputEvent::LButtonDown};
+			e.x = int(cx_);
+			e.y = int(cy_);
+			out.push_back(e);
+		}
+		else if (!down && touch_click_)
+		{
+			InputEvent e{touch_click_ == 2 ? InputEvent::RButtonUp : InputEvent::LButtonUp};
+			e.x = int(cx_);
+			e.y = int(cy_);
+			out.push_back(e);
+			touch_click_ = 0;
+			cursor_t_ = now;
+		}
+	}
+	// the right stick's left / right: keys, held past half way (back under 40 % lets go), repeating as the D-pad
+	{
+		const int hx = int(p.rx) - 128, hy = int(p.ry) - 128;
+		int h = stick_h_;
+		if (stick_h_ == 0 && std::abs(hx) > 64 && std::abs(hx) > std::abs(hy))
+			h = hx < 0 ? -1 : 1;
+		else if (stick_h_ != 0 && (std::abs(hx) < 51 || (hx < 0) != (stick_h_ < 0)))
+			h = 0;
+		if (h != stick_h_)
+		{
+			stick_h_ = h;
+			if (h)
+			{
+				InputEvent e{InputEvent::KeyDown};
+				e.key = h < 0 ? Key::StickLeft : Key::StickRight;
+				out.push_back(e);
+				stick_repeat_at_ = now + 0.40;
+				input_t_ = now;
+			}
+		}
+		else if (h && now >= stick_repeat_at_)
+		{
+			InputEvent e{InputEvent::KeyDown};
+			e.key = h < 0 ? Key::StickLeft : Key::StickRight;
+			e.repeat = true;
+			out.push_back(e);
+			stick_repeat_at_ = now + 0.07;
+			input_t_ = now;
+		}
+	}
+	// the right stick: the wheel (not while it is held left / right)
+	const double ry = stick_h_ ? 0 : Axis(p.ry);
 	// a push of the stick: its first step is a press, the next ones (still pushed that way) repeats
 	const int wdir = ry < 0 ? 1 : ry > 0 ? -1 : 0;
 	if (wdir != wheel_dir_)
@@ -1234,6 +1317,34 @@ void Dialog::Center(const CRect& in)
 	rect.bottom = rect.top + h;
 }
 
+void Dialog::MoveBy(int dx, int dy)
+{
+	if (!dx && !dy)
+		return;
+	rect.OffsetRect(dx, dy);
+	for (auto& c : controls)
+		c->rect.OffsetRect(dx, dy);
+	OnMove(dx, dy);
+}
+
+void Dialog::KeepOnScreen(const CRect& screen)
+{
+	int dx = 0, dy = 0;
+	if (rect.right > screen.right)
+		dx = screen.right - rect.right;
+	if (rect.left + dx < screen.left)
+		dx = screen.left - rect.left;
+	if (rect.bottom > screen.bottom)
+		dy = screen.bottom - rect.bottom;
+	if (rect.top + dy < screen.top)
+		dy = screen.top - rect.top;
+	if (dx || dy)
+	{
+		MoveBy(dx, dy);
+		OnMoveDone();
+	}
+}
+
 void Dialog::Paint(CDC& dc)
 {
 	// Windows 10's shadow, then the frame
@@ -1356,6 +1467,20 @@ bool Dialog::OnEvent(const InputEvent& ev)
 	{
 		case InputEvent::MouseMove:
 		{
+			if (moving_)
+			{
+				// the title bar follows the pointer; the whole window stays on the screen
+				const CRect& scr = WindowManager::Get().screen;
+				const int w = rect.Width(), h = rect.Height();
+				int x = ev.x - grab_x_, y = ev.y - grab_y_;
+				x = std::max(scr.left, std::min(x, scr.right - w));
+				y = std::max(scr.top, std::min(y, scr.bottom - h));
+				const int dx = x - rect.left, dy = y - rect.top;
+				MoveBy(dx, dy);
+				moved_x_ += dx;
+				moved_y_ += dy;
+				return true;
+			}
 			close_hot_ = has_close && closeb.PtInRect(ev.x, ev.y);
 			hot_ = nullptr;
 			for (auto& c : controls)
@@ -1370,6 +1495,15 @@ bool Dialog::OnEvent(const InputEvent& ev)
 			if (has_close && closeb.PtInRect(ev.x, ev.y))
 			{
 				close_pressed_ = true;
+				return true;
+			}
+			if (cap.PtInRect(ev.x, ev.y))
+			{
+				// the title bar: held, it moves the window
+				moving_ = true;
+				grab_x_ = ev.x - rect.left;
+				grab_y_ = ev.y - rect.top;
+				moved_x_ = moved_y_ = 0;
 				return true;
 			}
 			for (int i = int(controls.size()) - 1; i >= 0; i--)
@@ -1393,6 +1527,16 @@ bool Dialog::OnEvent(const InputEvent& ev)
 		}
 		case InputEvent::LButtonUp:
 		{
+			if (moving_)
+			{
+				moving_ = false;
+				if (moved_x_ || moved_y_)
+				{
+					OrbisLog("[ui] \"%s\" moved to %d,%d", title.c_str(), rect.left, rect.top);
+					OnMoveDone();
+				}
+				return true;
+			}
 			if (close_pressed_)
 			{
 				close_pressed_ = false;
@@ -1514,6 +1658,9 @@ void WindowManager::PushPopup(Popup* p)
 
 bool WindowManager::Dispatch(const InputEvent& ev)
 {
+	// the right stick's left / right are the window's keys only: menus and dialogs don't see them
+	if (ev.type == InputEvent::KeyDown && (ev.key == Key::StickLeft || ev.key == Key::StickRight))
+		return !popups_.empty() || !dialogs_.empty();
 	if (!popups_.empty())
 	{
 		Popup* p = popups_.back().get();

@@ -42,6 +42,9 @@ struct Config
 	std::string appmeta_dir; // /user/appmeta/<title_id>
 	std::string api_url;     // "" -> https://api.github.com/repos/<repo>/releases/latest
 	std::string release_key; // the release signing key, 64 hex digits (Ed25519 public key); "": no signature checked
+	// set when app_dir can't take an update (an image, a read-only folder: ProsperoAppPlace.h): why, and then nothing
+	// is downloaded or written (StartInstall refuses, InstallZip returns it)
+	std::string cant_install;
 };
 
 // GET url into out (at most max bytes); progress (when not null) follows the bytes read. The HTTP status, or -1.

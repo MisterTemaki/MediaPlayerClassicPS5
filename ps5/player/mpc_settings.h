@@ -66,8 +66,11 @@ enum class PadButton : int
 	R2,
 	L3,
 	R3,
+	Options, // 1.5: bindable; given another action, held for half a second it still opens the menu bar
 	StickUp, // the right stick (the mouse wheel)
 	StickDown,
+	StickLeft, // 1.5: pushed left / right, as the D-pad (the pointer is the left stick)
+	StickRight,
 	Count
 };
 
@@ -99,6 +102,40 @@ enum class PadAction : int
 	AudioDelayDown, // 10 ms
 	AudioDelayUp,
 	Statistics, // View > Renderer Settings > Display Statistics
+	// 1.5
+	Faster, // Play > Increase Rate (MPC-HC: twice as fast)
+	Slower, // Play > Decrease Rate (half)
+	NormalSpeed, // Play > Reset Rate
+	FrameStep, // Play > Frame Step
+	OpenFile, // File > Open File...
+	Playlist, // View > Playlist on/off
+	NextAspectRatio, // View > Aspect Ratio: the next one
+	OptionsWindow, // View > Options... (the page it was last on)
+	OptionsPlayer, // View > Options... at a page
+	OptionsKeys,
+	OptionsPlayback,
+	OptionsOutput,
+	OptionsFullscreen,
+	OptionsSubtitles,
+	OptionsDefaultStyle,
+	OptionsAudio,
+	OptionsMisc,
+	Count
+};
+
+// Options' pages, in the tree's order (ShowOptionsDialog's page)
+enum class OptionsPage : int
+{
+	Last = -1, // the one it was on (MPC-HC opens where it was left)
+	Player,
+	Keys,
+	Playback,
+	Output,
+	Fullscreen,
+	Subtitles,
+	DefaultStyle,
+	AudioSwitcher,
+	Miscellaneous,
 	Count
 };
 
@@ -180,6 +217,8 @@ struct Settings
 	// Interface
 	int dpi = 144; // 96 / 120 / 144 / 192 (100 % .. 200 %)
 	int cursor_speed = 3; // 1..5
+	bool touchpad_pointer = true; // 1.5: the DualSense touchpad moves the pointer, its click clicks (Options > Player > Keys)
+	int options_x = -1, options_y = -1; // 1.5: where the Options window was moved to (-1: centred)
 	int language = 0; // Options > Player > Language: 0 English, 1 Spanish, 2 Portuguese (Brazil), 3 French, 4 German
 	// boot.log and the others in <data>/logs: off unless mpc-hc.ini says debug_logs=1 (orbis_paths.cpp reads the
 	// same line: the installer and the helper follow it); Options > Miscellaneous "Debug logs", applied at once

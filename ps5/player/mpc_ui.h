@@ -45,6 +45,8 @@ enum class Key
 	PageUp, // L2 in lists
 	PageDown, // R2 in lists
 	Backspace, // the on-screen keyboard
+	StickLeft, // 1.5: the right stick pushed left / right (the window's keys only; menus and dialogs ignore them)
+	StickRight,
 };
 
 struct InputEvent
@@ -68,7 +70,8 @@ struct InputEvent
 };
 
 // The pad as a mouse and a keyboard: the left stick moves the pointer, Cross clicks while the pointer is
-// shown (it hides after a few seconds still), Square right-clicks; the buttons are keys otherwise.
+// shown (it hides after a few seconds still), Square right-clicks; the buttons are keys otherwise. 1.5: the
+// touchpad moves the pointer too (relative, as a laptop's), its click is a left click (two fingers: a right click).
 class InputMapper
 {
 public:
@@ -81,6 +84,7 @@ public:
 	double IdleSeconds() const; // since the last input
 	bool Held(Key k) const;
 	void SetSpeed(int s) { speed_ = s; }
+	void SetTouchpad(bool on) { touchpad_ = on; }
 
 private:
 	double cx_ = 960, cy_ = 540;
@@ -93,6 +97,15 @@ private:
 	double wheel_acc_ = 0;
 	int wheel_dir_ = 0; // the right stick: -1 / 0 / 1 as it is pushed now
 	bool wheel_sent_ = false; // a wheel step already sent for this push (the next ones are repeats)
+	// the right stick's left / right: -1 / 0 / 1 as it is held, and when the next repeat is due
+	int stick_h_ = 0;
+	double stick_repeat_at_ = 0;
+	// the touchpad
+	bool touchpad_ = true;
+	bool touching_ = false; // a finger followed (its id and where it was)
+	uint8_t touch_id_ = 0;
+	double touch_x_ = 0, touch_y_ = 0;
+	int touch_click_ = 0; // 1 left, 2 right: the touchpad's click held
 };
 
 void DrawCursor(CDC& dc, int x, int y);
@@ -349,6 +362,14 @@ public:
 	virtual void OnOk() { EndDialog(1); }
 	virtual void OnCancel() { EndDialog(2); }
 	virtual void Tick() {} // once per frame
+	// 1.5: dragged by its title bar (the pointer, Cross or the touchpad's click held), as on Windows: the window and its
+	// controls move by (dx, dy); OnMove moves a dialog's places of its own, OnMoveDone says where it ended (to remember)
+	void MoveBy(int dx, int dy);
+	// moved so that it is whole on the screen (as far as it fits)
+	void KeepOnScreen(const CRect& screen);
+	virtual void OnMove(int dx, int dy) {}
+	virtual void OnMoveDone() {}
+	bool Moving() const { return moving_; }
 	void EndDialog(int r)
 	{
 		result = r;
@@ -366,6 +387,9 @@ protected:
 	Control* hot_ = nullptr;
 	Control* dragging_ = nullptr;
 	bool close_hot_ = false, close_pressed_ = false;
+	bool moving_ = false; // the title bar held
+	int grab_x_ = 0, grab_y_ = 0; // where in the window it was taken
+	int moved_x_ = 0, moved_y_ = 0; // how far it went in this drag (OnMoved at the end)
 };
 
 // The modal stack (the top one gets the input) and the drop-downs that float above everything.

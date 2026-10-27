@@ -194,7 +194,6 @@ enum Cmd
 };
 
 constexpr int kW = 1920, kH = 1080;
-const double kRates[] = {0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 4.0, 8.0};
 
 struct SubCache
 {
@@ -265,7 +264,8 @@ private:
 	double last_pos_save_ = 0;
 	bool show_renderer_stats_ = false;
 	bool subs_enabled_ = true;
-	int rate_index_ = 4;
+	double rate_ = 1.0; // the playing rate (Play > Increase / Decrease / Reset Rate)
+	double options_down_ = 0; // Options pressed, given another action than the menu bar: when (held: the menu bar)
 	bool opened_ok_ = false;
 
 	// video
@@ -297,6 +297,8 @@ private:
 	void OnKey(Key k, bool repeat = false);
 	// Options > Player > Keys: what a button does in the window, and the first button doing an action (menus)
 	void DoPadAction(PadAction a);
+	void ShowOptions(OptionsPage page);
+	void TickOptionsButton();
 	std::string Accel(PadAction a, const char* combination = "") const;
 	void NextTrack(TrackType t);
 	void OnMouseMove(int x, int y);
@@ -1370,7 +1372,7 @@ std::vector<MenuItem> MainFrame::ViewMenu(bool context) const
 	v.push_back(panscan);
 	v.push_back(M::Sep());
 	v.push_back(ontop);
-	v.push_back(M::Cmd("&Options...", ID_VIEW_OPTIONS));
+	v.push_back(M::Cmd("&Options...", ID_VIEW_OPTIONS, Accel(PadAction::OptionsWindow)));
 	return v;
 }
 
@@ -1424,12 +1426,12 @@ std::vector<MenuItem> MainFrame::PlayMenu() const
 		M::Cmd("Shut&down", ID_AFTERPLAYBACK_SHUTDOWN).Enable(false), M::Cmd("Log &Off", ID_AFTERPLAYBACK_LOGOFF).Enable(false),
 		M::Cmd("&Lock", ID_AFTERPLAYBACK_LOCK).Enable(false)};
 	return {M::Cmd("&Play/Pause", ID_PLAY_PLAYPAUSE, Accel(PadAction::PlayPause)).Enable(loaded).Check(st == PlayState::Playing),
-		M::Cmd("&Stop", ID_PLAY_STOP).Enable(loaded), M::Cmd("Fra&me Step", ID_PLAY_FRAMESTEP).Enable(loaded && player_.HasVideo()),
+		M::Cmd("&Stop", ID_PLAY_STOP).Enable(loaded), M::Cmd("Fra&me Step", ID_PLAY_FRAMESTEP, Accel(PadAction::FrameStep)).Enable(loaded && player_.HasVideo()),
 		M::Popup("&Repeat", {M::Cmd("F&orever", ID_PLAY_REPEAT_FOREVER).Check(s_.repeat != 0), M::Sep(),
 								M::Cmd("&File", ID_PLAY_REPEAT_ONEFILE).Radio(s_.repeat == 1),
 								M::Cmd("&Playlist", ID_PLAY_REPEAT_WHOLEPLAYLIST).Radio(s_.repeat == 2)}),
-		M::Sep(), M::Cmd("&Decrease Rate", ID_PLAY_DECRATE).Enable(loaded), M::Cmd("&Increase Rate", ID_PLAY_INCRATE).Enable(loaded),
-		M::Cmd("R&eset Rate", ID_PLAY_RESETRATE).Enable(loaded), M::Sep(), M::Popup("&Filters", {M::Cmd("<empty>", 0).Enable(false)}),
+		M::Sep(), M::Cmd("&Decrease Rate", ID_PLAY_DECRATE, Accel(PadAction::Slower)).Enable(loaded), M::Cmd("&Increase Rate", ID_PLAY_INCRATE, Accel(PadAction::Faster)).Enable(loaded),
+		M::Cmd("R&eset Rate", ID_PLAY_RESETRATE, Accel(PadAction::NormalSpeed)).Enable(loaded), M::Sep(), M::Popup("&Filters", {M::Cmd("<empty>", 0).Enable(false)}),
 		M::Popup("S&haders", {M::Cmd("<empty>", 0).Enable(false)}), M::Sep(),
 		M::Popup("&Audio Track", TrackMenu(TrackType::Audio)).Enable(loaded),
 		M::Popup("Su&btitle Track", TrackMenu(TrackType::Subtitle)).Enable(loaded),
@@ -1560,7 +1562,7 @@ std::vector<MenuItem> MainFrame::BuildMenu(int which) const
 	v.push_back(M::Popup("&View", ViewMenu(true)));
 	v.push_back(view[16]); // Renderer Settings
 	v.push_back(M::Cmd("P&roperties", ID_FILE_PROPERTIES).Enable(loaded));
-	v.push_back(M::Cmd("&Options...", ID_VIEW_OPTIONS));
+	v.push_back(M::Cmd("&Options...", ID_VIEW_OPTIONS, Accel(PadAction::OptionsWindow)));
 	v.push_back(M::Sep());
 	v.push_back(M::Cmd("E&xit", ID_FILE_EXIT));
 	return v;
@@ -2017,21 +2019,7 @@ void MainFrame::Command(int id)
 			s.zoom_x = s.zoom_y = 1;
 			break;
 		case ID_VIEW_OPTIONS:
-			ShowOptionsDialog([this] {
-				ApplyAudio();
-				player_.SetSubtitleDelay(s_.sub_delay_ms / 1000.0);
-				player_.SetAudioDelay(s_.audio_delay_ms / 1000.0);
-				input_.SetSpeed(s_.cursor_speed);
-				SetSubtitleFont(s_.sub_font);
-				sub_cache_.key.clear();
-				OrbisLogSetEnabled(s_.debug_logs); // Debug logs, at once (the helper reads mpc-hc.ini, saved below)
-				if (g_dpi != s_.dpi)
-				{
-					g_dpi = s_.dpi;
-					sub_cache_.key.clear();
-				}
-				s_.Save();
-			});
+			ShowOptions(OptionsPage::Last);
 			break;
 		case ID_PLAY_PLAYPAUSE:
 			if (player_.State() == PlayState::Playing)
@@ -2085,16 +2073,28 @@ void MainFrame::Command(int id)
 		case ID_PLAY_INCRATE:
 		case ID_PLAY_RESETRATE:
 		{
+			// CMainFrame::OnPlayChangeRate / SetPlayingRate (a file, MPC-HC's default "auto" step): twice / half as fast;
+			// under 0.125x it pauses instead; Reset Rate: 1x. Playing (it was paused): it plays. The sound keeps its pitch
+			// (FFmpeg's atempo). The fastest here: 8x (the decoders' limit on the console)
 			if (!loaded)
 				break;
-			if (id == ID_PLAY_RESETRATE)
-				rate_index_ = 4;
-			else
-				rate_index_ = std::max(0, std::min(int(sizeof(kRates) / sizeof(kRates[0])) - 1, rate_index_ + (id == ID_PLAY_INCRATE ? 1 : -1)));
-			player_.SetRate(kRates[rate_index_]);
-			char b[64];
-			snprintf(b, sizeof(b), T("Rate: %gx"), kRates[rate_index_]);
-			Osd(b);
+			{
+				const double want = id == ID_PLAY_RESETRATE ? 1.0 : id == ID_PLAY_INCRATE ? rate_ * 2 : rate_ / 2;
+				if (want < 0.125)
+				{
+					if (player_.State() != PlayState::Paused)
+						Command(ID_PLAY_PAUSE);
+					break;
+				}
+				if (player_.State() == PlayState::Paused)
+					Command(ID_PLAY_PLAY);
+				rate_ = std::min(8.0, want);
+				player_.SetRate(rate_);
+				OrbisLog("[ui] rate %.3fx", rate_);
+				char b[64];
+				snprintf(b, sizeof(b), T("Speed: %.2fx"), rate_);
+				Osd(b);
+			}
 			break;
 		}
 		case ID_VOLUME_UP:
@@ -2232,7 +2232,7 @@ void MainFrame::Open(const std::string& url, bool use_saved_pos)
 	player_.Open(url, pos);
 	opened_ok_ = false;
 	sub_cache_.key.clear();
-	rate_index_ = 4;
+	rate_ = 1.0;
 	s_.AddRecent(url);
 	if (pl_cur_ < 0 || pl_cur_ >= int(playlist_.size()) || playlist_[pl_cur_] != url)
 	{
@@ -2347,6 +2347,25 @@ void MainFrame::OfferUpdate(const update::Status& st)
 			T("Check for updates"), MB_OK, 1);
 		return;
 	}
+	// the copy the console runs can't take it (an image, a read-only folder): said before anything is downloaded
+	const AppPlace& place = mpcupdate::Place();
+	if (!place.writable)
+	{
+		OrbisLog("[update] %s is available, but it can't be installed here: %s", st.latest.c_str(), place.reason.c_str());
+		if (place.image)
+			MessageBox(Fmt(T("Media Player Classic PS5 %s is available (you have %s).\n\nThis copy runs from an image "
+							 "that ShadowMount+ mounted (%s): the app can't write an update into it. Update the image the "
+							 "way you made it, with the new version's folder (from the release's zip)."),
+						   st.latest.c_str(), MPCPS5_PS5_VERSION, place.source.c_str()),
+				T("Check for updates"), MB_OK, 2);
+		else
+			MessageBox(Fmt(T("Media Player Classic PS5 %s is available (you have %s).\n\nThis copy runs from %s, where the "
+							 "app can't write: it can't be updated from here. Update that folder the way you put it there "
+							 "(with the new version's folder from the release's zip, or its payload)."),
+						   st.latest.c_str(), MPCPS5_PS5_VERSION, place.source.c_str()),
+				T("Check for updates"), MB_OK, 2);
+		return;
+	}
 	MessageBox(Fmt(T("Media Player Classic PS5 %s is available (you have %s).\n\nDownload it (%s) and install it now?"),
 				   st.latest.c_str(), MPCPS5_PS5_VERSION, size),
 		T("Check for updates"), MB_YESNO, 4, [this](int r) {
@@ -2405,8 +2424,9 @@ void MainFrame::TickUpdate()
 				upd_user_ = upd_auto_ = upd_installing_ = false;
 				break;
 			case update::Phase::Done:
-				OrbisLog("[update] %s installed: offering the restart", st.latest.c_str());
+				OrbisLog("[update] %s installed (in %s): offering the restart", st.latest.c_str(), mpcupdate::Place().dir.c_str());
 				upd_installing_ = false;
+				mpcupdate::NoteInstalled(st.latest); // the next start checks it runs
 				MessageBox(Fmt(T("Media Player Classic PS5 %s is installed.\n\nRestart the app now to use it?"), st.latest.c_str()),
 					T("Check for updates"), MB_YESNO, 4, [this](int r) {
 						if (r == IDYES)
@@ -2432,6 +2452,7 @@ void MainFrame::TickUpdate()
 void MainFrame::Tick()
 {
 	TickUpdate();
+	TickOptionsButton();
 	const PlayState st = player_.State();
 	if (st != last_state_)
 	{
@@ -2723,6 +2744,12 @@ PadButton ButtonOf(Key k)
 			return PadButton::L3;
 		case Key::R3:
 			return PadButton::R3;
+		case Key::Menu:
+			return PadButton::Options;
+		case Key::StickLeft:
+			return PadButton::StickLeft;
+		case Key::StickRight:
+			return PadButton::StickRight;
 		default:
 			return PadButton::Count;
 	}
@@ -2784,6 +2811,54 @@ void MainFrame::NextTrack(TrackType t)
 		player_.SelectTrack(t, n.id);
 	Osd(Fmt(T("Audio: %s"), n.name.c_str()));
 	OrbisLog("[ui] next audio track: %d", n.id);
+}
+
+void MainFrame::ShowOptions(OptionsPage page)
+{
+	OrbisLog("[ui] Options (page %d)", int(page));
+	ShowOptionsDialog(
+		[this] {
+			ApplyAudio();
+			player_.SetSubtitleDelay(s_.sub_delay_ms / 1000.0);
+			player_.SetAudioDelay(s_.audio_delay_ms / 1000.0);
+			input_.SetSpeed(s_.cursor_speed);
+			input_.SetTouchpad(s_.touchpad_pointer);
+			SetSubtitleFont(s_.sub_font);
+			sub_cache_.key.clear();
+			OrbisLogSetEnabled(s_.debug_logs); // Debug logs, at once (the helper reads mpc-hc.ini, saved below)
+			if (g_dpi != s_.dpi)
+			{
+				g_dpi = s_.dpi;
+				sub_cache_.key.clear();
+			}
+			s_.Save();
+		},
+		page);
+}
+
+// Options given another action (Options > Player > Keys): let go within half a second, it does that action; held
+// half a second, it opens the menu bar instead
+void MainFrame::TickOptionsButton()
+{
+	if (options_down_ <= 0)
+		return;
+	const PadAction a = s_.pad[int(PadButton::Options)];
+	if (input_.Held(Key::Menu))
+	{
+		if (NowSeconds() - options_down_ >= 0.5)
+		{
+			options_down_ = 0;
+			OrbisLog("[ui] Options held: the menu bar");
+			OpenMenuBar(0, true);
+		}
+		return;
+	}
+	options_down_ = 0;
+	if (a != PadAction::None && a != PadAction::MenuBar && !WindowManager::Get().HasModal())
+	{
+		OrbisLog("[ui] %s: %s", PadButtonName(PadButton::Options), PadActionKey(a));
+		DoPadAction(a);
+	}
 }
 
 void MainFrame::DoPadAction(PadAction a)
@@ -2869,6 +2944,41 @@ void MainFrame::DoPadAction(PadAction a)
 		case PadAction::Statistics:
 			Command(ID_VIEW_DISPLAY_RENDERER_STATS);
 			break;
+		case PadAction::Faster:
+			Command(ID_PLAY_INCRATE);
+			break;
+		case PadAction::Slower:
+			Command(ID_PLAY_DECRATE);
+			break;
+		case PadAction::NormalSpeed:
+			Command(ID_PLAY_RESETRATE);
+			break;
+		case PadAction::FrameStep:
+			Command(ID_PLAY_FRAMESTEP);
+			break;
+		case PadAction::OpenFile:
+			Command(ID_FILE_OPENMEDIA);
+			break;
+		case PadAction::Playlist:
+			Command(ID_VIEW_PLAYLIST);
+			break;
+		case PadAction::NextAspectRatio:
+			Command(ID_ASPECTRATIO_DAR + (s_.aspect_ratio + 1) % 7);
+			break;
+		case PadAction::OptionsWindow:
+			ShowOptions(OptionsPage::Last);
+			break;
+		case PadAction::OptionsPlayer:
+		case PadAction::OptionsKeys:
+		case PadAction::OptionsPlayback:
+		case PadAction::OptionsOutput:
+		case PadAction::OptionsFullscreen:
+		case PadAction::OptionsSubtitles:
+		case PadAction::OptionsDefaultStyle:
+		case PadAction::OptionsAudio:
+		case PadAction::OptionsMisc:
+			ShowOptions(OptionsPage(int(a) - int(PadAction::OptionsPlayer)));
+			break;
 		default:
 			break;
 	}
@@ -2898,11 +3008,22 @@ void MainFrame::OnKey(Key k, bool repeat)
 				break;
 		}
 	}
-	// Options: the menu bar, always
+	// Options: the menu bar (its default); given another action, that action when it is let go, and the menu bar still
+	// when it is held half a second (nobody locks themselves out of the menus)
 	if (k == Key::Menu)
 	{
-		if (!repeat)
-			OpenMenuBar(0, true);
+		if (repeat)
+			return;
+		const PadAction oa = s_.pad[int(PadButton::Options)];
+		if (oa == PadAction::MenuBar || oa == PadAction::None)
+		{
+			if (oa == PadAction::MenuBar)
+				OpenMenuBar(0, true);
+			else
+				options_down_ = NowSeconds(); // nothing of its own: held, still the menu bar
+			return;
+		}
+		options_down_ = NowSeconds();
 		return;
 	}
 	const PadButton b = ButtonOf(k);
@@ -2988,6 +3109,7 @@ int MainFrame::Run(const std::string& first)
 	s_.Load();
 	g_dpi = s_.dpi;
 	input_.SetSpeed(s_.cursor_speed);
+	input_.SetTouchpad(s_.touchpad_pointer);
 	OrbisLog("[ui] fonts folder: %d font(s) loaded", LoadExtraFonts(OrbisDir("fonts")));
 	SetSubtitleFont(s_.sub_font); // a file no longer there: Selawik (logged)
 	// the CA list for https:// streams
@@ -3018,6 +3140,22 @@ int MainFrame::Run(const std::string& first)
 						 "again. Network streams still work."),
 					   MPCPS5_PS5_VERSION),
 			"Media Player Classic Home Cinema", MB_OK, 2);
+	// an update installed before: is this the new version? (if not, what to do)
+	if (have_data_)
+	{
+		const mpcupdate::AfterUpdate au = mpcupdate::CheckAfterUpdate();
+		if (au.pending && au.ok)
+			Osd(Fmt(T("Media Player Classic PS5 updated to %s."), MPCPS5_PS5_VERSION), 5);
+		else if (au.pending)
+			MessageBox(Fmt(T("Media Player Classic PS5 %s was installed in %s, but this is still %s: the console started "
+							 "the old files.\n\nClose the app completely (on the home screen: Options on its card, Close "
+							 "Application) and open it again. If it still says %s, ShadowMount+ still shows the old files: "
+							 "run ShadowMount+ again from your Payload Manager (it registers the app again), or restart "
+							 "the PS5.\n\nThe version in the home screen's app information only changes when ShadowMount+ "
+							 "registers the app again."),
+						   au.want.c_str(), au.dir.c_str(), MPCPS5_PS5_VERSION, MPCPS5_PS5_VERSION),
+				T("Check for updates"), MB_OK, 2);
+	}
 
 	Bitmap screen{ps5video::Surface(), ps5video::kWidth, ps5video::kHeight, ps5video::kWidth};
 	CDC dc(screen);

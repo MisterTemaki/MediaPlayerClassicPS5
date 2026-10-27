@@ -867,6 +867,8 @@ bool SignatureValid(const std::vector<uint8_t>& zip, const std::vector<uint8_t>&
 std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expect_sha256, const Config& c,
 	std::atomic<size_t>* files_done, std::atomic<size_t>* files_total, const std::vector<uint8_t>* signature)
 {
+	if (!c.cant_install.empty())
+		return c.cant_install;
 	// an earlier install that isn't put back yet: its old copies are the only way back, so nothing is installed
 	// over it (RecoverInterrupted runs first; if the journal is still there, it couldn't finish)
 	if (Exists(c.app_dir + "/" + kJournal))
@@ -1083,7 +1085,7 @@ void Init(const Config& config, Fetch fetch)
 	std::lock_guard<std::mutex> l(g_mu);
 	g_config = config;
 	g_fetch = std::move(fetch);
-	if (!config.app_dir.empty())
+	if (!config.app_dir.empty() && config.cant_install.empty())
 		RecoverInterrupted(config.app_dir);
 }
 
@@ -1132,6 +1134,11 @@ bool StartInstall()
 	std::lock_guard<std::mutex> l(g_mu);
 	if (g_busy || !g_fetch || g_status.phase != Phase::Available)
 		return false;
+	if (!g_config.cant_install.empty())
+	{
+		OrbisLog("[update] not installed: %s", g_config.cant_install.c_str());
+		return false;
+	}
 	g_busy = true;
 	if (!Spawn(InstallMain))
 	{

@@ -1,7 +1,9 @@
 // Media Player Classic PS5 host build: the PS5 system calls of include-orbis/ProsperoSce.h, implemented on Linux so the
 // whole port (main-boot, shims, frontend, core) runs unchanged in the tests.
 //
-//   MPCPS5_HOST_PAD="frame:hexbuttons[,lx,ly,rx,ry][;...]"  pad 1 script (by flip count; sticks 0..255, 128 = centre)
+//   MPCPS5_HOST_PAD="frame:hexbuttons[,lx,ly,rx,ry[,tx,ty[,tx2,ty2]]][;...]"  pad 1 script (by flip count; sticks
+//                                                           0..255, 128 = centre; tx,ty: a finger on the touchpad,
+//                                                           x 0..1919, y 0..1079; a second one for two fingers)
 //   MPCPS5_HOST_DUMP="frame[,frame...]"                       flips to save as PPM (de-tiled)
 //   MPCPS5_HOST_DUMP_DIR=dir                                  where (default .)
 //   MPCPS5_HOST_MAX_FLIPS=n                                   abort after n flips (a hang guard)
@@ -36,6 +38,8 @@ struct PadStep
 {
 	uint32_t buttons = 0;
 	uint8_t lx = 128, ly = 128, rx = 128, ry = 128;
+	int touches = 0;
+	unsigned tx[2] = {0, 0}, ty[2] = {0, 0};
 };
 std::map<uint64_t, PadStep> g_script;
 std::set<uint64_t> g_dumps;
@@ -65,7 +69,11 @@ void InitEnv()
 				unsigned lx = 128, ly = 128, rx = 128, ry = 128;
 				const size_t comma = v.find(',');
 				if (comma != std::string::npos)
-					sscanf(v.c_str() + comma + 1, "%u,%u,%u,%u", &lx, &ly, &rx, &ry);
+				{
+					const int got = sscanf(v.c_str() + comma + 1, "%u,%u,%u,%u,%u,%u,%u,%u", &lx, &ly, &rx, &ry, &st.tx[0],
+						&st.ty[0], &st.tx[1], &st.ty[1]);
+					st.touches = got >= 8 ? 2 : got >= 6 ? 1 : 0;
+				}
 				st.lx = uint8_t(lx);
 				st.ly = uint8_t(ly);
 				st.rx = uint8_t(rx);
@@ -389,6 +397,13 @@ int scePadReadState(int handle, ScePadData* data)
 		data->leftStick.y = st.ly;
 		data->rightStick.x = st.rx;
 		data->rightStick.y = st.ry;
+		data->touch.fingers = uint8_t(st.touches);
+		for (int i = 0; i < st.touches; i++)
+		{
+			data->touch.touch[i].x = uint16_t(st.tx[i]);
+			data->touch.touch[i].y = uint16_t(st.ty[i]);
+			data->touch.touch[i].finger = uint8_t(i);
+		}
 	}
 	return 0;
 }

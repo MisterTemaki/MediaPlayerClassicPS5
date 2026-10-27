@@ -14,6 +14,11 @@ struct PadState
 	uint32_t buttons = 0; // SCE_PAD_BUTTON_*; the left stick also sets the D-pad bits
 	uint32_t raw_buttons = 0; // without the stick
 	uint8_t lx = 128, ly = 128, rx = 128, ry = 128, l2 = 0, r2 = 0;
+	// the touchpad (ScePadData's touch data): the fingers on it (0-2), each with its id and place (x 0..1919,
+	// y 0..~1070, the DualSense's touchpad)
+	uint8_t touches = 0;
+	uint8_t touch_id[2] = {0, 0};
+	uint16_t touch_x[2] = {0, 0}, touch_y[2] = {0, 0};
 };
 
 bool Init();

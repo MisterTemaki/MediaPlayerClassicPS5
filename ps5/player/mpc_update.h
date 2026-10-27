@@ -8,12 +8,30 @@
 
 #include <string>
 
+#include "ProsperoAppPlace.h"
+
 namespace mpcupdate
 {
 // The updater's setup: this build's version and title, the repository, FFmpeg as the transport.
 void Init();
 // The daily check at start: true (and the time noted in <root>/update-check.txt) when the last one is a day old.
 bool DailyCheckDue();
-// "/data/homebrew/<TITLE_ID>/eboot.bin": what opens the new version.
+// What opens the new version: the eboot the console runs (/app0/eboot.bin on the console; else through the mount
+// ShadowMount+ made, else the folder the update went to).
 std::string EbootPath();
+// 1.5: where the app runs from and where an update goes (ProsperoAppPlace.h), found at Init.
+const AppPlace& Place();
+// An update installed: noted (<root>/update-pending.txt) so that the next start can tell whether it runs the new
+// version.
+void NoteInstalled(const std::string& version);
+// At start: an update noted and not yet seen running. ok: this is that version (or newer) and the note is gone; else
+// the note stays for a few starts (shown counts them) and the app says what to do.
+struct AfterUpdate
+{
+	bool pending = false;
+	bool ok = false;
+	std::string want, dir;
+	int shown = 0;
+};
+AfterUpdate CheckAfterUpdate();
 } // namespace mpcupdate

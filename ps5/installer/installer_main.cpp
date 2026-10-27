@@ -9,7 +9,8 @@
 // MediaPlayerClassicPS5-helper.elf (MPCPS5_HELPER_ONLY) is step 2 alone: the app carries it and sends it to the ELF
 // loader itself when no helper answers (after a reboot, for instance).
 //
-// Nothing here writes outside /data/mpcps5 and /data/homebrew/PPSA99015.
+// Nothing here writes outside /data/mpcps5 and the app's folder: /data/homebrew/PPSA99015, or (1.5) the folder
+// ShadowMount+ runs it from, written through its mount /system_ex/app/PPSA99015.
 //
 // SPDX-License-Identifier: MIT
 
@@ -17,10 +18,12 @@
 #include "ProsperoJailbreak.h"
 #include "ProsperoNotify.h"
 #ifndef MPCPS5_HELPER_ONLY
+#include "ProsperoAppPlace.h"
 #include "ProsperoInstall.h"
 #endif
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <unistd.h>
@@ -32,6 +35,15 @@
 namespace
 {
 std::string g_ready_message;
+
+#ifndef MPCPS5_HELPER_ONLY
+// where the payload installs when nothing else runs the app
+std::string DefaultAppDir()
+{
+	const char* env = getenv("MPCPS5_PS5_HOMEBREW");
+	return std::string(env && *env ? env : "/data/homebrew") + "/" MPCPS5_TITLE_ID;
+}
+#endif
 
 void OnReady()
 {
@@ -64,7 +76,11 @@ int main()
 			snprintf(msg, sizeof(msg), "Media Player Classic PS5 %s installed. %s", MPCPS5_PS5_VERSION, open_hint);
 			break;
 		case InstallResult::Updated:
-			snprintf(msg, sizeof(msg), "Media Player Classic PS5 updated to %s. %s", MPCPS5_PS5_VERSION, open_hint);
+			if (!AppInstallPlace().mount.empty() && AppInstallPlace().source != DefaultAppDir())
+				snprintf(msg, sizeof(msg), "Media Player Classic PS5 updated to %s (in %s, the copy ShadowMount+ runs). %s",
+					MPCPS5_PS5_VERSION, AppInstallPlace().source.c_str(), open_hint);
+			else
+				snprintf(msg, sizeof(msg), "Media Player Classic PS5 updated to %s. %s", MPCPS5_PS5_VERSION, open_hint);
 			break;
 		case InstallResult::UpToDate:
 			snprintf(msg, sizeof(msg), "Media Player Classic PS5 %s is ready. %s", MPCPS5_PS5_VERSION, open_hint);
@@ -75,6 +91,11 @@ int main()
 				"as it is. Put the newer payload in your autoload. %s",
 				MPCPS5_PS5_VERSION, open_hint);
 			break;
+		case InstallResult::CantWrite:
+			// 1.5: ShadowMount+ runs the app from an image or a read-only folder: not written, and no second copy made
+			snprintf(msg, sizeof(msg), "%s (This payload is %s; the helper runs.)", AppInstallPlace().reason.c_str(),
+				MPCPS5_PS5_VERSION);
+			break;
 		case InstallResult::Failed:
 			snprintf(msg, sizeof(msg), "Media Player Classic PS5: could not install the app in %s (see %s/logs/installer.log)",
 				AppInstallDir().c_str(), OrbisRoot().c_str());
@@ -83,7 +104,7 @@ int main()
 			snprintf(msg, sizeof(msg), "Media Player Classic PS5: nothing to install");
 			break;
 	}
-	if (installed != InstallResult::NewerInstalled && SyncAppMeta() > 0)
+	if (installed != InstallResult::NewerInstalled && installed != InstallResult::CantWrite && SyncAppMeta() > 0)
 	{
 		const size_t len = strlen(msg);
 		snprintf(msg + len, sizeof(msg) - len, " Home screen art updated (restart the PS5 if it doesn't show).");
