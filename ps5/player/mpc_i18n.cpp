@@ -1151,6 +1151,21 @@ const Entry kTable[] = {
 		"und wieder öffnen. Steht dort noch %s, zeigt ShadowMount+ noch die alten Dateien: ShadowMount+ erneut aus "
 		"deinem Payload Manager starten (es registriert die App neu) oder die PS5 neu starten.\n\nDie Version in den "
 		"App-Informationen des Startbildschirms ändert sich erst, wenn ShadowMount+ die App neu registriert."},
+	{"Media Player Classic PS5 %s is available (you have %s).\n\nThe app can't tell for sure which folder this copy "
+	 "runs from (%s), so it doesn't write an update anywhere. Update it the way you put it there, with the new "
+	 "version's folder (from the release's zip).",
+		"Media Player Classic PS5 %s está disponible (tienes la %s).\n\nLa app no puede saber con seguridad desde qué "
+		"carpeta se ejecuta esta copia (%s), así que no escribe la actualización en ningún sitio. Actualízala como la "
+		"pusiste ahí, con la carpeta de la nueva versión (del zip de la versión).",
+		"O Media Player Classic PS5 %s está disponível (você tem o %s).\n\nO app não consegue saber com certeza de "
+		"qual pasta esta cópia roda (%s), então não grava a atualização em lugar nenhum. Atualize-a do jeito que você a "
+		"colocou lá, com a pasta da nova versão (do zip da versão).",
+		"Media Player Classic PS5 %s est disponible (vous avez la %s).\n\nL'app ne peut pas savoir avec certitude "
+		"depuis quel dossier cette copie fonctionne (%s) : elle n'écrit donc la mise à jour nulle part. Mettez-la à "
+		"jour comme vous l'avez installée, avec le dossier de la nouvelle version (du zip de la version).",
+		"Media Player Classic PS5 %s ist verfügbar (du hast %s).\n\nDie App kann nicht sicher erkennen, aus welchem "
+		"Ordner diese Kopie läuft (%s), und schreibt das Update deshalb nirgendwohin. Aktualisiere sie so, wie du sie "
+		"dort abgelegt hast, mit dem Ordner der neuen Version (aus dem Zip der Version)."},
 	{"Media Player Classic PS5 %s is available (you have %s).\n\nThis copy runs from an image that ShadowMount+ "
 	 "mounted (%s): the app can't write an update into it. Update the image the way you made it, with the new "
 	 "version's folder (from the release's zip).",

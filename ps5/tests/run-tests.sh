@@ -445,7 +445,7 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,%s"browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}%s]}' \
 		"$1" "$1" "$1" $SPORT "$1" $size "$digest" $SPORT "$1" "$sigasset" >"$SRV/latest.json"
 }
-u16run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
+u16run() { MPCPS5_PS5_SHADOWMNT=${SHM-$T/shadowmnt} MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
 release v1.5 01.050.000
@@ -584,7 +584,7 @@ expect "grep -q '\[ui\] message: Media Player Classic PS5 9.9 is available (you 
 expect "! grep -q 'Downloading\|9.9 installed\|GET .*\.zip' $T/root/logs/boot.log && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums" "... nothing downloaded, nothing written"
 # h: a read-only USB folder: the same, in its words
 rm -f $T/root/logs/boot.log
-rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|exfatfs|/dev/da1s1|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
+rc=$(SHM=$T/no-images MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|exfatfs|/dev/da1s1|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
 expect "grep -q \"This copy runs from $I, where the app can't write\" $T/root/logs/boot.log && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums" "a read-only folder: said before downloading, nothing written"
 # i: the payload with ShadowMount+ running the app from that USB folder: it brings that copy up to date (through the
 # mount), not a second one in /data/homebrew; from the image: it says so, writes nothing, and the helper still runs
@@ -595,11 +595,74 @@ MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$MNT" MPCPS5_PS5_ROOT=$T/root MPCPS
 for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $T/inst3.txt 2>/dev/null && break; sleep 0.1; done
 stop16
 expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst3.txt && ! grep -q 'eboot usb old' $U/eboot.bin && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $T/hb2 ]" "the payload: the copy ShadowMount+ runs (a USB folder) updated through the mount, no second copy"
-MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|ufs|/dev/lvd2|ro" MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst4.txt" 2>&1 &
-for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $T/inst4.txt 2>/dev/null && break; sleep 0.1; done
+# the payload with env ($2...) set, its output in $T/$1.txt (until its helper listens)
+inst16() {
+	local out=$T/$1.txt; shift
+	env "$@" MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_PS5_SHADOWMNT=$T/shadowmnt MPCPS5_PS5_USER_APP=$T/userapp MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$out" 2>&1 &
+	for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $out 2>/dev/null && break; sleep 0.1; done
+	stop16
+}
+sums() { ( cd $1 && find . -type f | sort | xargs sha256sum ); }
+ver() { sed -i "s/\"contentVersion\": \"[0-9.]*\"/\"contentVersion\": \"$2\"/" $1/sce_sys/param.json; }
+# ... an image holding a newer version (99, from f) or this one: an autoloaded payload says the app is newer / ready,
+# not "can't be written" at every start; only an older image is said to need updating the way it was made
+IMNT="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|ufs|/dev/lvd2|ro"
+rm -rf $SX/app/PPSA99015 && ln -s $I $SX/app/PPSA99015
+inst16 inst4 MPCPS5_HOST_MOUNTS="$IMNT"
+expect "grep -q 'a newer version is installed; this payload (1.5) left it as it is' $T/inst4.txt && ! grep -q 'can.t be written' $T/inst4.txt && grep -q 'listening on 127.0.0.1' $T/inst4.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "the payload and an image with a newer version: says the app is newer, writes nothing, the helper runs"
+ver $I 01.050.000; sums $I >$T/img.sums
+inst16 inst5 MPCPS5_HOST_MOUNTS="$IMNT"
+expect "grep -q 'Media Player Classic PS5 1.5 is ready' $T/inst5.txt && ! grep -q 'can.t be written' $T/inst5.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "... with this version: ready, nothing written"
+ver $I 01.040.000; sums $I >$T/img.sums
+inst16 inst6 MPCPS5_HOST_MOUNTS="$IMNT"
+expect "grep -q 'runs from an image that ShadowMount+ mounted ($I): an update can.t be written into it' $T/inst6.txt && grep -q 'listening on 127.0.0.1' $T/inst6.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "... with an older version: says it can't be written there, writes nothing, the helper runs"
+# j: nothing written where it isn't sure to be the app the console runs:
+# j1: a folder whose param.json names another title (mounted there all the same): not written, by the payload or
+# the app's Check for updates
+O=$T/other/PPSA99015
+rm -rf $T/other $SX/app/PPSA99015 && mkdir -p $T/other && cp -r $U $O && ln -s $O $SX/app/PPSA99015
+sed -i 's/"titleId": "PPSA99015"/"titleId": "PPSA00001"/' $O/sce_sys/param.json; ver $O 01.040.000; sums $O >$T/o.sums
+inst16 inst7 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$O|rw"
+expect "grep -q 'mounted on $SX/app/PPSA99015 can.t be identified for sure' $T/inst7.txt && sums $O | cmp -s - $T/o.sums && [ ! -e $T/hb2 ]" "a mounted folder whose param.json names another title: the payload writes nothing (no second copy)"
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+sleep 0.5
+release v9.9 99.000.000
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$O|rw" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
 stop16
-expect "grep -q 'runs from an image that ShadowMount+ mounted ($I): an update can.t be written into it' $T/inst4.txt && grep -q 'listening on 127.0.0.1' $T/inst4.txt && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "the payload and an image: says so, writes nothing, the helper runs"
-expect "! grep -q 'runtime error\|AddressSanitizer' $T/inst3.txt $T/inst4.txt" "the payload: no sanitizer reports"
+expect "grep -q \"The app can't tell for sure which folder this copy runs from\" $T/root/logs/boot.log && ! grep -q 'Downloading\|GET .*\.zip' $T/root/logs/boot.log && sums $O | cmp -s - $T/o.sums" "... the app: Check for updates says so before downloading, nothing written"
+# j2: a backport's unionfs over ShadowMount+'s nullfs mount: not written through it; the folder beneath is
+rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015; ver $U 01.040.000
+inst16 inst8 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$U|rw;$T/usb0|exfatfs|/dev/da0s1|rw;$SX/app/PPSA99015|unionfs|$T/backport|rw"
+expect "grep -q \"$SX/app/PPSA99015 is a unionfs mount over a nullfs mount of $U (on $T/usb0, exfatfs, from /dev/da0s1): files go through $U\" $T/inst8.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $T/hb2 ]" "a unionfs layer over the mount: the folder beneath written directly, not through the layer"
+# j3: a source name the system cut at 87 bytes: only through the mount; the cut path never made
+L=$T/long/$(printf 'x%.0s' $(seq 1 $((91 - ${#T} - 16))))/PPSA99015
+rm -rf $T/long $SX/app/PPSA99015 && mkdir -p $(dirname $L) && cp -r $U $L && ln -s $L $SX/app/PPSA99015; ver $L 01.040.000
+inst16 inst9 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$L|rw"
+expect "[ \${#L} = 91 ] && grep -q 'its name cut short by the system: \"${L:0:87}\"); written only through the mount' $T/inst9.txt && grep -q 'files go through $SX/app/PPSA99015' $T/inst9.txt && grep -q '\"contentVersion\": \"01.050.000\"' $L/sce_sys/param.json && [ ! -e ${L:0:87} ] && [ ! -e $T/hb2 ]" "a source name cut short (87 bytes): written only through the mount, the cut path not made"
+# j4: statfs fails: the mount table (getfsstat) says what is mounted
+rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015; ver $U 01.040.000
+inst16 inst10 MPCPS5_HOST_NO_STATFS=1 MPCPS5_HOST_MOUNTS="$MNT"
+expect "grep -q \"$SX/app/PPSA99015 is a nullfs mount of $U (on $T/usb0, exfatfs, from /dev/da0s1): files go through $SX/app/PPSA99015\" $T/inst10.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json" "statfs failing: the mount table finds the mount"
+# j5: neither answering while the mount point is there: nothing written, no second copy
+ver $U 01.040.000; sums $U >$T/u.sums
+inst16 inst11 MPCPS5_HOST_NO_STATFS=1 MPCPS5_HOST_NO_GETFSSTAT=1 MPCPS5_HOST_MOUNTS="$MNT"
+expect "grep -q 'what is mounted on $SX/app/PPSA99015 can.t be read' $T/inst11.txt && sums $U | cmp -s - $T/u.sums && [ ! -e $T/hb2 ]" "neither statfs nor the mount table answering: nothing written, no second copy"
+# k: the payload before ShadowMount+ has mounted the app (autoload order): the folder from ShadowMount+'s link
+# /user/app/PPSA99015/mount.lnk is updated, no second copy in /data/homebrew; a link to a folder not there: nothing
+rm -rf $SX/app/PPSA99015 $T/userapp && mkdir -p $T/userapp/PPSA99015 && echo "$U" >$T/userapp/PPSA99015/mount.lnk
+inst16 inst12 MPCPS5_HOST_MOUNTS="$T/usb0|exfatfs|/dev/da0s1|rw"
+expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst12.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $T/hb2 ]" "no mount yet: the folder of ShadowMount+'s mount.lnk updated, no second copy"
+echo "$T/gone/PPSA99015" >$T/userapp/PPSA99015/mount.lnk
+inst16 inst13
+expect "grep -q 'runs the app from $T/gone/PPSA99015, which isn.t there now' $T/inst13.txt && grep -q 'listening on 127.0.0.1' $T/inst13.txt && [ ! -e $T/hb2 ] && [ ! -e $T/gone ]" "... its folder not there (a drive not connected yet): nothing written, no second copy"
+rm -rf $T/userapp
+# l: extended storage on an LVD device but writable: not taken for an image; written
+mkdir -p $SX/app && ln -s $U $SX/app/PPSA99015; ver $U 01.040.000
+inst16 inst14 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$U|rw;$T/usb0|ufs|/dev/lvd5|rw"
+expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst14.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json" "a writable folder on an LVD device: updated (not taken for an image)"
+expect "! grep -q 'runtime error\|AddressSanitizer' $T/inst*.txt" "the payload: no sanitizer reports"
+nosan "$T"
 fi
 
 if want 17; then
@@ -1418,6 +1481,46 @@ rc=$(run "$T" "0:0;60:$CROSS;62:$CROSS,0,128;100:$CROSS,128,128;102:0" "40:cmd o
 expect "[ $rc = 0 ] && log $T '\[ui\] \"Options\" moved to 0,' && grep -q '^OptionsX=0$' $T/root/mpc-hc.ini" "dragged left by its title bar: it stops at the screen's edge (kept in mpc-hc.ini)"
 expect "$REGION $T/dump/flip00110.ppm 0 200 40 800 240 240 240 6 2000 >/dev/null && $REGION $T/dump/flip00180.ppm 0 200 40 800 240 240 240 6 2000 >/dev/null" "... drawn there, and opened there again"
 expect "grep -q '^ShowOSD=0$' $T/root/mpc-hc.ini" "... its controls work where it is (Show OSD clicked off, OK)"
+nosan "$T"
+# f: the touchpad pressed while the pointer is hidden (where it was hidden: on File): the first press only shows it;
+# the next one clicks
+TP="0,128,128,128,128,900,500"; TPD="100000,128,128,128,128,900,500"
+T=$(newroot t28f)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0;300:$TP;303:$TPD;306:$TP;309:0;340:$TP;343:$TPD;346:$TP;349:0" "30:mouse 25,50;390:quit" "330,370" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && ! $REGION $T/dump/flip00330.ppm 10 70 240 580 240 240 240 6 50000 >/dev/null" "the pointer hidden: a touchpad press only shows it (File, where it was hidden, not clicked)"
+expect "$REGION $T/dump/flip00370.ppm 10 70 240 580 240 240 240 6 50000 >/dev/null" "... the next press clicks there: the File menu"
+nosan "$T"
+# g: a finger rolling a little as it presses the touchpad (28 units, quickly) doesn't move the pointer off a small
+# button (Options' OK: closed); a longer stroke while pressed still drags (Options by its title bar)
+T=$(newroot t28g)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0;60:$TP;63:$TPD;64:100000,128,128,128,128,900,528;67:0,128,128,128,128,900,528;70:0" "40:cmd options;50:mouse 1132,884;100:quit" "55,90" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && $REGION $T/dump/flip00055.ppm 500 600 700 800 255 255 255 6 30000 >/dev/null && ! $REGION $T/dump/flip00090.ppm 500 600 700 800 255 255 255 6 30000 >/dev/null" "a touchpad click on OK with the finger rolling: OK clicked (Options closed)"
+T=$(newroot t28g2)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+P="0:0;60:$TP;63:$TPD"; for i in $(seq 1 10); do P="$P;$((63 + i)):100000,128,128,128,128,$((900 + 20 * i)),$((500 + 10 * i))"; done
+rc=$(run "$T" "$P;80:0,128,128,128,128,1100,600;82:0" "40:cmd options;50:mouse 700,187;100:key escape;110:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && log $T '\[ui\] \"Options\" moved to'" "... a stroke while pressed on its title bar drags Options"
+nosan "$T"
+# h: a window opened over Options while its title bar is held (About): Options doesn't stay stuck to the pointer
+T=$(newroot t28h)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0;60:$CROSS;90:0;100:0,255,128;115:0" "40:cmd options;50:mouse 700,187;70:cmd about;95:key escape;130:click;150:quit" "125" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && log $T 'cmd about' && $REGION $T/dump/flip00125.ppm 500 600 700 800 255 255 255 6 30000 >/dev/null && ! log $T '\[ui\] \"Options\" moved to'" "a window opened while Options' title bar is held: Options doesn't follow the pointer afterwards"
+nosan "$T"
+# i: Options (given Options: Keys) held while a window opens (About): no menu bar over it
+T=$(newroot t28i)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeyOptions=OptionsKeys"
+rc=$(run "$T" "0:0;40:$OPTIONS;140:0" "50:cmd about;160:key escape;170:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && log $T 'cmd about' && ! log $T 'Options held: the menu bar'" "Options held while a window opens: no menu bar over it"
+nosan "$T"
+# j: Faster from Stopped plays (MPC-HC's SetPlayingRate: not running, it plays)
+T=$(newroot t28j)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "40:cmd stop;50:state;60:cmd faster;70:state;80:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 4 ] && [ \"\$(field $T 2 1)\" = 2 ] && log $T '\[osd\] Speed: 2.00x'" "Faster when stopped: it plays, at 2x"
 nosan "$T"
 fi
 

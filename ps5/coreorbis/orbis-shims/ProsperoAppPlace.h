@@ -20,12 +20,25 @@ struct AppPlace
 	std::string dir;    // where the files are written: the mount, else the source (whichever accepts a file)
 	std::string fs;     // the source's file system ("ufs", "exfatfs", "nullfs"...), "" when unknown
 	bool writable = true;
-	bool image = false;  // the source is inside an image mounted by ShadowMount+ (or another read-only image)
+	bool image = false;  // the source is inside an image mounted by ShadowMount+ (under /mnt/shadowmnt)
+	bool unsure = false; // the folder couldn't be identified for sure (or isn't there): nothing is written anywhere
+	bool via_link = false; // no mount yet: the folder from ShadowMount+'s link (/user/app/<TITLE_ID>/mount.lnk)
 	std::string reason; // !writable: why, a sentence for the user (English, through T())
 	std::string log;    // what was found, for boot.log
 };
 
+// The rules (an update is never written where it isn't sure to be the app the console runs):
+// - the mount's top layer must be nullfs (through it the files are written); under another layer (a backport's
+//   unionfs) the nullfs beneath gives the folder, written directly, never through the layer on top;
+// - the source named by the mount (f_mntfromname, cut at 87 bytes by the system) is used only when it is whole,
+//   its sce_sys/param.json names the app and its eboot.bin is the one the mount shows; otherwise only the mount;
+// - every folder written has a sce_sys/param.json naming the app;
+// - statfs(2) failing: getfsstat(2); neither answering while the mount point is there: nothing written;
+// - no mount (a payload autoloaded before ShadowMount+ has mounted the app): ShadowMount+'s link
+//   /user/app/<TITLE_ID>/mount.lnk names the folder (not there: nothing written, no second copy).
 // default_dir: /data/homebrew/<TITLE_ID> (where the payload installs when nothing else runs the app).
-// Host tests: MPCPS5_PS5_SYSTEM_EX stands for /system_ex, MPCPS5_HOST_MOUNTS for the mount table
-// ("<mount point>|<fs type>|<from>|ro or rw;..."; a path takes the longest mount point it is in).
+// Host tests: MPCPS5_PS5_SYSTEM_EX stands for /system_ex, MPCPS5_PS5_USER_APP for /user/app, MPCPS5_PS5_SHADOWMNT
+// for /mnt/shadowmnt, MPCPS5_HOST_MOUNTS for
+// the mount table ("<mount point>|<fs type>|<from>|ro or rw;..." in mount order; a path takes the longest mount point
+// it is in, the last of a point's mounts), MPCPS5_HOST_NO_STATFS / MPCPS5_HOST_NO_GETFSSTAT make those fail.
 AppPlace FindAppPlace(const std::string& title_id, const std::string& default_dir);

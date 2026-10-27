@@ -76,7 +76,8 @@ int main()
 			snprintf(msg, sizeof(msg), "Media Player Classic PS5 %s installed. %s", MPCPS5_PS5_VERSION, open_hint);
 			break;
 		case InstallResult::Updated:
-			if (!AppInstallPlace().mount.empty() && AppInstallPlace().source != DefaultAppDir())
+			if ((!AppInstallPlace().mount.empty() || AppInstallPlace().via_link) &&
+				AppInstallPlace().source != DefaultAppDir())
 				snprintf(msg, sizeof(msg), "Media Player Classic PS5 updated to %s (in %s, the copy ShadowMount+ runs). %s",
 					MPCPS5_PS5_VERSION, AppInstallPlace().source.c_str(), open_hint);
 			else
@@ -87,9 +88,9 @@ int main()
 			break;
 		case InstallResult::NewerInstalled:
 			snprintf(msg, sizeof(msg),
-				"Media Player Classic PS5: a newer version is installed (updated from the app); this payload (%s) left it "
-				"as it is. Put the newer payload in your autoload. %s",
-				MPCPS5_PS5_VERSION, open_hint);
+				"Media Player Classic PS5: a newer version is installed%s; this payload (%s) left it as it is. Put the "
+				"newer payload in your autoload. %s",
+				AppInstallPlace().writable ? " (updated from the app)" : "", MPCPS5_PS5_VERSION, open_hint);
 			break;
 		case InstallResult::CantWrite:
 			// 1.5: ShadowMount+ runs the app from an image or a read-only folder: not written, and no second copy made

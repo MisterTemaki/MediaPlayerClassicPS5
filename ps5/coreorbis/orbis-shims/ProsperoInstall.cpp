@@ -121,7 +121,10 @@ std::string ContentVersion(const std::string& param)
 
 std::string InstalledVersion()
 {
-	FILE* f = fopen((AppInstallDir() + "/sce_sys/param.json").c_str(), "rb");
+	// the app the console runs: through the mount when there is one, else its folder
+	const AppPlace& place = AppInstallPlace();
+	const std::string dir = !place.mount.empty() ? place.mount : place.source;
+	FILE* f = fopen((dir + "/sce_sys/param.json").c_str(), "rb");
 	if (!f)
 		return "";
 	std::string s(65536, '\0');
@@ -173,6 +176,32 @@ InstallResult InstallApp()
 	const AppPlace& place = AppInstallPlace();
 	if (!place.writable)
 	{
+		// an autoloaded payload and an image (or a read-only folder) already holding this version or a newer one:
+		// nothing to say at every start; only a newer payload is something the user can't put there
+		std::string mine;
+		for (const EmbeddedAppFile* f = files; f->rel; f++)
+		{
+			std::string param;
+			if (strcmp(f->rel, "sce_sys/param.json") == 0 && EmbeddedContents(f, param))
+				mine = ContentVersion(param);
+		}
+		const std::string there = place.unsure ? "" : InstalledVersion();
+		if (!mine.empty() && !there.empty())
+		{
+			const int c = update::CompareVersions(there, mine);
+			if (c > 0)
+			{
+				OrbisLog("[install] %s holds version %s, newer than this payload's %s: left as it is (%s)",
+					place.source.c_str(), there.c_str(), mine.c_str(), place.log.c_str());
+				return InstallResult::NewerInstalled;
+			}
+			if (c == 0)
+			{
+				OrbisLog("[install] %s holds this version (%s): nothing to write (%s)", place.source.c_str(),
+					there.c_str(), place.log.c_str());
+				return InstallResult::UpToDate;
+			}
+		}
 		OrbisLog("[install] not installed: %s", place.reason.c_str());
 		return InstallResult::CantWrite;
 	}
@@ -319,6 +348,8 @@ int SyncAppMeta()
 	for (const char* old : {"pic0.png", "pic1.png"})
 		for (const std::string& d : {dir, AppInstallDir() + "/sce_sys"})
 		{
+			if (d != dir && !AppInstallPlace().writable)
+				continue; // the app's folder can't be written (an image...): only our /user/appmeta copy
 			const std::string path = d + "/" + old;
 			if (OrbisIsFile(path) && unlink(path.c_str()) == 0)
 			{

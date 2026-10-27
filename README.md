@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 430 host tests
+> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 454 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -37,8 +37,9 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
   Playlist on/off, Next aspect ratio. By default the right stick left / right jumps 1 s back / forward, so L2 / R2 can
   be the speed, as he suggested. Options given another action still opens the menu bar when held half a second.
 - **The DualSense touchpad is the pointer** (as DS4Windows makes it on a PC): a finger moves it (relative, as a laptop's
-  touchpad, faster for a quick stroke), pressing the touchpad clicks (with two fingers on it: a right-click). On by
-  default; off in Options > Player > Keys.
+  touchpad, faster for a quick stroke), pressing the touchpad clicks (with two fingers on it: a right-click); while
+  the pointer is hidden a press only shows it, and a finger rolling a little as it presses doesn't move it off what it
+  is on (a longer stroke while pressed drags). On by default; off in Options > Player > Keys.
 - **Windows can be moved**: drag a dialog -- Options, Properties, Go To, Open... -- by its title bar with the pointer
   (Cross or the touchpad's click held), as on Windows; it stays on the screen, and Options opens where it was left
   (kept in `mpc-hc.ini`) and at the page it was left on, as MPC-HC. Handy for tuning the subtitles or the picture with
@@ -48,7 +49,10 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
   folder than `/data/homebrew/PPSA99015` (a USB drive's, an image...): the update now goes into the folder the console
   really runs, written through that mount; an image or a read-only folder is said before anything is downloaded; the
   restart opens the eboot the console runs, and the next start checks the version and says what to do if it is still
-  the old one. See [Updates](#updates).
+  the old one. See [Updates](#updates). **Going from 1.4 to 1.5** the update is still installed by 1.4's updater,
+  which writes `/data/homebrew/PPSA99015`: if ShadowMount+ runs your copy from another folder (a USB drive, an
+  image...), send the 1.5 payload once instead (or close the app, uninstall it from the home screen and run
+  ShadowMount+ again, as Sulfurico-One64 did). From 1.5 on, updates go to the right folder.
 - **Fixed: a DVD-Video seek back early in a title** (in 1.4): seeking back to the first second or so went on from where
   it was. The first audio packet after a seek on a DVD has no timestamp, and the position was taken from before the
   seek; it now waits for one that has.
@@ -213,7 +217,8 @@ MPC-HC 1.7.13 maximized on Windows 10, at 150 % scale (Options > Miscellaneous c
 
 The DualSense is MPC-HC's mouse and keyboard. Move the **left stick** -- or a finger on the **touchpad** (1.5) --
 and the pointer appears: then **Cross** (or pressing the touchpad) clicks and **Square** (or pressing the touchpad
-with two fingers) right-clicks (the context menu), as with a mouse; it hides after 3 seconds still. Holding Cross
+with two fingers) right-clicks (the context menu), as with a mouse; it hides after 3 seconds still (then pressing
+the touchpad only shows it again, so a click never lands where it was hidden). Holding Cross
 (or the touchpad pressed) on a window's title bar drags the window (1.5). Without the pointer the buttons are keys:
 
 | Button | In the window (by default: Options > Player > Keys) | In a menu / dialog |
@@ -240,7 +245,8 @@ jump back / forward 5 s, 20 s or 1 s, previous / next chapter or file, volume up
 leave full screen, Go To..., the context menu, the menu bar, subtitle delay - / + (by Options > Subtitles' Delay
 interval), next subtitle track (after the last one: off), next audio track, audio delay - / + (10 ms), display
 statistics, and (1.5) **faster / slower / normal speed** (MPC-HC's Increase / Decrease / Reset Rate: twice / half as
-fast, from 0.125x to 8x, the sound keeping its pitch; under 0.125x it pauses, as MPC-HC), frame step, Open File...,
+fast, from 0.125x to 8x, the sound keeping its pitch; paused or stopped it plays, under 0.125x it pauses, as
+MPC-HC), frame step, Open File...,
 playlist on/off, next aspect ratio, **Options...** (at the page it was left on) or **Options at a page** (Player,
 Keys, Playback, Output, Fullscreen, Subtitles, Default Style, Audio Switcher, Miscellaneous), or nothing. The
 touchpad as the pointer is turned off and on on the same page. **Default** puts the table above back; the choice is kept in `mpc-hc.ini` (`[Keys]`). The menus show the
@@ -494,12 +500,24 @@ Honest limits:
   ([#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1)). Now the app (and the payload) find the
   mount's source and update **that** folder, writing **through the mount** (`/system_ex/app/PPSA99015/...`, so the
   mounted view sees the new files at once; the folder itself if the mount won't take a file); `boot.log` says which
-  (`[update] /system_ex/app/PPSA99015 is a nullfs mount of ...`). With no mount, `/data/homebrew/PPSA99015` as before.
+  (`[update] /system_ex/app/PPSA99015 is a nullfs mount of ...`). Nothing is written where the app isn't sure it is
+  the copy the console runs: every folder written has a `sce_sys/param.json` naming PPSA99015; the mount's source is
+  used only when its name is whole (the system cuts it at 87 characters) and its `eboot.bin` is the one the mount
+  shows, otherwise the files go only through the mount; another layer on top of the mount (a backport's unionfs) is
+  never written into -- the folder beneath is; and when the mount can't be read at all, nothing is written.
+- **No mount yet** (the payload autoloaded before ShadowMount+ has mounted the app): the folder ShadowMount+ last
+  mounted is in its link `/user/app/PPSA99015/mount.lnk`; the payload updates that folder (if it names PPSA99015), so
+  **no second copy** is made in `/data/homebrew`. If that folder isn't there (a drive not connected yet) nothing is
+  written: send the payload again once it is. With no mount and no link, `/data/homebrew/PPSA99015` as before.
 - **An image or a read-only folder** (an `.ffpkg` / `.exfat` image ShadowMount+ mounted, a read-only drive): the app
   can't write an update into it. Check for updates says so **before downloading anything**, and the payload leaves it
-  alone too (its notification says so; the helper still runs). Update the image or folder the way you made it, with
+  alone too: when it holds the payload's version or a newer one the payload just says it is ready (or newer), so an
+  autoloaded payload doesn't nag at every start; when the payload is newer its notification says it can't be written
+  there (the helper still runs either way). Update the image or folder the way you made it, with
   the new version's folder from the release's zip.
-- **After the restart.** Restart now opens the eboot the console runs (`/app0/eboot.bin`). The next start compares the
+- **After the restart.** Restart now opens the eboot the console runs: `/app0/eboot.bin` when the app sees its own
+  `/app0` (after the jailbreak the app's root is usually the console's real `/`, where there is none), else the mount's
+  (`/system_ex/app/PPSA99015/eboot.bin`), else the folder's. The next start compares the
   running version with the one installed: if it is still the old one, the app says what to do -- close the app
   completely (Options on its card on the home screen, Close Application) and open it again; if it is still old,
   run ShadowMount+ again from the Payload Manager (it registers the app again) or restart the PS5. Sulfurico-One64's
@@ -508,8 +526,9 @@ Honest limits:
 - **The version on the home screen** (the app's information there) comes from the registration ShadowMount+ makes
   (the console's app database): it only changes when ShadowMount+ registers the app again. That is cosmetic; the app
   itself says its version in Help > About. The app doesn't touch that database.
-- Only a PS5 can confirm the ShadowMount+ part: the mount table, writing through `/system_ex/app`, and Restart's
-  `/app0/eboot.bin` have been checked with a faked mount table on the host, not on a console yet.
+- Only a PS5 can confirm the ShadowMount+ part: the mount table (statfs, getfsstat), writing through `/system_ex/app`,
+  the backport layer, `mount.lnk` and Restart's eboot have been checked with a faked mount table on the host, not on a
+  console yet.
 - **Your autoload:** the updated app is newer than the ELF in your autoload. The older ELF sees that and leaves the
   app alone (its notification says so). Put the new ELF in your autoload when you can.
 

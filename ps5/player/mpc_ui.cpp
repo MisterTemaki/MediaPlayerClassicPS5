@@ -50,6 +50,8 @@ const BtnKey kButtons[] = {
 	{SCE_PAD_BUTTON_R3, Key::R3, false},
 };
 constexpr double kCursorHide = 3.0;
+// the touchpad (1920 x 1080 units on the DualSense): how far a finger goes during a click before the pointer follows
+constexpr double kPressSlop = 30;
 
 double Axis(uint8_t v)
 {
@@ -101,6 +103,7 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 	static double last = now;
 	const double dt = std::min(0.05, now - last);
 	last = now;
+	const bool cursor_was_shown = CursorVisible();
 
 	// the pointer: the left stick, faster the further it is pushed
 	const double ax = Axis(p.lx), ay = Axis(p.ly);
@@ -123,7 +126,13 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 	if (touchpad_ && p.touches > 0)
 	{
 		const double fx = p.touch_x[0], fy = p.touch_y[0];
-		if (touching_ && p.touch_id[0] == touch_id_)
+		if (touch_click_ && press_still_)
+		{
+			const double px = fx - press_x_, py = fy - press_y_;
+			if (px * px + py * py >= kPressSlop * kPressSlop)
+				press_still_ = false; // a drag: the pointer follows from here
+		}
+		if (touching_ && p.touch_id[0] == touch_id_ && !(touch_click_ && press_still_))
 		{
 			const double dx = fx - touch_x_, dy = fy - touch_y_;
 			const double dist = std::sqrt(dx * dx + dy * dy);
@@ -148,12 +157,22 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 	}
 	else
 		touching_ = false;
-	// the touchpad's click: a left click where the pointer is (two fingers on it: a right click); it shows the pointer
+	// the touchpad's click: a left click where the pointer is (two fingers on it: a right click). With the pointer
+	// hidden it only shows it: where it was hidden may be anything by now (a title bar's close box...)
 	{
 		const bool down = (cur & SCE_PAD_BUTTON_TOUCH_PAD) != 0 && touchpad_;
-		if (down && !touch_click_)
+		if (down && !touch_click_ && !cursor_was_shown)
+		{
+			touch_click_ = 3;
+			cursor_t_ = now;
+			input_t_ = now;
+		}
+		else if (down && !touch_click_)
 		{
 			touch_click_ = p.touches >= 2 ? 2 : 1;
+			press_still_ = p.touches > 0;
+			press_x_ = p.touch_x[0];
+			press_y_ = p.touch_y[0];
 			cursor_t_ = now;
 			input_t_ = now;
 			InputEvent e{touch_click_ == 2 ? InputEvent::RButtonDown : InputEvent::LButtonDown};
@@ -163,11 +182,15 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 		}
 		else if (!down && touch_click_)
 		{
-			InputEvent e{touch_click_ == 2 ? InputEvent::RButtonUp : InputEvent::LButtonUp};
-			e.x = int(cx_);
-			e.y = int(cy_);
-			out.push_back(e);
+			if (touch_click_ != 3)
+			{
+				InputEvent e{touch_click_ == 2 ? InputEvent::RButtonUp : InputEvent::LButtonUp};
+				e.x = int(cx_);
+				e.y = int(cy_);
+				out.push_back(e);
+			}
 			touch_click_ = 0;
+			press_still_ = false;
 			cursor_t_ = now;
 		}
 	}
@@ -1327,22 +1350,26 @@ void Dialog::MoveBy(int dx, int dy)
 	OnMove(dx, dy);
 }
 
-void Dialog::KeepOnScreen(const CRect& screen)
+void Dialog::CancelPointer()
 {
-	int dx = 0, dy = 0;
-	if (rect.right > screen.right)
-		dx = screen.right - rect.right;
-	if (rect.left + dx < screen.left)
-		dx = screen.left - rect.left;
-	if (rect.bottom > screen.bottom)
-		dy = screen.bottom - rect.bottom;
-	if (rect.top + dy < screen.top)
-		dy = screen.top - rect.top;
-	if (dx || dy)
+	if (moving_)
 	{
-		MoveBy(dx, dy);
-		OnMoveDone();
+		moving_ = false;
+		if (moved_x_ || moved_y_)
+		{
+			OrbisLog("[ui] \"%s\" moved to %d,%d", title.c_str(), rect.left, rect.top);
+			OnMoveDone();
+		}
 	}
+	close_pressed_ = false;
+	if (dragging_)
+	{
+		dragging_->OnRelease();
+		dragging_ = nullptr;
+	}
+	for (auto& c : controls)
+		if (Button* b = dynamic_cast<Button*>(c.get()))
+			b->pressed = false;
 }
 
 void Dialog::Paint(CDC& dc)
@@ -1648,11 +1675,15 @@ void WindowManager::Push(Dialog* d)
 		else
 			d->NextFocus(1);
 	}
+	if (!dialogs_.empty())
+		dialogs_.back()->CancelPointer();
 	dialogs_.emplace_back(d);
 }
 
 void WindowManager::PushPopup(Popup* p)
 {
+	if (!dialogs_.empty())
+		dialogs_.back()->CancelPointer();
 	popups_.emplace_back(p);
 }
 

@@ -2074,7 +2074,7 @@ void MainFrame::Command(int id)
 		case ID_PLAY_RESETRATE:
 		{
 			// CMainFrame::OnPlayChangeRate / SetPlayingRate (a file, MPC-HC's default "auto" step): twice / half as fast;
-			// under 0.125x it pauses instead; Reset Rate: 1x. Playing (it was paused): it plays. The sound keeps its pitch
+			// under 0.125x it pauses instead; Reset Rate: 1x. Paused or stopped: it plays. The sound keeps its pitch
 			// (FFmpeg's atempo). The fastest here: 8x (the decoders' limit on the console)
 			if (!loaded)
 				break;
@@ -2086,7 +2086,8 @@ void MainFrame::Command(int id)
 						Command(ID_PLAY_PAUSE);
 					break;
 				}
-				if (player_.State() == PlayState::Paused)
+				// as MPC-HC's SetPlayingRate: not running (paused, stopped), it plays
+				if (player_.State() == PlayState::Paused || player_.State() == PlayState::Stopped)
 					Command(ID_PLAY_PLAY);
 				rate_ = std::min(8.0, want);
 				player_.SetRate(rate_);
@@ -2352,7 +2353,13 @@ void MainFrame::OfferUpdate(const update::Status& st)
 	if (!place.writable)
 	{
 		OrbisLog("[update] %s is available, but it can't be installed here: %s", st.latest.c_str(), place.reason.c_str());
-		if (place.image)
+		if (place.unsure)
+			MessageBox(Fmt(T("Media Player Classic PS5 %s is available (you have %s).\n\nThe app can't tell for sure "
+							 "which folder this copy runs from (%s), so it doesn't write an update anywhere. Update it the "
+							 "way you put it there, with the new version's folder (from the release's zip)."),
+						   st.latest.c_str(), MPCPS5_PS5_VERSION, place.source.c_str()),
+				T("Check for updates"), MB_OK, 2);
+		else if (place.image)
 			MessageBox(Fmt(T("Media Player Classic PS5 %s is available (you have %s).\n\nThis copy runs from an image "
 							 "that ShadowMount+ mounted (%s): the app can't write an update into it. Update the image the "
 							 "way you made it, with the new version's folder (from the release's zip)."),
@@ -2848,6 +2855,9 @@ void MainFrame::TickOptionsButton()
 		if (NowSeconds() - options_down_ >= 0.5)
 		{
 			options_down_ = 0;
+			// a window opened meanwhile (a message...): the menu bar doesn't go over it
+			if (WindowManager::Get().HasModal())
+				return;
 			OrbisLog("[ui] Options held: the menu bar");
 			OpenMenuBar(0, true);
 		}

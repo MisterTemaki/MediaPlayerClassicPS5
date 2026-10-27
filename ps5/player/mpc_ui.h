@@ -105,7 +105,11 @@ private:
 	bool touching_ = false; // a finger followed (its id and where it was)
 	uint8_t touch_id_ = 0;
 	double touch_x_ = 0, touch_y_ = 0;
-	int touch_click_ = 0; // 1 left, 2 right: the touchpad's click held
+	int touch_click_ = 0; // 1 left, 2 right: the touchpad's click held; 3: a press that only showed the pointer
+	// a finger rolling as it presses doesn't move the pointer (as a laptop's touchpad): until it has gone
+	// kPressSlop touch units from where it was at the press
+	bool press_still_ = false;
+	double press_x_ = 0, press_y_ = 0;
 };
 
 void DrawCursor(CDC& dc, int x, int y);
@@ -365,8 +369,8 @@ public:
 	// 1.5: dragged by its title bar (the pointer, Cross or the touchpad's click held), as on Windows: the window and its
 	// controls move by (dx, dy); OnMove moves a dialog's places of its own, OnMoveDone says where it ended (to remember)
 	void MoveBy(int dx, int dy);
-	// moved so that it is whole on the screen (as far as it fits)
-	void KeepOnScreen(const CRect& screen);
+	// another window opened over this one between a press and its release: the release won't come here
+	void CancelPointer();
 	virtual void OnMove(int dx, int dy) {}
 	virtual void OnMoveDone() {}
 	bool Moving() const { return moving_; }
