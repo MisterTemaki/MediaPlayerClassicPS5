@@ -1217,6 +1217,18 @@ ini "$T" "LastDir=disc://cd0"
 rc=$(MPCPS5_HOST_DISC=$WORK/no-disc.iso run "$T" "0:0" "30:cmd quickopen;50:key escape;60:open dvd://cd0;90:key enter;100:quit" "")
 expect "[ $rc = 0 ] && log $T '\[ui\] file browser at disc://cd0: No disc' && log $T '\[ui\] message: Failed to open \"cd0\":' && log $T '\[player\] failed: No disc'" "an empty drive: the Open dialog says No disc; playing it: No disc"
 nosan "$T"
+# h: an early seek back (0.5 s, a second in): a DVD title's first audio packet after the seek has no timestamp; the
+# clock went back to where it was before the seek (1.5 s). The same on a Blu-ray title and a file
+for m in dvd bd file; do
+T=$(newroot t25h-$m)
+if [ $m = file ]; then
+	rc=$(run "$T" "0:0" "30:open $MEDIA/chapters.mkv;90:state;92:seek 0.5;93:state;130:state;140:quit" "")
+else
+	rc=$(MPCPS5_HOST_DISC=$MEDIA/$m.iso run "$T" "0:0" "30:cmd disc0;90:state;92:seek 0.5;93:state;130:state;140:quit" "")
+fi
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && near \$(field $T 2 2) 0.5 0.3 && near \$(field $T 3 2) \$(at $T 0.5 92 130) 0.5" "$m: a seek back to 0.5 s a second in: it plays on from 0.5 s"
+nosan "$T"
+done
 fi
 
 if want 26; then

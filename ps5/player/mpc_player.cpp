@@ -1447,6 +1447,7 @@ struct Player::Impl
 		int dec_serial = -1;
 		double out_pos = 0; // stream time at the end of what has been pushed
 		bool have_pos = false;
+		int nopts_drop = 0; // frames without a timestamp dropped before the first timed one
 		norm_factor = -1; // Normalize starts again at the max (a file, another track)
 		while (!quit && !a_stop)
 		{
@@ -1467,6 +1468,7 @@ struct Player::Impl
 				avfilter_graph_free(&agraph);
 				dec_serial = qp.serial;
 				have_pos = false;
+				nopts_drop = 0;
 				norm_factor = -1; // a seek: as MPC-HC's flush / new segment
 			}
 			const int sr = avcodec_send_packet(adec, qp.pkt);
@@ -1485,6 +1487,19 @@ struct Player::Impl
 				if (rr < 0)
 					break;
 				AVStream* st = ic->streams[astream];
+				if (frame->pts == AV_NOPTS_VALUE && !have_pos)
+				{
+					// After a seek out_pos still holds the position before it: a first
+					// frame without a timestamp (a DVD title's first AC-3 packet after a
+					// seek has none) would set the clock back to that position. Wait for
+					// a timed frame; a stream with no timestamps starts at the clock.
+					if (++nopts_drop <= 32)
+					{
+						av_frame_unref(frame);
+						continue;
+					}
+					out_pos = clock.Get();
+				}
 				double pts = frame->pts != AV_NOPTS_VALUE ? frame->pts * av_q2d(st->time_base) - StreamStart() : out_pos;
 				const double fdur = frame->nb_samples / double(frame->sample_rate);
 				if (pts + fdur < skip_until.load())
