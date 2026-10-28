@@ -211,4 +211,36 @@ python3 "$(dirname "$0")/make_disc.py" manyext "$D/manyext.iso" 60000
 python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-nullpgc.iso" "NULLPGC" nullpgc
 python3 "$(dirname "$0")/make_disc.py" dvd "$D/dvd-nullpgc-iso.iso" "NULLPGC" nullpgc-iso
 python3 "$(dirname "$0")/make_disc.py" aedloop "$D/aedloop.iso"
+# nopts.vob (1.5): MPEG-PS, MPEG-2 video red 0-2 s / green 2-4 s, MP2 audio silent 0-2 s / 440 Hz 2-4 s, with no
+# timestamp in any audio PES header (the PTS flags cleared, those bytes made stuffing): the audio's position is
+# counted from where playback starts
+$FF -f lavfi -i color=c=red:size=320x240:rate=25:d=2 -f lavfi -i color=c=green:size=320x240:rate=25:d=2 \
+	-f lavfi -i anullsrc=r=48000:cl=stereo:d=2 -f lavfi -i sine=frequency=440:sample_rate=48000:d=2 \
+	-filter_complex "[0][1]concat=n=2:v=1:a=0[v];[2][3]concat=n=2:v=0:a=1[a]" -map "[v]" -map "[a]" \
+	-c:v mpeg2video -g 12 -b:v 1M -c:a mp2 -ac 2 -b:a 192k -f vob "$D/nopts-src.vob"
+python3 - "$D/nopts-src.vob" "$D/nopts.vob" <<'PY'
+import sys
+d = bytearray(open(sys.argv[1], 'rb').read())
+i = cleared = 0
+while i + 4 <= len(d):
+    if d[i:i + 3] != b'\0\0\1':
+        i += 1
+        continue
+    sid = d[i + 3]
+    if sid == 0xBA:  # pack header (MPEG-2): 14 bytes and its stuffing
+        i += 14 + (d[i + 13] & 7)
+    elif sid == 0xB9:  # end code
+        i += 4
+    else:  # a PES packet (or a system header): its length follows
+        n = (d[i + 4] << 8) | d[i + 5]
+        if 0xC0 <= sid <= 0xDF and (d[i + 6] & 0xC0) == 0x80 and d[i + 7] & 0xC0:
+            hl = d[i + 8]
+            d[i + 7] &= 0x3F  # no PTS / DTS
+            d[i + 9:i + 9 + hl] = b'\xff' * hl  # the header's optional fields become stuffing
+            cleared += 1
+        i += 6 + n
+open(sys.argv[2], 'wb').write(d)
+assert cleared > 10, cleared
+PY
+rm -f "$D/nopts-src.vob"
 echo "media in $D"

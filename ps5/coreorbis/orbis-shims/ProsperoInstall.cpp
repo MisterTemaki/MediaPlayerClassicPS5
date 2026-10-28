@@ -174,6 +174,12 @@ InstallResult InstallApp()
 		return InstallResult::NothingEmbedded;
 
 	const AppPlace& place = AppInstallPlace();
+	if (!place.writable && place.image_pending)
+	{
+		// autoloaded before ShadowMount+ has mounted the image the app runs from: nothing to write, nothing to say
+		OrbisLog("[install] %s: left to the image", place.log.c_str());
+		return InstallResult::UpToDate;
+	}
 	if (!place.writable)
 	{
 		// an autoloaded payload and an image (or a read-only folder) already holding this version or a newer one:

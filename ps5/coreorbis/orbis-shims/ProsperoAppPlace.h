@@ -23,6 +23,7 @@ struct AppPlace
 	bool image = false;  // the source is inside an image mounted by ShadowMount+ (under /mnt/shadowmnt)
 	bool unsure = false; // the folder couldn't be identified for sure (or isn't there): nothing is written anywhere
 	bool via_link = false; // no mount yet: the folder from ShadowMount+'s link (/user/app/<TITLE_ID>/mount.lnk)
+	bool image_pending = false; // that folder is in an image ShadowMount+ hasn't mounted yet (not written)
 	std::string reason; // !writable: why, a sentence for the user (English, through T())
 	std::string log;    // what was found, for boot.log
 };
@@ -35,7 +36,8 @@ struct AppPlace
 // - every folder written has a sce_sys/param.json naming the app;
 // - statfs(2) failing: getfsstat(2); neither answering while the mount point is there: nothing written;
 // - no mount (a payload autoloaded before ShadowMount+ has mounted the app): ShadowMount+'s link
-//   /user/app/<TITLE_ID>/mount.lnk names the folder (not there: nothing written, no second copy).
+//   /user/app/<TITLE_ID>/mount.lnk names the folder (not there: nothing written, no second copy; in an image -- under
+//   /mnt/shadowmnt, or mount_img.lnk beside it -- never written; a link that isn't an absolute path is ignored).
 // default_dir: /data/homebrew/<TITLE_ID> (where the payload installs when nothing else runs the app).
 // Host tests: MPCPS5_PS5_SYSTEM_EX stands for /system_ex, MPCPS5_PS5_USER_APP for /user/app, MPCPS5_PS5_SHADOWMNT
 // for /mnt/shadowmnt, MPCPS5_HOST_MOUNTS for

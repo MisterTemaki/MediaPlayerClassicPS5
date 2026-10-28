@@ -216,11 +216,24 @@ bool SameEboot(const std::string& source, const std::string& mount)
 
 // ShadowMount+'s images (.ffpkg ufs, .exfat, .ffpfs pfs) are mounted under /mnt/shadowmnt. Anything else is judged by
 // its read-only flag and whether a file can be written (extended storage may be on an LVD device and writable)
-bool IsImage(const MountInfo& u, const std::string& source)
+bool InImages(const std::string& path)
 {
 	const char* env = getenv("MPCPS5_PS5_SHADOWMNT"); // the host tests' stand-in
-	const std::string images = env && *env ? env : "/mnt/shadowmnt";
-	return Inside(u.on, images) || Inside(source, images);
+	return Inside(path, env && *env ? env : "/mnt/shadowmnt");
+}
+
+bool IsImage(const MountInfo& u, const std::string& source)
+{
+	return InImages(u.on) || InImages(source);
+}
+
+void SetImage(AppPlace& a)
+{
+	a.writable = false;
+	a.image = true;
+	a.reason = "Media Player Classic PS5 runs from an image that ShadowMount+ mounted (" + a.source +
+			   "): an update can't be written into it. Update the image the way you made it, with the new version's "
+			   "folder.";
 }
 
 std::string Line(const char* fmt, const std::string& a, const std::string& b = "", const std::string& c = "")
@@ -255,10 +268,7 @@ void Finish(AppPlace& a, const std::string& title_id, bool mount_ro, const std::
 	a.dir = a.source;
 	if (a.image)
 	{
-		a.writable = false;
-		a.reason = "Media Player Classic PS5 runs from an image that ShadowMount+ mounted (" + a.source +
-				   "): an update can't be written into it. Update the image the way you made it, with the new version's "
-				   "folder.";
+		SetImage(a);
 		a.log += ": an image, not written";
 		return;
 	}
@@ -292,7 +302,8 @@ void Finish(AppPlace& a, const std::string& title_id, bool mount_ro, const std::
 void NoMount(AppPlace& a, const std::string& title_id, const std::string& default_dir, const std::string& mount)
 {
 	const char* ua = getenv("MPCPS5_PS5_USER_APP");
-	const std::string lnk = std::string(ua && *ua ? ua : "/user/app") + "/" + title_id + "/mount.lnk";
+	const std::string links = std::string(ua && *ua ? ua : "/user/app") + "/" + title_id;
+	const std::string lnk = links + "/mount.lnk";
 	std::string target;
 	if (FILE* f = fopen(lnk.c_str(), "r"))
 	{
@@ -307,6 +318,34 @@ void NoMount(AppPlace& a, const std::string& title_id, const std::string& defaul
 	while (target.size() > 1 && target.back() == '/')
 		target.pop_back();
 	a.log = mount + " isn't a mount";
+	if (!target.empty() && target[0] != '/')
+	{
+		a.log += " and ShadowMount+'s link holds \"" + target + "\", not a folder's path: ignored; files go to " + default_dir;
+		return;
+	}
+	// an image's folder (ShadowMount+ mounts the image under /mnt/shadowmnt and writes mount_img.lnk beside the link):
+	// never written, and before ShadowMount+ has mounted it, nothing to say
+	if (!target.empty() && (InImages(target) || Exists(links + "/mount_img.lnk")))
+	{
+		a.source = a.dir = target;
+		a.via_link = true;
+		a.log += "; ShadowMount+ runs the app from an image's folder, " + target + " (" + lnk + ")";
+		if (!Exists(target))
+		{
+			SetImage(a);
+			a.image_pending = true;
+			a.log += ", not mounted yet: not written";
+			return;
+		}
+		Finish(a, title_id, false, {target});
+		if (!a.image)
+		{
+			SetImage(a);
+			a.dir = target;
+			a.log += "; an image, not written";
+		}
+		return;
+	}
 	if (target.empty() || target == default_dir)
 	{
 		a.log += target.empty() ? " and ShadowMount+ has no link for the app: files go to " + default_dir

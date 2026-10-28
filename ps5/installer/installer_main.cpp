@@ -105,7 +105,8 @@ int main()
 			snprintf(msg, sizeof(msg), "Media Player Classic PS5: nothing to install");
 			break;
 	}
-	if (installed != InstallResult::NewerInstalled && installed != InstallResult::CantWrite && SyncAppMeta() > 0)
+	if (installed != InstallResult::NewerInstalled && installed != InstallResult::CantWrite &&
+		!AppInstallPlace().image_pending && SyncAppMeta() > 0)
 	{
 		const size_t len = strlen(msg);
 		snprintf(msg + len, sizeof(msg) - len, " Home screen art updated (restart the PS5 if it doesn't show).");

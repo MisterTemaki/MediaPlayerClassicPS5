@@ -19,7 +19,7 @@ ONLY=${ONLY:-}
 PASS=0
 FAIL=0
 MEDIA=$WORK/media
-[ -f "$MEDIA/aedloop.iso" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
+[ -f "$MEDIA/nopts.vob" ] || bash tests/make_media.sh "$MEDIA" >/dev/null
 
 # pad bits
 CROSS=4000; CIRCLE=2000; TRIANGLE=1000; SQUARE=8000; UP=10; DOWN=40; LEFT=80; RIGHT=20; L1=400; R1=800; L2=100; R2=200
@@ -445,7 +445,7 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,%s"browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}%s]}' \
 		"$1" "$1" "$1" $SPORT "$1" $size "$digest" $SPORT "$1" "$sigasset" >"$SRV/latest.json"
 }
-u16run() { MPCPS5_PS5_SHADOWMNT=${SHM-$T/shadowmnt} MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
+u16run() { MPCPS5_PS5_SHADOWMNT=${SHM-${M:-$T}/shadowmnt} MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
 cp "$T/homebrew/PPSA99015/eboot.bin" "$T/eboot.before"
 # a: the daily check at start finds this version: nothing offered; Help > Check for updates says "the latest version"
 release v1.5 01.050.000
@@ -558,47 +558,50 @@ printf '1.5\n/x\n0\n' >$T/root/update-pending.txt
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:quit" "")
 expect "[ $rc = 0 ] && grep -q 'this is 1.5: the new version runs' $T/root/logs/boot.log && grep -q '\[osd\] Media Player Classic PS5 updated to 1.5.' $T/root/logs/boot.log && [ ! -e $T/root/update-pending.txt ]" "an update seen running: said once (the OSD), the note gone"
+# the mount table's names are cut at 87 bytes, as the console's: with a long work dir the folders mounted (f-l) live
+# under a short one
+M=$T; [ ${#T} -le 56 ] || M=$(mktemp -d /tmp/mpc16.XXXXXX)
 # f: ShadowMount+ runs the app from another folder (a USB drive's homebrew), nullfs-mounted on /system_ex/app: the
 # update goes there, through the mount; /data/homebrew isn't touched; the restart opens the eboot the console runs
-SX=$T/sysex; U=$T/usb0/homebrew/PPSA99015
-rm -rf $SX $T/usb0 && mkdir -p $SX/app $T/usb0/homebrew && cp -r $T/homebrew/PPSA99015 $U
+SX=$M/sysex; U=$M/usb0/homebrew/PPSA99015
+rm -rf $SX $M/usb0 && mkdir -p $SX/app $M/usb0/homebrew && cp -r $T/homebrew/PPSA99015 $U
 echo "eboot usb 1.5" >$U/eboot.bin; rm -f $U/manifest.sha256 $U/update.journal
 ln -s $U $SX/app/PPSA99015
 ( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) >$T/home.sums
-MNT="$SX/app/PPSA99015|nullfs|$U|rw;$T/usb0|exfatfs|/dev/da0s1|rw"
+MNT="$SX/app/PPSA99015|nullfs|$U|rw;$M/usb0|exfatfs|/dev/da0s1|rw"
 release v9.9 99.000.000
 rm -f $T/root/logs/boot.log $T/root/update-pending.txt
 rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$MNT" u16run "$T" "0:0" "100:cmd 601;200:key enter;450:key enter;520:quit" "")
-expect "grep -q \"\[update\] $SX/app/PPSA99015 is a nullfs mount of $U (on $T/usb0, exfatfs, from /dev/da0s1): files go through $SX/app/PPSA99015\" $T/root/logs/boot.log" "the app runs from a USB drive's folder (a nullfs mount): found, written through the mount"
+expect "grep -q \"\[update\] $SX/app/PPSA99015 is a nullfs mount of $U (on $M/usb0, exfatfs, from /dev/da0s1): files go through $SX/app/PPSA99015\" $T/root/logs/boot.log" "the app runs from a USB drive's folder (a nullfs mount): found, written through the mount"
 expect "grep -q 'eboot v9.9' $U/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $U/sce_sys/param.json && [ -z \"\$(find $U -name '*.new' -o -name '*.old.*' -o -name 'update.journal*')\" ]" "... the update is in that folder (eboot.bin, param.json)"
 expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/home.sums" "... /data/homebrew's copy untouched (no second copy written)"
 expect "grep -q 'sceSystemServiceLoadExec($SX/app/PPSA99015/eboot.bin)' $T/out.txt && grep -q '^9.9$' $T/root/update-pending.txt" "... the restart opens the eboot the console runs (the mount); the next start checks the version"
 # g: from an image ShadowMount+ mounted (.ffpkg, read-only): Check for updates says so before downloading; nothing written
-I=$T/shadowmnt/img1/PPSA99015
-rm -rf $T/shadowmnt $SX/app/PPSA99015 && mkdir -p $T/shadowmnt/img1 && cp -r $U $I && ln -s $I $SX/app/PPSA99015
+I=$M/shadowmnt/img1/PPSA99015
+rm -rf $M/shadowmnt $SX/app/PPSA99015 && mkdir -p $M/shadowmnt/img1 && cp -r $U $I && ln -s $I $SX/app/PPSA99015
 ( cd $I && find . -type f | sort | xargs sha256sum ) >$T/img.sums
 release v9.9 99.000.000
 rm -f $T/root/logs/boot.log $T/root/update-pending.txt
-rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|ufs|/dev/lvd2|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
+rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$M/shadowmnt/img1|ufs|/dev/lvd2|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
 expect "grep -q '\[ui\] message: Media Player Classic PS5 9.9 is available (you have 1.5).' $T/root/logs/boot.log && grep -q 'This copy runs from an image that ShadowMount+ mounted ($I)' $T/root/logs/boot.log" "an image: Check for updates says it can't be written, before downloading"
 expect "! grep -q 'Downloading\|9.9 installed\|GET .*\.zip' $T/root/logs/boot.log && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums" "... nothing downloaded, nothing written"
 # h: a read-only USB folder: the same, in its words
 rm -f $T/root/logs/boot.log
-rc=$(SHM=$T/no-images MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|exfatfs|/dev/da1s1|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
+rc=$(SHM=$M/no-images MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$I|rw;$M/shadowmnt/img1|exfatfs|/dev/da1s1|ro" u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
 expect "grep -q \"This copy runs from $I, where the app can't write\" $T/root/logs/boot.log && ( cd $I && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/img.sums" "a read-only folder: said before downloading, nothing written"
 # i: the payload with ShadowMount+ running the app from that USB folder: it brings that copy up to date (through the
 # mount), not a second one in /data/homebrew; from the image: it says so, writes nothing, and the helper still runs
 rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015
 echo "eboot usb old" >$U/eboot.bin; sed -i 's/"contentVersion": "[0-9.]*"/"contentVersion": "01.040.000"/' $U/sce_sys/param.json
 stop16
-MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$MNT" MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst3.txt" 2>&1 &
+MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_HOST_MOUNTS="$MNT" MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$M/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst3.txt" 2>&1 &
 for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $T/inst3.txt 2>/dev/null && break; sleep 0.1; done
 stop16
-expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst3.txt && ! grep -q 'eboot usb old' $U/eboot.bin && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $T/hb2 ]" "the payload: the copy ShadowMount+ runs (a USB folder) updated through the mount, no second copy"
+expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst3.txt && ! grep -q 'eboot usb old' $U/eboot.bin && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $M/hb2 ]" "the payload: the copy ShadowMount+ runs (a USB folder) updated through the mount, no second copy"
 # the payload with env ($2...) set, its output in $T/$1.txt (until its helper listens)
 inst16() {
 	local out=$T/$1.txt; shift
-	env "$@" MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_PS5_SHADOWMNT=$T/shadowmnt MPCPS5_PS5_USER_APP=$T/userapp MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$out" 2>&1 &
+	env "$@" MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_PS5_SHADOWMNT=$M/shadowmnt MPCPS5_PS5_USER_APP=$M/userapp MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$M/hb2 MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$out" 2>&1 &
 	for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $out 2>/dev/null && break; sleep 0.1; done
 	stop16
 }
@@ -606,24 +609,24 @@ sums() { ( cd $1 && find . -type f | sort | xargs sha256sum ); }
 ver() { sed -i "s/\"contentVersion\": \"[0-9.]*\"/\"contentVersion\": \"$2\"/" $1/sce_sys/param.json; }
 # ... an image holding a newer version (99, from f) or this one: an autoloaded payload says the app is newer / ready,
 # not "can't be written" at every start; only an older image is said to need updating the way it was made
-IMNT="$SX/app/PPSA99015|nullfs|$I|rw;$T/shadowmnt/img1|ufs|/dev/lvd2|ro"
+IMNT="$SX/app/PPSA99015|nullfs|$I|rw;$M/shadowmnt/img1|ufs|/dev/lvd2|ro"
 rm -rf $SX/app/PPSA99015 && ln -s $I $SX/app/PPSA99015
 inst16 inst4 MPCPS5_HOST_MOUNTS="$IMNT"
-expect "grep -q 'a newer version is installed; this payload (1.5) left it as it is' $T/inst4.txt && ! grep -q 'can.t be written' $T/inst4.txt && grep -q 'listening on 127.0.0.1' $T/inst4.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "the payload and an image with a newer version: says the app is newer, writes nothing, the helper runs"
+expect "grep -q 'a newer version is installed; this payload (1.5) left it as it is' $T/inst4.txt && ! grep -q 'can.t be written' $T/inst4.txt && grep -q 'listening on 127.0.0.1' $T/inst4.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $M/hb2 ]" "the payload and an image with a newer version: says the app is newer, writes nothing, the helper runs"
 ver $I 01.050.000; sums $I >$T/img.sums
 inst16 inst5 MPCPS5_HOST_MOUNTS="$IMNT"
-expect "grep -q 'Media Player Classic PS5 1.5 is ready' $T/inst5.txt && ! grep -q 'can.t be written' $T/inst5.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "... with this version: ready, nothing written"
+expect "grep -q 'Media Player Classic PS5 1.5 is ready' $T/inst5.txt && ! grep -q 'can.t be written' $T/inst5.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $M/hb2 ]" "... with this version: ready, nothing written"
 ver $I 01.040.000; sums $I >$T/img.sums
 inst16 inst6 MPCPS5_HOST_MOUNTS="$IMNT"
-expect "grep -q 'runs from an image that ShadowMount+ mounted ($I): an update can.t be written into it' $T/inst6.txt && grep -q 'listening on 127.0.0.1' $T/inst6.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $T/hb2 ]" "... with an older version: says it can't be written there, writes nothing, the helper runs"
+expect "grep -q 'runs from an image that ShadowMount+ mounted ($I): an update can.t be written into it' $T/inst6.txt && grep -q 'listening on 127.0.0.1' $T/inst6.txt && sums $I | cmp -s - $T/img.sums && [ ! -e $M/hb2 ]" "... with an older version: says it can't be written there, writes nothing, the helper runs"
 # j: nothing written where it isn't sure to be the app the console runs:
 # j1: a folder whose param.json names another title (mounted there all the same): not written, by the payload or
 # the app's Check for updates
-O=$T/other/PPSA99015
-rm -rf $T/other $SX/app/PPSA99015 && mkdir -p $T/other && cp -r $U $O && ln -s $O $SX/app/PPSA99015
+O=$M/other/PPSA99015
+rm -rf $M/other $SX/app/PPSA99015 && mkdir -p $M/other && cp -r $U $O && ln -s $O $SX/app/PPSA99015
 sed -i 's/"titleId": "PPSA99015"/"titleId": "PPSA00001"/' $O/sce_sys/param.json; ver $O 01.040.000; sums $O >$T/o.sums
 inst16 inst7 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$O|rw"
-expect "grep -q 'mounted on $SX/app/PPSA99015 can.t be identified for sure' $T/inst7.txt && sums $O | cmp -s - $T/o.sums && [ ! -e $T/hb2 ]" "a mounted folder whose param.json names another title: the payload writes nothing (no second copy)"
+expect "grep -q 'mounted on $SX/app/PPSA99015 can.t be identified for sure' $T/inst7.txt && sums $O | cmp -s - $T/o.sums && [ ! -e $M/hb2 ]" "a mounted folder whose param.json names another title: the payload writes nothing (no second copy)"
 (cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
 sleep 0.5
 release v9.9 99.000.000
@@ -633,36 +636,51 @@ stop16
 expect "grep -q \"The app can't tell for sure which folder this copy runs from\" $T/root/logs/boot.log && ! grep -q 'Downloading\|GET .*\.zip' $T/root/logs/boot.log && sums $O | cmp -s - $T/o.sums" "... the app: Check for updates says so before downloading, nothing written"
 # j2: a backport's unionfs over ShadowMount+'s nullfs mount: not written through it; the folder beneath is
 rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015; ver $U 01.040.000
-inst16 inst8 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$U|rw;$T/usb0|exfatfs|/dev/da0s1|rw;$SX/app/PPSA99015|unionfs|$T/backport|rw"
-expect "grep -q \"$SX/app/PPSA99015 is a unionfs mount over a nullfs mount of $U (on $T/usb0, exfatfs, from /dev/da0s1): files go through $U\" $T/inst8.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $T/hb2 ]" "a unionfs layer over the mount: the folder beneath written directly, not through the layer"
+inst16 inst8 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$U|rw;$M/usb0|exfatfs|/dev/da0s1|rw;$SX/app/PPSA99015|unionfs|$M/backport|rw"
+expect "grep -q \"$SX/app/PPSA99015 is a unionfs mount over a nullfs mount of $U (on $M/usb0, exfatfs, from /dev/da0s1): files go through $U\" $T/inst8.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $M/hb2 ]" "a unionfs layer over the mount: the folder beneath written directly, not through the layer"
 # j3: a source name the system cut at 87 bytes: only through the mount; the cut path never made
-L=$T/long/$(printf 'x%.0s' $(seq 1 $((91 - ${#T} - 16))))/PPSA99015
-rm -rf $T/long $SX/app/PPSA99015 && mkdir -p $(dirname $L) && cp -r $U $L && ln -s $L $SX/app/PPSA99015; ver $L 01.040.000
+L=$M/long/$(printf 'x%.0s' $(seq 1 $((91 - ${#M} - 16))))/PPSA99015
+rm -rf $M/long $SX/app/PPSA99015 && mkdir -p $(dirname $L) && cp -r $U $L && ln -s $L $SX/app/PPSA99015; ver $L 01.040.000
 inst16 inst9 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$L|rw"
-expect "[ \${#L} = 91 ] && grep -q 'its name cut short by the system: \"${L:0:87}\"); written only through the mount' $T/inst9.txt && grep -q 'files go through $SX/app/PPSA99015' $T/inst9.txt && grep -q '\"contentVersion\": \"01.050.000\"' $L/sce_sys/param.json && [ ! -e ${L:0:87} ] && [ ! -e $T/hb2 ]" "a source name cut short (87 bytes): written only through the mount, the cut path not made"
+expect "[ \${#L} = 91 ] && grep -q 'its name cut short by the system: \"${L:0:87}\"); written only through the mount' $T/inst9.txt && grep -q 'files go through $SX/app/PPSA99015' $T/inst9.txt && grep -q '\"contentVersion\": \"01.050.000\"' $L/sce_sys/param.json && [ ! -e ${L:0:87} ] && [ ! -e $M/hb2 ]" "a source name cut short (87 bytes): written only through the mount, the cut path not made"
 # j4: statfs fails: the mount table (getfsstat) says what is mounted
 rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015; ver $U 01.040.000
 inst16 inst10 MPCPS5_HOST_NO_STATFS=1 MPCPS5_HOST_MOUNTS="$MNT"
-expect "grep -q \"$SX/app/PPSA99015 is a nullfs mount of $U (on $T/usb0, exfatfs, from /dev/da0s1): files go through $SX/app/PPSA99015\" $T/inst10.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json" "statfs failing: the mount table finds the mount"
+expect "grep -q \"$SX/app/PPSA99015 is a nullfs mount of $U (on $M/usb0, exfatfs, from /dev/da0s1): files go through $SX/app/PPSA99015\" $T/inst10.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json" "statfs failing: the mount table finds the mount"
 # j5: neither answering while the mount point is there: nothing written, no second copy
 ver $U 01.040.000; sums $U >$T/u.sums
 inst16 inst11 MPCPS5_HOST_NO_STATFS=1 MPCPS5_HOST_NO_GETFSSTAT=1 MPCPS5_HOST_MOUNTS="$MNT"
-expect "grep -q 'what is mounted on $SX/app/PPSA99015 can.t be read' $T/inst11.txt && sums $U | cmp -s - $T/u.sums && [ ! -e $T/hb2 ]" "neither statfs nor the mount table answering: nothing written, no second copy"
+expect "grep -q 'what is mounted on $SX/app/PPSA99015 can.t be read' $T/inst11.txt && sums $U | cmp -s - $T/u.sums && [ ! -e $M/hb2 ]" "neither statfs nor the mount table answering: nothing written, no second copy"
 # k: the payload before ShadowMount+ has mounted the app (autoload order): the folder from ShadowMount+'s link
 # /user/app/PPSA99015/mount.lnk is updated, no second copy in /data/homebrew; a link to a folder not there: nothing
-rm -rf $SX/app/PPSA99015 $T/userapp && mkdir -p $T/userapp/PPSA99015 && echo "$U" >$T/userapp/PPSA99015/mount.lnk
-inst16 inst12 MPCPS5_HOST_MOUNTS="$T/usb0|exfatfs|/dev/da0s1|rw"
-expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst12.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $T/hb2 ]" "no mount yet: the folder of ShadowMount+'s mount.lnk updated, no second copy"
-echo "$T/gone/PPSA99015" >$T/userapp/PPSA99015/mount.lnk
+rm -rf $SX/app/PPSA99015 $M/userapp && mkdir -p $M/userapp/PPSA99015 && echo "$U" >$M/userapp/PPSA99015/mount.lnk
+inst16 inst12 MPCPS5_HOST_MOUNTS="$M/usb0|exfatfs|/dev/da0s1|rw"
+expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst12.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json && [ ! -e $M/hb2 ]" "no mount yet: the folder of ShadowMount+'s mount.lnk updated, no second copy"
+echo "$M/gone/PPSA99015" >$M/userapp/PPSA99015/mount.lnk
 inst16 inst13
-expect "grep -q 'runs the app from $T/gone/PPSA99015, which isn.t there now' $T/inst13.txt && grep -q 'listening on 127.0.0.1' $T/inst13.txt && [ ! -e $T/hb2 ] && [ ! -e $T/gone ]" "... its folder not there (a drive not connected yet): nothing written, no second copy"
-rm -rf $T/userapp
+expect "grep -q 'runs the app from $M/gone/PPSA99015, which isn.t there now' $T/inst13.txt && grep -q 'listening on 127.0.0.1' $T/inst13.txt && [ ! -e $M/hb2 ] && [ ! -e $M/gone ]" "... its folder not there (a drive not connected yet): nothing written, no second copy"
+# ... the link naming an image's folder ShadowMount+ hasn't mounted yet (under /mnt/shadowmnt, or with mount_img.lnk
+# beside it): the payload just says it is ready, writes nothing (an autoloaded payload doesn't nag at every boot)
+echo "$M/shadowmnt/img2/PPSA99015" >$M/userapp/PPSA99015/mount.lnk
+inst16 inst15
+expect "grep -q 'Media Player Classic PS5 1.5 is ready' $T/inst15.txt && grep -q 'an image.s folder, $M/shadowmnt/img2/PPSA99015 .*not mounted yet' $T/inst15.txt && ! grep -q 'isn.t there now' $T/inst15.txt && [ ! -e $M/hb2 ] && [ ! -e $M/shadowmnt/img2 ]" "... a link to an image not mounted yet: ready, nothing written"
+echo "$M/images/PPSA99015" >$M/userapp/PPSA99015/mount.lnk; echo "/data/x.ffpkg" >$M/userapp/PPSA99015/mount_img.lnk
+inst16 inst16
+expect "grep -q 'Media Player Classic PS5 1.5 is ready' $T/inst16.txt && ! grep -q 'isn.t there now' $T/inst16.txt && [ ! -e $M/hb2 ] && [ ! -e $M/images ]" "... the same with mount_img.lnk beside the link"
+rm -f $M/userapp/PPSA99015/mount_img.lnk
+# ... a link that isn't an absolute path: no link (a first install goes to /data/homebrew)
+echo "PPSA99015" >$M/userapp/PPSA99015/mount.lnk
+inst16 inst17
+expect "grep -q 'link holds \"PPSA99015\", not a folder.s path: ignored' $T/inst17.txt && grep -q 'Media Player Classic PS5 1.5 installed' $T/inst17.txt && [ -f $M/hb2/PPSA99015/eboot.bin ]" "... a link that isn't a path: ignored, installed in /data/homebrew"
+rm -rf $M/hb2
+rm -rf $M/userapp
 # l: extended storage on an LVD device but writable: not taken for an image; written
 mkdir -p $SX/app && ln -s $U $SX/app/PPSA99015; ver $U 01.040.000
-inst16 inst14 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$U|rw;$T/usb0|ufs|/dev/lvd5|rw"
+inst16 inst14 MPCPS5_HOST_MOUNTS="$SX/app/PPSA99015|nullfs|$U|rw;$M/usb0|ufs|/dev/lvd5|rw"
 expect "grep -q 'updated to 1.5 (in $U, the copy ShadowMount+ runs)' $T/inst14.txt && grep -q '\"contentVersion\": \"01.050.000\"' $U/sce_sys/param.json" "a writable folder on an LVD device: updated (not taken for an image)"
 expect "! grep -q 'runtime error\|AddressSanitizer' $T/inst*.txt" "the payload: no sanitizer reports"
 nosan "$T"
+[ "$M" = "$T" ] || rm -rf "$M"
 fi
 
 if want 17; then
@@ -1521,6 +1539,35 @@ T=$(newroot t28j)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
 rc=$(run "$T" "0:0" "40:cmd stop;50:state;60:cmd faster;70:state;80:quit" "" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 4 ] && [ \"\$(field $T 2 1)\" = 2 ] && log $T '\[osd\] Speed: 2.00x'" "Faster when stopped: it plays, at 2x"
+nosan "$T"
+# k: audio without any timestamp (nopts.vob: the tone starts with the green picture, at 2 s): it plays from the
+# start, in step with the picture (when the tone is heard vs when the position passes 2 s; 1.5's first fix dropped
+# the first 32 frames, so the audio played 0.77 s early)
+T=$(newroot t28k)
+SC=""; for f in $(seq 30 3 240); do SC="$SC$f:state;"; done
+rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/a run "$T" "0:0" "${SC}250:quit" "" "$MEDIA/nopts.vob")
+avs() { python3 - "$1" <<'PY'
+import sys, re, array
+T = sys.argv[1]
+log = open(T + '/root/logs/boot.log', errors='replace').read().splitlines()
+t_open, pts = None, []
+for l in log:
+    m = re.match(r'\[\s*([0-9.]+)\] \[audio\] sceAudioOutOpen', l)
+    if m and t_open is None:
+        t_open = float(m.group(1))
+    m = re.match(r'\[\s*([0-9.]+)\] \[test\] state 2 pos ([0-9.]+)', l)
+    if m:
+        pts.append((float(m.group(1)), float(m.group(2))))
+# the wall time the position passed 2 s
+w2 = next(w0 + (w1 - w0) * (2 - p0) / (p1 - p0) for (w0, p0), (w1, p1) in zip(pts, pts[1:]) if p0 < 2 <= p1)
+a = array.array('h')
+a.frombytes(open(T + '/a.2ch', 'rb').read())
+L = a[0::2]
+on = next(i for i in range(0, len(L) - 480, 480) if sum(x * x for x in L[i:i + 480]) / 480 > 1000 ** 2)
+print('%+.3f' % (t_open + on / 48000 - w2))
+PY
+}
+expect "[ $rc = 0 ] && python3 -c \"import sys; sys.exit(0 if -0.35 <= \$(avs $T) <= 0.35 else 1)\"" "audio with no timestamps: in step with the picture"
 nosan "$T"
 fi
 

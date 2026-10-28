@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 454 host tests
+> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 459 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -55,7 +55,8 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
   ShadowMount+ again, as Sulfurico-One64 did). From 1.5 on, updates go to the right folder.
 - **Fixed: a DVD-Video seek back early in a title** (in 1.4): seeking back to the first second or so went on from where
   it was. The first audio packet after a seek on a DVD has no timestamp, and the position was taken from before the
-  seek; it now waits for one that has.
+  seek; it now starts at the seek's target (and audio with no timestamps at all, from where playback starts, as
+  before).
 
 **1.4:** what MachoMan1988 asked for ([#2](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/2)): "attach my
 external blu ray disc drive to enjoy my movies in the same way they are doing with PS2 disc games". **Disc drives**
@@ -508,7 +509,9 @@ Honest limits:
 - **No mount yet** (the payload autoloaded before ShadowMount+ has mounted the app): the folder ShadowMount+ last
   mounted is in its link `/user/app/PPSA99015/mount.lnk`; the payload updates that folder (if it names PPSA99015), so
   **no second copy** is made in `/data/homebrew`. If that folder isn't there (a drive not connected yet) nothing is
-  written: send the payload again once it is. With no mount and no link, `/data/homebrew/PPSA99015` as before.
+  written: send the payload again once it is. A folder in an image (under `/mnt/shadowmnt`, or `mount_img.lnk` beside
+  the link) is never written; before ShadowMount+ has mounted the image the payload just says it is ready. With no
+  mount and no link (or a link that isn't a full path), `/data/homebrew/PPSA99015` as before.
 - **An image or a read-only folder** (an `.ffpkg` / `.exfat` image ShadowMount+ mounted, a read-only drive): the app
   can't write an update into it. Check for updates says so **before downloading anything**, and the payload leaves it
   alone too: when it holds the payload's version or a newer one the payload just says it is ready (or newer), so an

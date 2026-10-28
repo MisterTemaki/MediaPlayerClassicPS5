@@ -477,6 +477,7 @@ struct Player::Impl
 	double seek_to = 0;
 	bool seek_exact = true;
 	std::atomic<double> skip_until{-1e18}; // frames before this (in the current serial) are not shown
+	std::atomic<double> serial_start{0}; // where the current serial starts: the last seek's target, 0 at the start
 	std::atomic<bool> show_after_seek{false};
 
 	// clock
@@ -936,6 +937,7 @@ struct Player::Impl
 					OrbisLog("[player] seek to %.2f failed: %s", target, AvErr(r).c_str());
 				vq.Flush();
 				aq.Flush();
+				serial_start = target;
 				serial++;
 				skip_until = exact ? target - 0.001 : -1e18;
 				ps5audio::Clear();
@@ -1447,7 +1449,7 @@ struct Player::Impl
 		int dec_serial = -1;
 		double out_pos = 0; // stream time at the end of what has been pushed
 		bool have_pos = false;
-		int nopts_drop = 0; // frames without a timestamp dropped before the first timed one
+		bool guessed_pos = false; // out_pos set from where the serial starts (an untimed first frame)
 		norm_factor = -1; // Normalize starts again at the max (a file, another track)
 		while (!quit && !a_stop)
 		{
@@ -1468,7 +1470,7 @@ struct Player::Impl
 				avfilter_graph_free(&agraph);
 				dec_serial = qp.serial;
 				have_pos = false;
-				nopts_drop = 0;
+				guessed_pos = false;
 				norm_factor = -1; // a seek: as MPC-HC's flush / new segment
 			}
 			const int sr = avcodec_send_packet(adec, qp.pkt);
@@ -1489,16 +1491,13 @@ struct Player::Impl
 				AVStream* st = ic->streams[astream];
 				if (frame->pts == AV_NOPTS_VALUE && !have_pos)
 				{
-					// After a seek out_pos still holds the position before it: a first
-					// frame without a timestamp (a DVD title's first AC-3 packet after a
-					// seek has none) would set the clock back to that position. Wait for
-					// a timed frame; a stream with no timestamps starts at the clock.
-					if (++nopts_drop <= 32)
-					{
-						av_frame_unref(frame);
-						continue;
-					}
-					out_pos = clock.Get();
+					// A first frame without a timestamp (a DVD title's first AC-3 packet after
+					// a seek has none; some files have none at all): it starts where the serial
+					// does (the seek's target, 0 at the start), not at out_pos, which after a
+					// seek still holds the position before it. A timed frame later puts it right.
+					out_pos = serial_start.load();
+					have_pos = true;
+					guessed_pos = true;
 				}
 				double pts = frame->pts != AV_NOPTS_VALUE ? frame->pts * av_q2d(st->time_base) - StreamStart() : out_pos;
 				const double fdur = frame->nb_samples / double(frame->sample_rate);
@@ -1507,10 +1506,11 @@ struct Player::Impl
 					av_frame_unref(frame);
 					continue;
 				}
-				if (!have_pos)
+				if (!have_pos || (guessed_pos && frame->pts != AV_NOPTS_VALUE))
 				{
 					out_pos = pts;
 					have_pos = true;
+					guessed_pos = false;
 				}
 				const double tempo = rate;
 				if (!SetupAudioGraph(frame, tempo))
