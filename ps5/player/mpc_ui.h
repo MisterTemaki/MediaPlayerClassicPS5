@@ -83,6 +83,7 @@ public:
 	void HideCursor();
 	double IdleSeconds() const; // since the last input
 	bool Held(Key k) const;
+	double HeldFor(Key k) const; // how long a button has been seen held (a slow frame counts kMaxHeldStep at most)
 	void SetSpeed(int s) { speed_ = s; }
 	void SetTouchpad(bool on) { touchpad_ = on; }
 
@@ -91,6 +92,9 @@ private:
 	double cursor_t_ = -100; // when the pointer last moved
 	double input_t_ = 0;
 	uint32_t prev_ = 0;
+	// the D-pad / buttons' repeat: how long each has been seen held (kMaxHeldStep a poll at most), and at what held
+	// time it repeats next
+	double held_[32] = {};
 	double repeat_at_[32] = {};
 	bool cross_click_ = false, square_click_ = false;
 	int speed_ = 3;
@@ -99,7 +103,7 @@ private:
 	bool wheel_sent_ = false; // a wheel step already sent for this push (the next ones are repeats)
 	// the right stick's left / right: -1 / 0 / 1 as it is held, and when the next repeat is due
 	int stick_h_ = 0;
-	double stick_repeat_at_ = 0;
+	double stick_held_ = 0, stick_repeat_at_ = 0;
 	// the touchpad
 	bool touchpad_ = true;
 	bool touching_ = false; // a finger followed (its id and where it was)

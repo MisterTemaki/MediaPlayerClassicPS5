@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 459 host tests
+> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 461 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -57,6 +57,9 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
   it was. The first audio packet after a seek on a DVD has no timestamp, and the position was taken from before the
   seek; it now starts at the seek's target (and audio with no timestamps at all, from where playback starts, as
   before).
+- **Fixed: two timing slips** (in 1.4 too): right after a seek, audio decoded before it could put the position back
+  for a moment; and a slow frame while a button was pressed briefly could count as holding it, so R1 skipped two
+  chapters. A button now repeats (or Options opens the menu bar) only once it has been seen held across frames.
 
 **1.4:** what MachoMan1988 asked for ([#2](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/2)): "attach my
 external blu ray disc drive to enjoy my movies in the same way they are doing with PS2 disc games". **Disc drives**

@@ -2852,7 +2852,7 @@ void MainFrame::TickOptionsButton()
 	const PadAction a = s_.pad[int(PadButton::Options)];
 	if (input_.Held(Key::Menu))
 	{
-		if (NowSeconds() - options_down_ >= 0.5)
+		if (input_.HeldFor(Key::Menu) >= 0.5) // seen held (a hitch during a short press doesn't count as held)
 		{
 			options_down_ = 0;
 			// a window opened meanwhile (a message...): the menu bar doesn't go over it
@@ -3265,6 +3265,8 @@ int MainFrame::Run(const std::string& first)
 							OnEvent(u);
 					}
 				}
+				else if (c.compare(0, 6, "stall ") == 0)
+					usleep(useconds_t(atoi(c.c_str() + 6)) * 1000); // a hitch: this frame takes that long
 				else if (c == "quit")
 					quit_ = true;
 #ifndef __PROSPERO__

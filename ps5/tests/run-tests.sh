@@ -94,8 +94,10 @@ if want 3; then
 echo "== 3. chapters, tracks: the default audio and subtitles, R1/L1 by chapter, another audio track"
 T=$(newroot t3)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
-# R1 at 60 (chapter 2: green), R1 at 140 (chapter 3: blue), L1 at 220 (back to green)
-rc=$(run "$T" "0:0;60:$R1;62:0;140:$R1;142:0;220:$L1;222:0" "40:state;120:state;200:state;280:state;290:cmd 2001;330:state;340:quit" \
+# R1 at 60 (chapter 2: green), R1 at 140 (chapter 3: blue), L1 at 220 (back to green). Each from a known position (a
+# seek just before): Next skips a chapter less than a second ahead and Previous one less than 3 s back (MPC-HC), so
+# where a slow run happens to be would change the chapter
+rc=$(run "$T" "0:0;60:$R1;62:0;140:$R1;142:0;220:$L1;222:0" "40:state;55:seek 0.5;120:state;135:seek 3.5;200:state;215:seek 7;280:state;290:cmd 2001;330:state;340:quit" \
 	"30,50,120,200,280" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
 expect "[ \"\$(field $T 1 5)\" = 2 ]" "the default audio track (Portuguese, stream 2)"
@@ -106,6 +108,13 @@ expect "$CHECK $T/dump/flip00200.ppm 960 300 blue >/dev/null" "R1: chapter 3, bl
 expect "$CHECK $T/dump/flip00280.ppm 960 300 green >/dev/null" "L1: back to chapter 2, green"
 expect "$REGION $T/dump/flip00050.ppm 500 700 1420 960 255 255 255 30 3000 >/dev/null" "the embedded subtitle drawn (white text at the bottom; it starts at 0.5 s: frame 50)"
 expect "[ \"\$(field $T 5 5)\" = 1 ]" "Play > Audio Track > English: audio stream 1"
+nosan "$T"
+# a slow frame (half a second) while R1 is pressed briefly: one chapter, not a repeat (it counts as held only across
+# polls, a poll adding 0.1 s at most)
+T=$(newroot t3h)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0;60:$R1;63:0" "55:seek 0.5;61:stall 600;120:state;130:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && grep -q 'frame 61: stall 600' $T/root/logs/boot.log && python3 -c \"import sys; sys.exit(0 if 2.9 <= \$(field $T 1 2) < 5.9 else 1)\"" "R1 pressed during a hitch: chapter 2, not 3"
 nosan "$T"
 fi
 

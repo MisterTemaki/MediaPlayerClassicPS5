@@ -52,6 +52,8 @@ const BtnKey kButtons[] = {
 constexpr double kCursorHide = 3.0;
 // the touchpad (1920 x 1080 units on the DualSense): how far a finger goes during a click before the pointer follows
 constexpr double kPressSlop = 30;
+// the most one poll adds to how long a button has been held (for its repeat): a few polls are needed to repeat
+constexpr double kMaxHeldStep = 0.1;
 
 double Axis(uint8_t v)
 {
@@ -86,6 +88,14 @@ double InputMapper::IdleSeconds() const
 	return NowSeconds() - input_t_;
 }
 
+double InputMapper::HeldFor(Key k) const
+{
+	for (int i = 0; i < int(sizeof(kButtons) / sizeof(kButtons[0])); i++)
+		if (kButtons[i].key == k)
+			return (prev_ & kButtons[i].bit) ? held_[i] : 0;
+	return 0;
+}
+
 bool InputMapper::Held(Key k) const
 {
 	for (const auto& b : kButtons)
@@ -102,6 +112,9 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 	const double now = NowSeconds();
 	static double last = now;
 	const double dt = std::min(0.05, now - last);
+	// held buttons repeat after being seen held this long; one poll counts for at most kMaxHeldStep, so a slow
+	// frame (a hitch) while a button is pressed briefly doesn't make it repeat (R1 skipping two chapters)
+	const double held_step = std::min(kMaxHeldStep, now - last);
 	last = now;
 	const bool cursor_was_shown = CursorVisible();
 
@@ -210,17 +223,18 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 				InputEvent e{InputEvent::KeyDown};
 				e.key = h < 0 ? Key::StickLeft : Key::StickRight;
 				out.push_back(e);
-				stick_repeat_at_ = now + 0.40;
+				stick_held_ = 0;
+				stick_repeat_at_ = 0.40;
 				input_t_ = now;
 			}
 		}
-		else if (h && now >= stick_repeat_at_)
+		else if (h && (stick_held_ += held_step) >= stick_repeat_at_)
 		{
 			InputEvent e{InputEvent::KeyDown};
 			e.key = h < 0 ? Key::StickLeft : Key::StickRight;
 			e.repeat = true;
 			out.push_back(e);
-			stick_repeat_at_ = now + 0.07;
+			stick_repeat_at_ = stick_held_ + 0.07;
 			input_t_ = now;
 		}
 	}
@@ -274,16 +288,18 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 			InputEvent e{InputEvent::KeyDown};
 			e.key = Key::Enter;
 			out.push_back(e);
-			repeat_at_[14] = now + 0.45;
+			held_[14] = 0;
+			repeat_at_[14] = 0.45;
 		}
 	}
-	else if ((cur & SCE_PAD_BUTTON_CROSS) && !cross_click_ && now >= repeat_at_[14] && repeat_at_[14] > 0)
+	else if ((cur & SCE_PAD_BUTTON_CROSS) && !cross_click_ && repeat_at_[14] > 0 &&
+			 (held_[14] += held_step) >= repeat_at_[14])
 	{
 		InputEvent e{InputEvent::KeyDown};
 		e.key = Key::Enter;
 		e.repeat = true;
 		out.push_back(e);
-		repeat_at_[14] = now + 0.12;
+		repeat_at_[14] = held_[14] + 0.12;
 	}
 	if (released & SCE_PAD_BUTTON_CROSS)
 	{
@@ -331,15 +347,16 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 			InputEvent e{InputEvent::KeyDown};
 			e.key = b.key;
 			out.push_back(e);
-			repeat_at_[i] = now + 0.40;
+			held_[i] = 0;
+			repeat_at_[i] = 0.40;
 		}
-		else if ((cur & b.bit) && b.repeats && now >= repeat_at_[i])
+		else if ((cur & b.bit) && (held_[i] += held_step) >= repeat_at_[i] && b.repeats)
 		{
 			InputEvent e{InputEvent::KeyDown};
 			e.key = b.key;
 			e.repeat = true;
 			out.push_back(e);
-			repeat_at_[i] = now + 0.07;
+			repeat_at_[i] = held_[i] + 0.07;
 		}
 	}
 	prev_ = cur;

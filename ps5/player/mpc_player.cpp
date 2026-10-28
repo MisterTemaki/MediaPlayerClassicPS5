@@ -474,6 +474,11 @@ struct Player::Impl
 	// seeking
 	std::mutex seek_mu;
 	bool seek_req = false;
+	// Seek() sets the clock at once, but the demuxer's seek (and serial++) comes a little later: until it is done,
+	// frames from before it (still the current serial) mustn't set the clock back. seek_gen counts the seeks asked,
+	// seek_done the ones the demuxer has done (serial already moved on)
+	std::atomic<int> seek_gen{0}, seek_done{0};
+	bool SeekPending() const { return seek_gen.load() != seek_done.load(); }
 	double seek_to = 0;
 	bool seek_exact = true;
 	std::atomic<double> skip_until{-1e18}; // frames before this (in the current serial) are not shown
@@ -916,6 +921,7 @@ struct Player::Impl
 		{
 			// a seek?
 			bool do_seek = false;
+			int taken_gen = 0;
 			double target = 0;
 			bool exact = true;
 			{
@@ -926,6 +932,7 @@ struct Player::Impl
 					target = seek_to;
 					exact = seek_exact;
 					seek_req = false;
+					taken_gen = seek_gen.load();
 				}
 			}
 			if (do_seek)
@@ -942,6 +949,7 @@ struct Player::Impl
 				skip_until = exact ? target - 0.001 : -1e18;
 				ps5audio::Clear();
 				clock.Set(target);
+				seek_done = taken_gen;
 				eof = false;
 				ended = false;
 				show_after_seek = true;
@@ -1438,7 +1446,8 @@ struct Player::Impl
 				av_usleep(5000);
 		}
 		const double queued = ps5audio::Queued() / double(ps5audio::kRate) * rate;
-		clock.Set(end_pts - queued - audio_delay);
+		if (serial == my_serial && !SeekPending())
+			clock.Set(end_pts - queued - audio_delay);
 		return true;
 	}
 
@@ -1878,6 +1887,7 @@ void Player::Seek(double seconds, bool exact)
 		return;
 	std::lock_guard<std::mutex> l(m->seek_mu);
 	m->seek_req = true;
+	m->seek_gen++;
 	m->seek_to = std::max(0.0, seconds);
 	m->seek_exact = exact;
 	m->clock.Set(m->seek_to);
@@ -2216,14 +2226,15 @@ bool Player::UpdateVideo()
 	{
 		take = true;
 		s.show_after_seek = false;
-		if (s.paused)
+		if (s.paused && !s.SeekPending())
 			s.clock.Set(s.frames.front().pts);
 	}
 	else if (s.step_req)
 	{
 		take = true;
 		s.step_req = false;
-		s.clock.Set(s.frames.front().pts);
+		if (!s.SeekPending())
+			s.clock.Set(s.frames.front().pts);
 	}
 	else if (!s.paused)
 	{
