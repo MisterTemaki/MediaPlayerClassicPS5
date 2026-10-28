@@ -44,3 +44,14 @@ struct AppPlace
 // the mount table ("<mount point>|<fs type>|<from>|ro or rw;..." in mount order; a path takes the longest mount point
 // it is in, the last of a point's mounts), MPCPS5_HOST_NO_STATFS / MPCPS5_HOST_NO_GETFSSTAT make those fail.
 AppPlace FindAppPlace(const std::string& title_id, const std::string& default_dir);
+
+// 1.5.1: the app's build (MPCPS5_APP_PROCESS) has no statfs(2) / getfsstat(2): the SDK has them only in libkernel_sys,
+// which a title can't load (1.5 imported it and crashed at launch, #3). Its FindAppPlace asks the helper payload, which
+// answers with its own FindAppPlace (jailbreak::kCmdAppPlace); without an answer (no helper, or a 1.4 / 1.5 one that
+// doesn't know the request) FindAppPlaceWithoutMounts: ShadowMount+'s link checked with stat(2) against what
+// /system_ex/app/<TITLE_ID> shows (param.json, the same eboot.bin), written directly (never through the mount), images
+// never; anything else not written.
+AppPlace FindAppPlaceWithoutMounts(const std::string& title_id, const std::string& default_dir);
+// The helper's answer: "key=value" lines. Parse fails (false) on anything but absolute folders.
+std::string SerializeAppPlace(const AppPlace& a);
+bool ParseAppPlace(const std::string& text, AppPlace& out);

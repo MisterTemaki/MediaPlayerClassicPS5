@@ -44,6 +44,10 @@ constexpr int32_t kCmdWantedCovers = 6;
 // In the answer's msg2: the helper downloads the wanted covers itself, in the background (fe_coverworker.h).
 constexpr const char* kBackgroundCovers = "covers: background";
 constexpr int32_t kMaxWantedBytes = 1 << 20;
+// 1.5.1: where the app the console runs is (ProsperoAppPlace.h): msg1 the title id, msg2 the default folder; the
+// helper answers ret = the length of its FindAppPlace's text, then the text. 1.4 / 1.5 helpers close the connection.
+constexpr int32_t kCmdAppPlace = 7;
+constexpr int32_t kMaxAppPlaceBytes = 1 << 16;
 constexpr int32_t kRetUntouched = -1337;
 
 // The app side: ask for this process. Returns true when a helper answered yes; `how` names it.
@@ -54,6 +58,9 @@ bool RequestForSelf(std::string& how);
 // ELF loader if none answers). False when no helper could be reached; `text` may be empty (nothing wanted).
 // `background`: the helper downloads them itself (the app downloads nothing at start).
 bool FetchWantedCovers(std::string& text, bool* background = nullptr);
+
+// The app side: the helper's answer to kCmdAppPlace (no helper started for it). False when none came.
+bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, std::string& text);
 
 // The helper ELF built into the app (helper_data.cpp in the native eboot; nothing elsewhere).
 struct Blob

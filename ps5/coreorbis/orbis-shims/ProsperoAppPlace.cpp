@@ -1,5 +1,11 @@
 // Media Player Classic PS5 1.5: where the app the console runs really is (ProsperoAppPlace.h).
 //
+// Two builds of this file: the payloads' (the installer and the helper), which read the mount table with
+// statfs(2) / getfsstat(2); and the app's (ProsperoAppPlaceApp.cpp, MPCPS5_APP_PROCESS), which must not: the SDK
+// has those two only in libkernel_sys, a library a title can't load (1.5 imported it and crashed at launch, #3).
+// The app asks the helper, which runs FindAppPlace here and sends the answer; without one it goes by ShadowMount+'s
+// link and stat(2) alone (FindAppPlaceWithoutMounts).
+//
 // SPDX-License-Identifier: MIT
 
 #include "ProsperoAppPlace.h"
@@ -7,9 +13,12 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#if defined(__PROSPERO__) || defined(__FreeBSD__)
+#if (defined(__PROSPERO__) || defined(__FreeBSD__)) && !defined(MPCPS5_APP_PROCESS)
 #include <sys/mount.h>
 #include <sys/param.h>
+#endif
+#ifdef MPCPS5_APP_PROCESS
+#include "ProsperoJailbreak.h"
 #endif
 
 #include <cstdio>
@@ -43,7 +52,7 @@ bool Inside(const std::string& path, const std::string& on)
 }
 
 // the longest mount point a path is in; of the mounts on one point the last one (the top)
-MountInfo Lookup(const std::vector<MountInfo>& table, const std::string& path)
+[[maybe_unused]] MountInfo Lookup(const std::vector<MountInfo>& table, const std::string& path)
 {
 	MountInfo best;
 	for (const MountInfo& m : table)
@@ -52,7 +61,18 @@ MountInfo Lookup(const std::vector<MountInfo>& table, const std::string& path)
 	return best;
 }
 
-#if defined(__PROSPERO__) || defined(__FreeBSD__)
+#if defined(MPCPS5_APP_PROCESS)
+// the app: no mount table of its own (see the top)
+bool StatfsOf(const std::string&, MountInfo&)
+{
+	return false;
+}
+
+bool MountTable(std::vector<MountInfo>&)
+{
+	return false;
+}
+#elif defined(__PROSPERO__) || defined(__FreeBSD__)
 MountInfo FromStatfs(const struct statfs& sf)
 {
 	MountInfo m;
@@ -264,7 +284,8 @@ void Finish(AppPlace& a, const std::string& title_id, bool mount_ro, const std::
 	}
 	a.fs = u.ok ? u.type : "";
 	a.image = IsImage(u, a.source);
-	a.log += Line(" (on %s, %s, from %s", u.on, a.fs, u.from) + (mount_ro || u.ro ? ", read-only)" : ")");
+	if (u.ok)
+		a.log += Line(" (on %s, %s, from %s", u.on, a.fs, u.from) + (mount_ro || u.ro ? ", read-only)" : ")");
 	a.dir = a.source;
 	if (a.image)
 	{
@@ -299,11 +320,12 @@ void Finish(AppPlace& a, const std::string& title_id, bool mount_ro, const std::
 
 // No mount on /system_ex/app/<TITLE_ID> (yet: a payload autoloaded before ShadowMount+ has mounted the app): the
 // folder ShadowMount+ last mounted there, from its link /user/app/<TITLE_ID>/mount.lnk
-void NoMount(AppPlace& a, const std::string& title_id, const std::string& default_dir, const std::string& mount)
+// ShadowMount+'s link for the title: its folder (/user/app/<TITLE_ID>/mount.lnk), "" when there is none
+std::string ReadLink(const std::string& title_id, std::string& links, std::string& lnk)
 {
 	const char* ua = getenv("MPCPS5_PS5_USER_APP");
-	const std::string links = std::string(ua && *ua ? ua : "/user/app") + "/" + title_id;
-	const std::string lnk = links + "/mount.lnk";
+	links = std::string(ua && *ua ? ua : "/user/app") + "/" + title_id;
+	lnk = links + "/mount.lnk";
 	std::string target;
 	if (FILE* f = fopen(lnk.c_str(), "r"))
 	{
@@ -317,6 +339,13 @@ void NoMount(AppPlace& a, const std::string& title_id, const std::string& defaul
 	}
 	while (target.size() > 1 && target.back() == '/')
 		target.pop_back();
+	return target;
+}
+
+void NoMount(AppPlace& a, const std::string& title_id, const std::string& default_dir, const std::string& mount)
+{
+	std::string links, lnk;
+	const std::string target = ReadLink(title_id, links, lnk);
 	a.log = mount + " isn't a mount";
 	if (!target.empty() && target[0] != '/')
 	{
@@ -372,8 +401,146 @@ void NoMount(AppPlace& a, const std::string& title_id, const std::string& defaul
 	a.log += "; ShadowMount+ runs the app from " + target + " (" + lnk + ")";
 	Finish(a, title_id, false, {target});
 }
+
+std::string OneLine(std::string v)
+{
+	for (char& c : v)
+		if (c == '\n' || c == '\r')
+			c = ' ';
+	return v;
+}
 } // namespace
 
+std::string SerializeAppPlace(const AppPlace& a)
+{
+	std::string t = "place=1\n";
+	auto put = [&](const char* k, const std::string& v) { t += std::string(k) + "=" + OneLine(v) + "\n"; };
+	put("mount", a.mount);
+	put("source", a.source);
+	put("dir", a.dir);
+	put("fs", a.fs);
+	put("writable", a.writable ? "1" : "0");
+	put("image", a.image ? "1" : "0");
+	put("unsure", a.unsure ? "1" : "0");
+	put("via_link", a.via_link ? "1" : "0");
+	put("image_pending", a.image_pending ? "1" : "0");
+	put("reason", a.reason);
+	put("log", a.log);
+	return t;
+}
+
+bool ParseAppPlace(const std::string& text, AppPlace& out)
+{
+	AppPlace a;
+	bool header = false, have_source = false, have_dir = false;
+	size_t at = 0;
+	while (at < text.size())
+	{
+		size_t end = text.find('\n', at);
+		if (end == std::string::npos)
+			end = text.size();
+		const std::string line = text.substr(at, end - at);
+		at = end + 1;
+		const size_t eq = line.find('=');
+		if (eq == std::string::npos)
+			continue;
+		const std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+		if (k == "place")
+			header = v == "1";
+		else if (k == "mount")
+			a.mount = v;
+		else if (k == "source")
+			a.source = v, have_source = true;
+		else if (k == "dir")
+			a.dir = v, have_dir = true;
+		else if (k == "fs")
+			a.fs = v;
+		else if (k == "writable")
+			a.writable = v == "1";
+		else if (k == "image")
+			a.image = v == "1";
+		else if (k == "unsure")
+			a.unsure = v == "1";
+		else if (k == "via_link")
+			a.via_link = v == "1";
+		else if (k == "image_pending")
+			a.image_pending = v == "1";
+		else if (k == "reason")
+			a.reason = v;
+		else if (k == "log")
+			a.log = v;
+	}
+	// only absolute folders: anything else and the answer isn't used
+	if (!header || !have_source || !have_dir || a.source.empty() || a.source[0] != '/' || a.dir.empty() || a.dir[0] != '/' ||
+		(!a.mount.empty() && a.mount[0] != '/'))
+		return false;
+	out = a;
+	return true;
+}
+
+AppPlace FindAppPlaceWithoutMounts(const std::string& title_id, const std::string& default_dir)
+{
+	AppPlace a;
+	a.source = a.dir = default_dir;
+	const char* sx = getenv("MPCPS5_PS5_SYSTEM_EX");
+	const std::string mount = std::string(sx && *sx ? sx : "/system_ex") + "/app/" + title_id;
+	if (!Exists(mount + "/eboot.bin"))
+	{
+		// nothing shown there: as with no mount (ShadowMount+'s link, else default_dir)
+		NoMount(a, title_id, default_dir, mount);
+		a.log = "(no mount table) " + a.log;
+		return a;
+	}
+	// the app is there, from a folder the mount table would name: ShadowMount+'s link names it, checked against what
+	// the mount shows (its param.json, the same eboot.bin). The folder is written directly, never through the mount:
+	// without the table a layer on top of it (a backport's unionfs) can't be seen
+	std::string links, lnk;
+	const std::string target = ReadLink(title_id, links, lnk);
+	a.mount = mount;
+	a.log = mount + " shows the app (no mount table)";
+	if (target.empty() || target[0] != '/')
+	{
+		a.source = mount;
+		Unsure(a, "the folder this copy runs from can't be told without the helper payload's answer, and ShadowMount+ has no "
+				  "link for it.",
+			target.empty() ? ", no ShadowMount+ link: not written" : ", ShadowMount+'s link isn't a path: not written");
+		return a;
+	}
+	a.source = target;
+	a.via_link = true;
+	a.log += "; ShadowMount+'s link: " + target + " (" + lnk + ")";
+	if (InImages(target) || Exists(links + "/mount_img.lnk"))
+	{
+		a.dir = target;
+		SetImage(a);
+		a.log += ": an image's folder, not written";
+		return a;
+	}
+	if (!Exists(target) || !NamesTitle(target, title_id) || !SameEboot(target, mount))
+	{
+		Unsure(a, "ShadowMount+'s link names " + target + ", which isn't the folder the console shows on " + mount + ".",
+			": not the folder the mount shows (its param.json or eboot.bin differ): not written");
+		return a;
+	}
+	Finish(a, title_id, false, {target});
+	return a;
+}
+
+#ifdef MPCPS5_APP_PROCESS
+AppPlace FindAppPlace(const std::string& title_id, const std::string& default_dir)
+{
+	// the helper payload reads the mount table (FindAppPlace in its build); an old one (1.4, 1.5) doesn't know the
+	// request and closes the connection
+	std::string text;
+	AppPlace a;
+	if (jailbreak::FetchAppPlace(title_id, default_dir, text) && ParseAppPlace(text, a))
+	{
+		a.log = "(from the helper) " + a.log;
+		return a;
+	}
+	return FindAppPlaceWithoutMounts(title_id, default_dir);
+}
+#else
 AppPlace FindAppPlace(const std::string& title_id, const std::string& default_dir)
 {
 	AppPlace a;
@@ -454,3 +621,4 @@ AppPlace FindAppPlace(const std::string& title_id, const std::string& default_di
 	Unsure(a, "the folder mounted on " + mount + " can't be identified for sure.", why + ": not written");
 	return a;
 }
+#endif

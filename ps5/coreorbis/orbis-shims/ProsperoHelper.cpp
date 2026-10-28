@@ -11,6 +11,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ProsperoJailbreak.h"
+#include "ProsperoAppPlace.h"
 
 #include "OrbisPaths.h"
 
@@ -268,6 +269,23 @@ bool ServeHelper(void (*on_ready)())
 			snprintf(req.msg2, sizeof(req.msg2), "%s", kBackgroundCovers);
 			OrbisLog("[helper] pid %d: wanted-covers list, %zu bytes", req.pid, text.size());
 			if (SendUntil(c, &req, sizeof(req), deadline))
+				SendUntil(c, text.data(), text.size(), deadline);
+		}
+		else if (got == sizeof(req) && req.magic == kMagic && req.cmd == kCmdAppPlace)
+		{
+			// 1.5.1: where the app the console runs is, read here (statfs / getfsstat are a payload's to call, not a
+			// title's: #3). Only this title, and only an absolute default folder of it
+			req.msg1[sizeof(req.msg1) - 1] = 0;
+			req.msg2[sizeof(req.msg2) - 1] = 0;
+			const std::string title = req.msg1, dflt = req.msg2;
+			const std::string tail = "/" + title;
+			std::string text;
+			if (title == MPCPS5_TITLE_ID && !dflt.empty() && dflt[0] == '/' && dflt.size() > tail.size() &&
+				dflt.compare(dflt.size() - tail.size(), tail.size(), tail) == 0)
+				text = SerializeAppPlace(FindAppPlace(title, dflt));
+			req.ret = text.empty() || text.size() > size_t(kMaxAppPlaceBytes) ? -1 : int32_t(text.size());
+			OrbisLog("[helper] pid %d: where %s is: %s", req.pid, title.c_str(), req.ret < 0 ? "refused" : "answered");
+			if (SendUntil(c, &req, sizeof(req), deadline) && req.ret > 0)
 				SendUntil(c, text.data(), text.size(), deadline);
 		}
 		else if (got == sizeof(req) && req.magic == kMagic && req.cmd == kCmdJailbreak)

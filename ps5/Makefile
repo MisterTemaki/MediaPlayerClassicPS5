@@ -27,7 +27,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.5
+VERSION ?= 1.5.1
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -45,12 +45,13 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
 	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp player/mpc_i18n.cpp \
 	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp \
-	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlace.cpp
-# the payloads: the helper, and the installer (= helper + install)
+	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlaceApp.cpp
+# the payloads: the helper, and the installer (= helper + install). ProsperoAppPlace.cpp reads the mount table there
+# (statfs / getfsstat, libkernel_sys); the app has its own build of it without (ProsperoAppPlaceApp.cpp, #3)
 HELPER_SRC := coreorbis/orbis-shims/orbis_paths.cpp coreorbis/orbis-shims/ProsperoNotify.cpp \
-	coreorbis/orbis-shims/ProsperoHelper.cpp coreorbis/orbis-shims/ProsperoCrash.cpp
+	coreorbis/orbis-shims/ProsperoHelper.cpp coreorbis/orbis-shims/ProsperoCrash.cpp coreorbis/orbis-shims/ProsperoAppPlace.cpp
 INSTALLER_SRC := installer/installer_main.cpp $(HELPER_SRC) coreorbis/orbis-shims/ProsperoInstall.cpp \
-	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlace.cpp
+	coreorbis/orbis-shims/ProsperoUpdate.cpp
 
 # Ed25519 for the release signatures (Monocypher 4.0.2, BSD-2-Clause / CC0): in the app and the installer, which both
 # link ProsperoUpdate.cpp
@@ -72,6 +73,7 @@ FF_LIBS = -lavformat -lavcodec -lavfilter -lswscale -lswresample -lavutil -ldav1
 %/port/player/mpc_res.o: $(wildcard assets/res/* assets/fonts/*)
 %/port/player/mpc_font.o: EXTRA_FLAGS = -Wno-error -Wno-sign-compare -Wno-unused-function
 %/port/player/mpc_app.o: assets/data/cacert.pem
+%/port/coreorbis/orbis-shims/ProsperoAppPlaceApp.o: coreorbis/orbis-shims/ProsperoAppPlace.cpp
 # the helper payload is installer_main.cpp without the install step
 %/port/installer/helper_main.o: EXTRA_FLAGS = -DMPCPS5_HELPER_ONLY
 
@@ -173,7 +175,10 @@ LIBC_BUILDER := $(NATIVE)/build/host/libc-builder
 LLD ?= ld.lld
 NATIVE_CLANG = PS5_PAYLOAD_SDK=$(PS5_PAYLOAD_SDK) sh $(NATIVE)/tooling/prospero-clang18
 SDK_LIB := $(PS5_PAYLOAD_SDK)/target/lib
-APP_STUBS = $(filter-out %/libScePosixForWebKit.so %/libSceGLSlimVSH.so,$(sort $(wildcard $(SDK_LIB)/*.so)))
+# Not libkernel_sys / libkernel_web either: a title can't load them (1.5 picked up libkernel_sys through statfs and
+# crashed at launch, #3); with them left out such a symbol is a link error. tools/check_imports.py checks the result.
+APP_STUBS = $(filter-out %/libScePosixForWebKit.so %/libSceGLSlimVSH.so %/libkernel_sys.so %/libkernel_web.so,\
+	$(sort $(wildcard $(SDK_LIB)/*.so)))
 
 $(NATIVE_TOOL): $(NATIVE)/tooling/native/native_app_builder.cpp $(NATIVE)/tooling/native/elf_object.cpp \
 		$(NATIVE)/tooling/native/self_container.cpp $(NATIVE)/tooling/native/sce_module_writer.cpp
@@ -223,6 +228,7 @@ build/app/mpc-pie.elf: $(EBOOT_OBJS) $(FF_PS5_ARCHIVES) $(VDEC_STUB) $(NATIVE)/t
 		--start-group $(FF_PS5_ARCHIVES) --end-group \
 		$(VDEC_STUB) $(SDK_LIB)/libSceSysmodule.so --as-needed $(filter-out %/libSceSysmodule.so,$(APP_STUBS)) -L $(SDK_LIB) \
 		$(SDK_LIB)/libc++.a $(SDK_LIB)/libc++abi.a $(SDK_LIB)/libunwind.a $(SDK_LIB)/libc.a -lpthread
+	python3 tools/check_imports.py $@ $(SDK_LIB) $(VDEC_STUB) || { rm -f $@; exit 1; }
 
 build/app/eboot.elf: build/app/mpc-pie.elf $(NATIVE_TOOL)
 	$(NATIVE_TOOL) link --in $< --out $@ --stub-dir $(SDK_LIB) --stub $(VDEC_STUB) --module-sdk 0x02000009 \

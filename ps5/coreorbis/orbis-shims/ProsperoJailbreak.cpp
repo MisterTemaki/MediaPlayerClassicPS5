@@ -216,6 +216,60 @@ bool FetchWantedCovers(std::string& text, bool* background)
 	return r == 1;
 }
 
+bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, std::string& text)
+{
+	text.clear();
+	const int port = PortFromEnv("MPCPS5_HELPER_PORT", kHelperPort);
+	const int fd = ConnectLocal(port);
+	if (fd < 0)
+	{
+		OrbisLog("[update] no helper on port %d to ask where the app is", port);
+		return false;
+	}
+	Request req;
+	memset(&req, 0, sizeof(req));
+	req.magic = kMagic;
+	req.cmd = kCmdAppPlace;
+	req.pid = int32_t(getpid());
+	req.ret = kRetUntouched;
+	snprintf(req.msg1, sizeof(req.msg1), "%s", title_id.c_str());
+	snprintf(req.msg2, sizeof(req.msg2), "%s", default_dir.c_str());
+	size_t got = 0;
+	if (WriteAll(fd, &req, sizeof(req)))
+		while (got < sizeof(req))
+		{
+			const ssize_t n = recv(fd, reinterpret_cast<char*>(&req) + got, sizeof(req) - got, 0);
+			if (n <= 0)
+				break;
+			got += size_t(n);
+		}
+	if (got != sizeof(req) || req.magic != kMagic || req.cmd != kCmdAppPlace || req.ret < 0 || req.ret > kMaxAppPlaceBytes)
+	{
+		close(fd);
+		// a 1.4 / 1.5 helper ignores the request and closes the connection
+		OrbisLog("[update] the helper didn't say where the app is (%zu bytes back, ret %d): an older helper", got,
+			got == sizeof(req) ? req.ret : 0);
+		return false;
+	}
+	text.resize(size_t(req.ret));
+	size_t have = 0;
+	while (have < text.size())
+	{
+		const ssize_t n = recv(fd, &text[have], text.size() - have, 0);
+		if (n <= 0)
+			break;
+		have += size_t(n);
+	}
+	close(fd);
+	if (have != text.size())
+	{
+		OrbisLog("[update] the helper's answer was cut short (%zu of %zu bytes): not used", have, text.size());
+		text.clear();
+		return false;
+	}
+	return true;
+}
+
 bool RequestForSelf(std::string& how)
 {
 	const int own = PortFromEnv("MPCPS5_HELPER_PORT", kHelperPort);

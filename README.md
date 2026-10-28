@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5):** builds with the ps5-payload-dev SDK into a signed native app and passes 461 host tests
+> **Status (1.5.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 467 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -27,6 +27,16 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.5.1:** a fix for **1.5 not opening on the console** (it stopped at launch with "signal: 12 (SIGSYS)"),
+found by **Sulfurico-One64** ([#3](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/3)). To find the folder
+ShadowMount+ runs the app from, 1.5's app called `statfs` / `getfsstat`, which the SDK has only in `libkernel_sys` --
+a library for the console's system processes, not for a title -- so 1.5's eboot asked to load `libkernel_sys.sprx`
+and the console stopped it. In 1.5.1 the app asks the helper payload, where those calls belong; with an older helper
+(1.4's or 1.5's, e.g. in your autoload) or none it goes by ShadowMount+'s link, checked against what the console shows,
+and otherwise writes nothing (see [Updates](#updates)). Its eboot imports exactly what 1.4's did, and the build now
+fails if the eboot would need any library or symbol a title can't load (`tools/check_imports.py`). If 1.5 doesn't open
+for you, see [If the app doesn't open](#if-the-app-doesnt-open). Only a PS5 can confirm that 1.5.1 opens again.
 
 **1.5:** what Sulfurico-One64 asked for in a new comment on
 [#1](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/1), and the in-app update fixed for ShadowMount+:
@@ -164,6 +174,7 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 ## Contents
 
 - [Install](#install)
+- [If the app doesn't open](#if-the-app-doesnt-open)
 - [The window](#the-window)
 - [Controls](#controls)
 - [Opening media](#opening-media)
@@ -179,8 +190,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.5.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.elf`).
+1. Send `MediaPlayerClassicPS5-v1.5.1.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.1.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon -- or, 1.5, updates the folder ShadowMount+
    already runs it from, see [Updates](#updates)) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
@@ -189,6 +200,26 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 Title ID `PPSA99015`, data folder `/data/mpcps5`. Nothing of the emulator ports (Snes9x, Genesis Plus GX,
 FBNeo, Mesen2, NES FCEUmm) is touched.
+
+## If the app doesn't open
+
+1.5 doesn't open on the console (#3: "Error in game PPSA99015: signal: 12 (SIGSYS)"); 1.5.1 fixes that. To get a
+working app:
+- **Send the 1.5.1 payload** (`MediaPlayerClassicPS5-v1.5.1.elf`) and put it in your autoload instead of 1.5's. It is
+  newer than the installed 1.5, so it writes itself over it -- into the folder ShadowMount+ runs the app from (found
+  as described in [Updates](#updates)); then close the app if it is open and open it again. A 1.4 app updates to 1.5.1
+  from **Help > Check for updates** as well (1.4's updater writes `/data/homebrew/PPSA99015`: if ShadowMount+ runs
+  your copy from another folder, send the payload instead).
+- **Going back to an older version** (1.4, say): a payload never writes itself over a newer version ("a newer version
+  is installed ... left it as it is"), so first move or delete the app's folder (`/data/homebrew/PPSA99015`, or the
+  one ShadowMount+ runs it from), then send the older payload: it installs afresh. If the app was in an image, put the
+  older version's folder in the image instead.
+- **What Sulfurico-One64 did with ShadowMount+** (it works for any version): move the app's folder out of the place
+  ShadowMount+ scans, uninstall the app from the home screen, let ShadowMount+ run again (from the Payload Manager)
+  so it forgets it, then put the folder of the version you want back (from that version's release zip, or with its
+  payload) and run ShadowMount+ again: it registers the app from that folder.
+- If it still doesn't open, please report it with the console's error and, if there is one,
+  `/data/mpcps5/logs/boot.log` and `/data/mpcps5/logs/installer.log`.
 
 ## The window
 
@@ -509,6 +540,11 @@ Honest limits:
   used only when its name is whole (the system cuts it at 87 characters) and its `eboot.bin` is the one the mount
   shows, otherwise the files go only through the mount; another layer on top of the mount (a backport's unionfs) is
   never written into -- the folder beneath is; and when the mount can't be read at all, nothing is written.
+  **1.5.1:** the mount table is read by the helper payload (a title can't call `statfs` / `getfsstat`: #3); the app
+  asks it (`boot.log`: `[update] (from the helper) ...`). With an older helper (1.4's, 1.5's) or none, the app goes by
+  ShadowMount+'s link `/user/app/PPSA99015/mount.lnk`: that folder is updated directly only when its `param.json`
+  names PPSA99015 and its `eboot.bin` is the one `/system_ex/app/PPSA99015` shows; an image's folder never; without a
+  link, or with one to another folder, nothing is written and Check for updates says it can't tell.
 - **No mount yet** (the payload autoloaded before ShadowMount+ has mounted the app): the folder ShadowMount+ last
   mounted is in its link `/user/app/PPSA99015/mount.lnk`; the payload updates that folder (if it names PPSA99015), so
   **no second copy** is made in `/data/homebrew`. If that folder isn't there (a drive not connected yet) nothing is
@@ -532,9 +568,9 @@ Honest limits:
 - **The version on the home screen** (the app's information there) comes from the registration ShadowMount+ makes
   (the console's app database): it only changes when ShadowMount+ registers the app again. That is cosmetic; the app
   itself says its version in Help > About. The app doesn't touch that database.
-- Only a PS5 can confirm the ShadowMount+ part: the mount table (statfs, getfsstat), writing through `/system_ex/app`,
-  the backport layer, `mount.lnk` and Restart's eboot have been checked with a faked mount table on the host, not on a
-  console yet.
+- Only a PS5 can confirm the ShadowMount+ part: the mount table (statfs, getfsstat, in the helper), writing through
+  `/system_ex/app`, the backport layer, `mount.lnk`, the same-eboot check through the mount and Restart's eboot have
+  been checked with a faked mount table on the host, not on a console yet.
 - **Your autoload:** the updated app is newer than the ELF in your autoload. The older ELF sees that and leaves the
   app alone (its notification says so). Put the new ELF in your autoload when you can.
 
@@ -576,9 +612,10 @@ On Linux (Ubuntu 24.04 tested), with the [ps5-payload-dev SDK](https://github.co
 cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib, the subtitle and the disc libraries,
                    # for the PS5 and the host (once); make deps-disc: only the disc libraries, then FFmpeg again
-make ps5           # build/ps5/MediaPlayerClassicPS5.elf
+make ps5           # build/ps5/MediaPlayerClassicPS5.elf (1.5.1: fails if the eboot would load a library or import a
+                   # symbol a title can't -- libkernel_sys, libkernel_web: tools/check_imports.py, #3)
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.5.elf, the release zip, mpc-ps5-v1.5-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.5.1.elf, the release zip, mpc-ps5-v1.5.1-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 
