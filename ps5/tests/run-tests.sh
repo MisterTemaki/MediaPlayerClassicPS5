@@ -715,17 +715,7 @@ nosan "$T"
 rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015; ver $U $CVER; echo "eboot usb 1.5" >$U/eboot.bin
 mkdir -p $M/userapp/PPSA99015 && echo "$U" >$M/userapp/PPSA99015/mount.lnk
 (cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
-python3 -c "
-import socket, sys
-s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('127.0.0.1', int(sys.argv[1]))); s.listen(4)
-while True:
-    c, _ = s.accept(); c.settimeout(2)
-    try:
-        c.recv(0x50c)
-    except Exception:
-        pass
-    c.close()  # what a 1.4 / 1.5 helper does with a request it doesn't know
-" $MPCPS5_HELPER_PORT >/dev/null 2>&1 &
+python3 tests/fake_helper.py $MPCPS5_HELPER_PORT old >"$T/oldh.txt" 2>&1 &
 OLDH=$!
 sleep 0.5
 release v9.9 99.000.000
@@ -745,7 +735,44 @@ rm -f $T/root/logs/boot.log
 rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_PS5_USER_APP=$M/userapp u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
 stop16
 expect "grep -q \"ShadowMount+'s link: $O2 .*: not the folder the mount shows\" $T/root/logs/boot.log && grep -q \"The app can't tell for sure which folder\" $T/root/logs/boot.log && sums $U | cmp -s - $T/u.sums && sums $O2 | cmp -s - $T/o2.sums" "... a link to another folder than the one shown (another eboot.bin): nothing written"
-rm -rf $M/userapp $M/other2
+# n: a helper answering with a folder that isn't this app's (its param.json names another title), "writable": the
+# app checks it and writes nothing
+rm -rf $M/other3 && mkdir -p $M/other3 && cp -r $U $M/other3/PPSA99015 && O3=$M/other3/PPSA99015
+sed -i 's/"titleId": "PPSA99015"/"titleId": "PPSA00001"/' $O3/sce_sys/param.json; sums $O3 >$T/o3.sums
+printf 'place=1\nmount=%s\nsource=%s\ndir=%s\nfs=ufs\nwritable=1\nimage=0\nunsure=0\nvia_link=0\nimage_pending=0\nreason=\nlog=a fake answer\n' \
+	"$SX/app/PPSA99015" "$O3" "$O3" >$T/place.txt
+python3 tests/fake_helper.py $MPCPS5_HELPER_PORT place $T/place.txt >"$T/fakeh.txt" 2>&1 &
+FH=$!
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+sleep 0.5
+release v9.9 99.000.000
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_PS5_USER_APP=$M/userapp u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
+kill $FH 2>/dev/null; wait $FH 2>/dev/null
+expect "grep -q \"(from the helper) a fake answer; but the folder to write holds no param.json naming PPSA99015: not written\" $T/root/logs/boot.log && grep -q \"The app can't tell for sure which folder\" $T/root/logs/boot.log && sums $O3 | cmp -s - $T/o3.sums" "a helper naming another title's folder (writable): the app checks its param.json, writes nothing"
+# o: a helper that never answers (wedged): the unlock waits its 5 s, the question where the app is isn't asked again --
+# start-up doesn't take 10 s
+python3 tests/fake_helper.py $MPCPS5_HELPER_PORT silent >"$T/silenth.txt" 2>&1 &
+FH=$!
+sleep 0.5
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:quit" "")
+kill $FH 2>/dev/null; wait $FH 2>/dev/null
+el16() { python3 - "$T/root/logs/boot.log" <<'PY'
+import re, sys
+t = {}
+for l in open(sys.argv[1], errors='replace'):
+    m = re.match(r'\[\s*([0-9.]+)\] (.*)', l)
+    if m and 'asks to leave the sandbox' in m.group(2) and 'a' not in t:
+        t['a'] = float(m.group(1))
+    if m and m.group(2).startswith('[update] (no mount table)') and 'b' not in t:
+        t['b'] = float(m.group(1))
+print('%.2f' % (t['b'] - t['a']))
+PY
+}
+expect "[ $rc = 0 ] && grep -q 'not asking the helper where the app is: at start it no reply within 5 s' $T/root/logs/boot.log && python3 -c \"import sys; sys.exit(0 if \$(el16) < 7.5 else 1)\"" "a helper that never answers: asked once (5 s), not again where the app is"
+stop16
+rm -rf $M/userapp $M/other2 $M/other3
 [ "$M" = "$T" ] || rm -rf "$M"
 fi
 

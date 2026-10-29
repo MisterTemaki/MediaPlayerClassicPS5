@@ -71,6 +71,45 @@ bool WriteAll(int fd, const void* data, size_t size)
 	return true;
 }
 
+// How our own helper last replied (1.5.1): a request after an unanswered unlock doesn't wait again (a wedged helper
+// would add 5 s to every start), and the log says what happened.
+enum class Reply
+{
+	NotAsked,
+	Answered, // a whole reply with our magic
+	Absent,   // nobody on the port
+	TimedOut, // connected, no (whole) reply within the 5 s
+	Closed,   // connected, then closed without a whole reply (a 1.4 / 1.5 helper on a request it doesn't know)
+};
+Reply g_own_reply = Reply::NotAsked;
+
+const char* ReplyName(Reply r)
+{
+	switch (r)
+	{
+		case Reply::Answered:
+			return "answered";
+		case Reply::Absent:
+			return "no helper on the port";
+		case Reply::TimedOut:
+			return "no reply within 5 s";
+		case Reply::Closed:
+			return "closed the connection without a reply";
+		default:
+			return "not asked";
+	}
+}
+
+// what a reply of `got` bytes (the last recv returned n, errno e) was
+Reply ReplyOf(size_t got, size_t want, ssize_t n, int e, bool magic_ok)
+{
+	if (got == want && magic_ok)
+		return Reply::Answered;
+	if (n < 0 && (e == EAGAIN || e == EWOULDBLOCK))
+		return Reply::TimedOut;
+	return Reply::Closed;
+}
+
 // One request to one daemon. 1 = yes, 0 = no answer on that port, -1 = it answered no.
 // strict (our own helper): only a whole reply with our magic and ret 0 counts. The other daemons get PS5SX2's
 // leniency (etaHEN's legacy server can answer without touching ret).
@@ -80,6 +119,8 @@ int Ask(int port, const char* who, bool strict)
 	if (fd < 0)
 	{
 		OrbisLog("[jailbreak] %s (port %d): nobody there (errno %d)", who, port, errno);
+		if (strict)
+			g_own_reply = Reply::Absent;
 		return 0;
 	}
 	Request req;
@@ -95,14 +136,19 @@ int Ask(int port, const char* who, bool strict)
 		return 0;
 	}
 	size_t got = 0;
+	ssize_t n = 0;
+	int e = 0;
 	while (got < sizeof(req))
 	{
-		const ssize_t n = recv(fd, reinterpret_cast<char*>(&req) + got, sizeof(req) - got, 0);
+		n = recv(fd, reinterpret_cast<char*>(&req) + got, sizeof(req) - got, 0);
+		e = errno;
 		if (n <= 0)
 			break;
 		got += size_t(n);
 	}
 	close(fd);
+	if (strict)
+		g_own_reply = ReplyOf(got, sizeof(req), n, e, req.magic == kMagic);
 	req.msg1[sizeof(req.msg1) - 1] = 0;
 	OrbisLog("[jailbreak] %s (port %d): ret %d, %zu bytes back%s%s", who, port, req.ret, got, req.msg1[0] ? ": " : "",
 		req.msg1);
@@ -220,6 +266,12 @@ bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, 
 {
 	text.clear();
 	const int port = PortFromEnv("MPCPS5_HELPER_PORT", kHelperPort);
+	if (g_own_reply == Reply::TimedOut || g_own_reply == Reply::Closed)
+	{
+		// it didn't answer the unlock either: asking again would only wait
+		OrbisLog("[update] not asking the helper where the app is: at start it %s", ReplyName(g_own_reply));
+		return false;
+	}
 	const int fd = ConnectLocal(port);
 	if (fd < 0)
 	{
@@ -235,20 +287,28 @@ bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, 
 	snprintf(req.msg1, sizeof(req.msg1), "%s", title_id.c_str());
 	snprintf(req.msg2, sizeof(req.msg2), "%s", default_dir.c_str());
 	size_t got = 0;
+	ssize_t n = 0;
+	int e = 0;
 	if (WriteAll(fd, &req, sizeof(req)))
 		while (got < sizeof(req))
 		{
-			const ssize_t n = recv(fd, reinterpret_cast<char*>(&req) + got, sizeof(req) - got, 0);
+			n = recv(fd, reinterpret_cast<char*>(&req) + got, sizeof(req) - got, 0);
+			e = errno;
 			if (n <= 0)
 				break;
 			got += size_t(n);
 		}
-	if (got != sizeof(req) || req.magic != kMagic || req.cmd != kCmdAppPlace || req.ret < 0 || req.ret > kMaxAppPlaceBytes)
+	const Reply r = ReplyOf(got, sizeof(req), n, e, req.magic == kMagic);
+	if (r != Reply::Answered || req.cmd != kCmdAppPlace || req.ret < 0 || req.ret > kMaxAppPlaceBytes)
 	{
 		close(fd);
-		// a 1.4 / 1.5 helper ignores the request and closes the connection
-		OrbisLog("[update] the helper didn't say where the app is (%zu bytes back, ret %d): an older helper", got,
-			got == sizeof(req) ? req.ret : 0);
+		if (r == Reply::Closed && got == 0)
+			OrbisLog("[update] the helper didn't say where the app is: it closed the connection without a reply (a 1.4 / "
+					 "1.5 helper doesn't know the request)");
+		else if (r != Reply::Answered)
+			OrbisLog("[update] the helper didn't say where the app is: %s (%zu bytes back)", ReplyName(r), got);
+		else
+			OrbisLog("[update] the helper didn't say where the app is: it refused (ret %d)", req.ret);
 		return false;
 	}
 	text.resize(size_t(req.ret));

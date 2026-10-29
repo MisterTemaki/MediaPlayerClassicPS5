@@ -73,7 +73,6 @@ FF_LIBS = -lavformat -lavcodec -lavfilter -lswscale -lswresample -lavutil -ldav1
 %/port/player/mpc_res.o: $(wildcard assets/res/* assets/fonts/*)
 %/port/player/mpc_font.o: EXTRA_FLAGS = -Wno-error -Wno-sign-compare -Wno-unused-function
 %/port/player/mpc_app.o: assets/data/cacert.pem
-%/port/coreorbis/orbis-shims/ProsperoAppPlaceApp.o: coreorbis/orbis-shims/ProsperoAppPlace.cpp
 # the helper payload is installer_main.cpp without the install step
 %/port/installer/helper_main.o: EXTRA_FLAGS = -DMPCPS5_HELPER_ONLY
 
@@ -259,6 +258,9 @@ $(APP_OUT)/sce_sys/%.dds: app/sce_sys/%.dds
 HOST_CC ?= gcc
 HOST_CXX ?= g++
 HOST_OUT := build/host
+# the app's build of ProsperoAppPlace.cpp includes it (explicit targets: a recipe-less pattern rule adds nothing)
+$(PS5_OUT)/port/coreorbis/orbis-shims/ProsperoAppPlaceApp.o $(HOST_OUT)/port/coreorbis/orbis-shims/ProsperoAppPlaceApp.o: \
+	coreorbis/orbis-shims/ProsperoAppPlace.cpp
 HOST_SAN ?= -fsanitize=address,undefined -fno-omit-frame-pointer
 HOST_OPT := -O1 -g -mavx2 -fno-strict-aliasing
 HOST_DEP_INCS := -isystem $(DEPS_HOST)/include

@@ -536,6 +536,19 @@ AppPlace FindAppPlace(const std::string& title_id, const std::string& default_di
 	if (jailbreak::FetchAppPlace(title_id, default_dir, text) && ParseAppPlace(text, a))
 	{
 		a.log = "(from the helper) " + a.log;
+		// not taken on trust: a folder the app would write must be this app's (its param.json names the title), and
+		// so must the folder it says the console runs, when it is one (a link's, an image's)
+		const bool dir_ok = NamesTitle(a.dir, title_id);
+		const bool source_ok = !(a.via_link || a.image) || a.source == a.dir || NamesTitle(a.source, title_id);
+		if (a.writable && (!dir_ok || !source_ok))
+		{
+			const std::string bad = dir_ok ? a.source : a.dir;
+			a.mount.clear();
+			a.dir = a.source;
+			Unsure(a, "the folder the helper named (" + bad + ") isn't this app's.",
+				"; but " + std::string(dir_ok ? "the source" : "the folder to write") + " holds no param.json naming " +
+					title_id + ": not written");
+		}
 		return a;
 	}
 	return FindAppPlaceWithoutMounts(title_id, default_dir);
