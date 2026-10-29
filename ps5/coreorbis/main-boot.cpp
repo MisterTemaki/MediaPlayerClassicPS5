@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <pthread.h>
+#include <stdexcept>
 #include <string>
 #include <unistd.h>
 
@@ -63,6 +64,70 @@ void WritePid()
 	_exit(status);
 }
 
+// 1.5.2: the C++ runtime checked at the start, with the debug logs on: a throw from our code and one from inside libc++
+// (std::stoi), each caught by type, and a dynamic_cast (the dialogs use it) through the type_info vtables. Up to 1.5.1
+// the eboot took the personality routine and the type_info vtables from the system's libSceLibcInternal next to its own
+// static __cxa_throw and unwinder (the Makefile's link order), the mix that crashed Stella PS5 1.0 at its first throw.
+// boot.log says "exceptions: ok" when they work (a crash here names this stage).
+struct SelfTestBase
+{
+	virtual ~SelfTestBase() = default;
+};
+struct SelfTestDerived : SelfTestBase
+{
+	int value = 42;
+};
+
+__attribute__((noinline)) int ThrowForSelfTest(int v)
+{
+	if (v > 0)
+		throw std::runtime_error("self-test");
+	return v;
+}
+
+__attribute__((noinline)) SelfTestBase* MakeForSelfTest(bool derived)
+{
+	return derived ? new SelfTestDerived : new SelfTestBase;
+}
+
+void ExceptionSelfTest()
+{
+	if (!OrbisLogEnabled())
+		return;
+	MPCPS5_STAGE(Boot, "exceptions self-test");
+	OrbisLog("[boot] exceptions: self-test (a throw and its catch)");
+	OrbisLogSync();
+	volatile int one = 1;
+	bool ours = false, libcxx = false, cast = false;
+	try
+	{
+		ThrowForSelfTest(one);
+	}
+	catch (const std::runtime_error& e)
+	{
+		ours = strcmp(e.what(), "self-test") == 0;
+	}
+	try
+	{
+		volatile int n = std::stoi(std::string(one ? "not a number" : "1"));
+		(void)n;
+	}
+	catch (const std::invalid_argument&)
+	{
+		libcxx = true;
+	}
+	SelfTestBase* d = MakeForSelfTest(one != 0);
+	SelfTestBase* b = MakeForSelfTest(one == 0);
+	const SelfTestDerived* dd = dynamic_cast<SelfTestDerived*>(d);
+	cast = dd && dd->value == 42 && dynamic_cast<SelfTestDerived*>(b) == nullptr;
+	delete d;
+	delete b;
+	OrbisLog("[boot] exceptions: %s (our throw %s, libc++'s std::invalid_argument %s, dynamic_cast %s)",
+		ours && libcxx && cast ? "ok" : "NOT OK", ours ? "caught" : "missed", libcxx ? "caught" : "missed",
+		cast ? "right" : "WRONG");
+	OrbisLogSync();
+}
+
 struct Args
 {
 	int argc;
@@ -89,6 +154,7 @@ int Run(int argc, char** argv)
 	OrbisLog("[boot] jailbreak: %s", freed ? how.c_str() : "nobody answered");
 	const bool have_data = OrbisPathsInit();
 	OrbisLogOpen(); // also writes the lines above
+	ExceptionSelfTest();
 	if (!have_data)
 		OrbisLog("[boot] can't create %s: no access to /data", OrbisRoot().c_str());
 	else

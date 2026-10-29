@@ -61,6 +61,7 @@ T=$(newroot t1)
 rc=$(run "$T" "0:0;60:$OPTIONS;62:0;70:$UP;72:0;80:$CROSS;82:0" "" "40,75")
 expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
 expect "grep -q 'Media Player Classic PS5 $(sed -n 's/^VERSION ?= //p' Makefile), FFmpeg' $T/root/logs/boot.log" "boot log names the player and FFmpeg"
+expect "grep -q '\[boot\] exceptions: ok (our throw caught, libc++.s std::invalid_argument caught, dynamic_cast right)' $T/root/logs/boot.log" "1.5.2: the start checks C++ exceptions and dynamic_cast (debug logs on): ok"
 expect "$CHECK $T/dump/flip00040.ppm 900 10 255 255 255 2 >/dev/null" "the white title bar"
 expect "$CHECK $T/dump/flip00040.ppm 960 1062 0 0 0 2 >/dev/null" "the black status bar"
 expect "$CHECK $T/dump/flip00040.ppm 900 1025 240 240 240 2 >/dev/null" "the toolbar in COLOR_BTNFACE"
@@ -1679,12 +1680,25 @@ nosan "$T"
 fi
 
 if want 29; then
-echo "== 29. 1.5.1 (#3): the eboot imports only what a title may load (no libkernel_sys / libkernel_web)"
+echo "== 29. 1.5.1 (#3): the eboot imports only what a title may load (no libkernel_sys / libkernel_web); 1.5.2: its own C++ runtime, the Makefile's dependencies"
 SDKLIB=${PS5_PAYLOAD_SDK:-/opt/ps5-payload-sdk}/target/lib
 if [ -f build/app/mpc-pie.elf ] && [ -d "$SDKLIB" ]; then
 	python3 tools/check_imports.py build/app/mpc-pie.elf "$SDKLIB" build/app/stubs/libSceVideodec2.so >"$WORK/imports.txt" 2>&1
 	rc=$?
 	expect "[ $rc = 0 ] && grep -q '^check_imports: ok' $WORK/imports.txt && ! grep -q 'libkernel_sys\|libkernel_web' $WORK/imports.txt" "the app's PIE (build/app/mpc-pie.elf): only allowed modules and symbols"
+	# 1.5.2: the eboot's C++ runtime is its own: its __gxx_personality_v0 defined (not imported), every CIE's
+	# personality slot relocated to it, and __eh_frame_hdr_start = .eh_frame_hdr (libunwind finds the FDEs by it)
+	if command -v llvm-dwarfdump-18 >/dev/null && command -v llvm-readelf-18 >/dev/null; then
+		P=build/app/mpc-pie.elf
+		pers=$(llvm-readelf-18 -sW $P | awk '$NF=="__gxx_personality_v0" && $2 != "0000000000000000" {print $2}' | sed 's/^0*//' | head -1)
+		slots=$(llvm-dwarfdump-18 --eh-frame $P 2>/dev/null | awk '/Personality Address/ {print $3}' | sed 's/^0*//' | sort -u)
+		hdr=$(llvm-readelf-18 -SW $P | awk '$2==".eh_frame_hdr" {print $4}' | sed 's/^0*//')
+		ok=1
+		[ -n "$pers" ] && [ -n "$slots" ] || ok=0
+		for s in $slots; do llvm-readelf-18 -rW $P | grep -qi "^0*$s .*R_X86_64_RELATIVE *0*$pers\$" || ok=0; done
+		llvm-readelf-18 -sW $P | awk '$NF=="__eh_frame_hdr_start" {print $2}' | grep -qi "0*$hdr\$" || ok=0
+		expect "[ $ok = 1 ] && grep -q '^check_imports: ok' $WORK/imports.txt && ! grep -q 'the C++ runtime' $WORK/imports.txt" "the eboot's C++ runtime is its own: __gxx_personality_v0 at 0x$pers, every CIE's personality slot ($(echo $slots | tr ' ' ,)) relocated to it, __eh_frame_hdr_start = .eh_frame_hdr"
+	fi
 else
 	echo "  (skipped: build/app/mpc-pie.elf or the SDK isn't there -- make ps5 first)"
 fi
@@ -1697,6 +1711,14 @@ if [ -d "$SDKLIB" ] && command -v ld.lld >/dev/null && command -v clang >/dev/nu
 	python3 tools/check_imports.py "$WORK/imp/bad.elf" "$SDKLIB" >"$WORK/imp/out.txt" 2>&1
 	rc=$?
 	expect "[ $rc = 1 ] && grep -q 'NEEDED libkernel_sys.sprx: not a module the app may load' $WORK/imp/out.txt && grep -q 'import statfs: not in an allowed module (only in libkernel_sys.so)' $WORK/imp/out.txt" "a PIE importing statfs (1.5's crash): refused, naming libkernel_sys"
+	# 1.5.2: a PIE taking the C++ personality routine from the system (the eboot up to 1.5.1, Stella PS5 1.0's crash
+	# starting a game): refused
+	printf 'extern char __gxx_personality_v0;\nvoid* p = &__gxx_personality_v0;\nint _start(void) { return p != 0; }\n' >"$WORK/imp/cxx.c"
+	clang -fPIC -c -o "$WORK/imp/cxx.o" "$WORK/imp/cxx.c" &&
+		ld.lld -pie --no-dynamic-linker -e _start -o "$WORK/imp/cxx.elf" "$WORK/imp/cxx.o" --as-needed "$SDKLIB/libkernel.so" "$SDKLIB/libSceLibcInternal.so"
+	python3 tools/check_imports.py "$WORK/imp/cxx.elf" "$SDKLIB" >"$WORK/imp/cxx.txt" 2>&1
+	rc=$?
+	expect "[ $rc = 1 ] && grep -q 'import __gxx_personality_v0: the C++ runtime .* must be the eboot.s own' $WORK/imp/cxx.txt" "a PIE importing the C++ personality routine from the system: refused"
 else
 	echo "  (skipped: no SDK, ld.lld or clang for the check's own test)"
 fi

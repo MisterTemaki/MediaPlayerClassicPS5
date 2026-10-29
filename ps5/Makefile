@@ -218,15 +218,22 @@ $(VDEC_STUB): stubs/videodec2_stub.c
 	@mkdir -p $(dir $@)
 	$(PS5_CC) -std=c11 -O2 -fPIC -c -o $(dir $@)videodec2_stub.o $<
 	$(PS5_PAYLOAD_SDK)/bin/prospero-lld --shared -soname libSceVideodec2.sprx -o $@ $(dir $@)videodec2_stub.o
+# 1.5.2: the C++ runtime is the eboot's own, whole: libc++, libc++abi (__cxa_throw, the personality routine, the
+# type_info vtables dynamic_cast walks) and libunwind (which finds the FDEs through ehframe.ld's __eh_frame_hdr_start),
+# named before the system stubs. Up to 1.5.1 they came after them, and libSceLibcInternal's stub won
+# __gxx_personality_v0, __cxa_get_globals and the type_info / std exception vtables while __cxa_throw and libunwind were
+# static: a throw would run the system's personality routine on the static unwinder's context (Stella PS5 1.0 crashed
+# that way at its first throw, starting any game). tools/check_imports.py refuses any imported C++ runtime symbol.
 build/app/mpc-pie.elf: $(EBOOT_OBJS) $(FF_PS5_ARCHIVES) $(VDEC_STUB) $(NATIVE)/tooling/native/ps5-pie.ld $(NATIVE)/tooling/native/ehframe.ld \
-		$(NATIVE)/tooling/native/app-symbols.map $(NATIVE)/tooling/native/localize.map
+		$(NATIVE)/tooling/native/app-symbols.map $(NATIVE)/tooling/native/localize.map tools/check_imports.py
 	$(LLD) -m elf_x86_64 -pie -z max-page-size=0x4000 --hash-style=gnu \
 		-T $(NATIVE)/tooling/native/ps5-pie.ld -T $(NATIVE)/tooling/native/ehframe.ld --eh-frame-hdr \
 		--version-script $(NATIVE)/tooling/native/app-symbols.map --version-script $(NATIVE)/tooling/native/localize.map \
 		-e _start --no-dynamic-linker --wrap=getaddrinfo --wrap=pthread_create -o $@ $(EBOOT_OBJS) \
 		--start-group $(FF_PS5_ARCHIVES) --end-group \
+		$(SDK_LIB)/libc++.a $(SDK_LIB)/libc++abi.a $(SDK_LIB)/libunwind.a \
 		$(VDEC_STUB) $(SDK_LIB)/libSceSysmodule.so --as-needed $(filter-out %/libSceSysmodule.so,$(APP_STUBS)) -L $(SDK_LIB) \
-		$(SDK_LIB)/libc++.a $(SDK_LIB)/libc++abi.a $(SDK_LIB)/libunwind.a $(SDK_LIB)/libc.a -lpthread
+		$(SDK_LIB)/libc.a -lpthread
 	python3 tools/check_imports.py $@ $(SDK_LIB) $(VDEC_STUB) || { rm -f $@; exit 1; }
 
 build/app/eboot.elf: build/app/mpc-pie.elf $(NATIVE_TOOL)

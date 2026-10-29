@@ -68,6 +68,7 @@ const char* SignalName(int sig)
 		case SIGFPE: return "SIGFPE";
 		case SIGABRT: return "SIGABRT";
 		case SIGTRAP: return "SIGTRAP";
+		case SIGSYS: return "SIGSYS";
 		default: return "signal";
 	}
 }
@@ -222,7 +223,8 @@ void Install()
 	sa.sa_sigaction = Handler;
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
-	for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP})
+	// 1.5.2: SIGSYS too -- a call the console refuses to a title ends it with SIGSYS (#3 was one, at load time)
+	for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP, SIGSYS})
 		sigaction(sig, &sa, nullptr);
 #else
 	(void)g_sigstack;
