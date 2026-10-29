@@ -53,6 +53,9 @@ state() { grep "\[test\] state" "$1/root/logs/boot.log" | sed -n "${2}p"; }
 # the n-th state line's field: st pos dur video audio sub picture
 field() { state "$1" "$2" | sed -E "s/.* state ([0-9]+) pos ([0-9.]+) dur ([0-9.]+) video (-?[0-9]+) audio (-?[0-9]+) sub (-?[0-9]+) picture ([0-9]+).*/\\$3/"; }
 near() { python3 -c "import sys; sys.exit(0 if abs(float('$1') - float('$2')) <= float('$3') else 1)"; }
+# 1.5.2: a test server's port taking connections (up to 20 s: a loaded machine starts Python slowly; a fixed sleep
+# made group 6's SMB server late now and then)
+listening() { for i in $(seq 1 200); do python3 -c "import socket, sys; s = socket.socket(); sys.exit(s.connect_ex(('127.0.0.1', $1)))" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
 
 if want 1; then
 echo "== 1. the window without a file: MPC-HC's chrome, the logo; File > Exit from the keyboard menu"
@@ -161,7 +164,7 @@ T=$(newroot t6)
 HPORT=$((40000 + RANDOM % 10000))
 python3 tests/http_range.py "$MEDIA" "$HPORT" >"$T/http.txt" 2>&1 &
 HPID=$!
-sleep 1
+listening $HPORT
 rc=$(run "$T" "0:0" "60:state;70:quit" "55" "http://127.0.0.1:$HPORT/red.mp4")
 expect "[ \"\$(field $T 1 1)\" = 2 ]" "http://.../red.mp4 plays"
 expect "$CHECK $T/dump/flip00055.ppm 960 400 red >/dev/null" "its picture: red"
@@ -177,7 +180,7 @@ s.setSMBChallenge('')
 s.start()
 PY
 SPID=$!
-sleep 2
+listening $SPORT
 T6=$T
 T=$(newroot t6b)
 rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://guest@127.0.0.1:$SPORT/VIDEOS/red.mp4")
