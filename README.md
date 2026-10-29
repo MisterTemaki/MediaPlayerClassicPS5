@@ -15,10 +15,11 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 470 host tests
+> **Status (1.5.2):** builds with the ps5-payload-dev SDK into a signed native app and passes 490 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
-> HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
+> HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). 1.5.1 was reported to open on a PS5; most of the
+> rest **hasn't been confirmed on a console yet** -- please report what works and what
 > doesn't (with **View > Options > Miscellaneous > Debug logs** on -- `debug_logs=1` in `/data/mpcps5/mpc-hc.ini` -- the
 > log goes to `/data/mpcps5/logs/boot.log`).
 
@@ -27,6 +28,32 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.5.2:** fixes from a full code review, nothing new to learn:
+- **C++ exceptions inside the app**: up to 1.5.1 the app's C++ runtime was half its own and half the console's (the
+  order the build linked them in): a C++ error thrown inside the app -- rare, a thread the console refuses for
+  instance -- would have crashed it in the console's half instead of being handled, and the dialogs' type checks ran
+  on the console's copy. Stella PS5 1.0 crashed that way starting any game. Now the whole runtime is the app's own,
+  the build refuses an eboot that takes any of it from the console (`tools/check_imports.py`), and with Debug logs on
+  `boot.log` says `[boot] exceptions: ok` at the start. A crash by SIGSYS (a call the console refuses) is in the crash
+  log now. Only a PS5 can confirm that line says "ok" there.
+- **Blu-ray (PGS), DVD and DVB subtitles**: every picture of every bitmap subtitle track was kept for the whole film
+  (with a Blu-ray remux's dozen PGS tracks, gigabytes by its end). Over 256 MB, the pictures of lines more than 30 s
+  away from the one playing go now (the film decodes them again when it gets back to them); text subtitles are kept as
+  before.
+- **Updates**: `update.journal`'s SHA-256 of a replaced file is of the whole file (it was of its first MB only, so after
+  a cut-off install a new `eboot.bin` whose first MB matched the old one's could pass for it); the "a newer version is
+  available" notification no longer holds up the window while the console shows it.
+- **Passwords on the screen**: File > Open File...'s list showed the Recent Files with their network passwords, and an
+  `http://` (or `rtsp://`...) address typed with `user:password@` showed its password in the title bar and in Recent
+  Files. They are left out now (the address still opens with its password).
+- **Damaged or made-up files**: a font in `/data/mpcps5/fonts` whose glyph says it is enormous isn't drawn (it would have
+  taken gigabytes), and one whose lines or letters say they are far bigger than its size is taken at a few times its
+  size (each subtitle line's picture was that big); an audio file's cover over 8192 pixels a side isn't decoded (the logo shows); File > Save Image of a
+  file whose name has `%2F` in it keeps the picture in the screenshots folder.
+- **Building**: a changed font, logo or CA list is built in again, and a new `VERSION` or release key rebuilds what
+  carries it, without a `make clean`.
+- The CRT shaders left over from the emulator ports (the player never drew with them) are out of the app.
 
 **1.5.1:** a fix for **1.5 not opening on the console** (it stopped at launch with "signal: 12 (SIGSYS)"),
 found by **Sulfurico-One64** ([#3](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/3)). To find the folder
@@ -190,8 +217,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.5.1.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.1.elf`).
+1. Send `MediaPlayerClassicPS5-v1.5.2.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.2.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon -- or, 1.5, updates the folder ShadowMount+
    already runs it from, see [Updates](#updates)) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
@@ -205,9 +232,9 @@ FBNeo, Mesen2, NES FCEUmm) is touched.
 
 1.5 doesn't open on the console (#3: "Error in game PPSA99015: signal: 12 (SIGSYS)"); 1.5.1 fixes that. To get a
 working app:
-- **Send the 1.5.1 payload** (`MediaPlayerClassicPS5-v1.5.1.elf`) and put it in your autoload instead of 1.5's. It is
+- **Send the newest payload** (`MediaPlayerClassicPS5-v1.5.2.elf`) and put it in your autoload instead of 1.5's. It is
   newer than the installed 1.5, so it writes itself over it -- into the folder ShadowMount+ runs the app from (found
-  as described in [Updates](#updates)); then close the app if it is open and open it again. A 1.4 app updates to 1.5.1
+  as described in [Updates](#updates)); then close the app if it is open and open it again. A 1.4 app updates to the newest
   from **Help > Check for updates** as well (1.4's updater writes `/data/homebrew/PPSA99015`: if ShadowMount+ runs
   your copy from another folder, send the payload instead).
 - **Going back to an older version** (1.4, say): a payload never writes itself over a newer version ("a newer version
@@ -617,9 +644,10 @@ cd ps5
 make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib, the subtitle and the disc libraries,
                    # for the PS5 and the host (once); make deps-disc: only the disc libraries, then FFmpeg again
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf (1.5.1: fails if the eboot would load a library or import a
-                   # symbol a title can't -- libkernel_sys, libkernel_web: tools/check_imports.py, #3)
+                   # symbol a title can't -- libkernel_sys, libkernel_web: tools/check_imports.py, #3; 1.5.2: or take
+                   # any of the C++ runtime from the console)
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.5.1.elf, the release zip, mpc-ps5-v1.5.1-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.5.2.elf, the release zip, mpc-ps5-v1.5.2-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 
