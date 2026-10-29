@@ -2349,8 +2349,10 @@ void MainFrame::OfferUpdate(const update::Status& st)
 		return;
 	}
 	// the copy the console runs can't take it (an image, a read-only folder): said before anything is downloaded.
-	// Looked for again if the helper didn't say at start (1.5.1)
-	mpcupdate::RefreshPlace();
+	// Looked for again if the helper didn't say at start (1.5.1), only when the user asked (Help, Check for updates):
+	// asking a helper that was silent at start may wait up to 5 s, which the daily check at start mustn't
+	if (upd_user_)
+		mpcupdate::RefreshPlace();
 	const AppPlace& place = mpcupdate::Place();
 	if (!place.writable)
 	{
