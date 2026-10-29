@@ -1117,22 +1117,27 @@ struct Player::Impl
 			TrimSubtitlePictures(start);
 	}
 
-	// (smu held) over the budget: the pictures of every track's lines that ended kSubPictureKeep s before `newest` go,
-	// those furthest behind first, until half the budget is used; a line left with no text goes with them
+	// (smu held) over the budget: the pictures of every track's lines more than kSubPictureKeep s from `newest` (the
+	// line just decoded) go -- those that ended before it, and, after a seek back, those that start long after it --
+	// the furthest first, until half the budget is used; a line left with no text goes with them. A line let go is
+	// decoded again when the film gets back to it (a seek replays the packets).
 	void TrimSubtitlePictures(double newest)
 	{
-		std::vector<std::pair<double, std::pair<int, size_t>>> old; // end, (track, index)
+		std::vector<std::pair<double, std::pair<int, size_t>>> old; // distance from newest, (track, index)
 		for (auto& t : subs)
 			for (size_t i = 0; i < t.second.size(); i++)
 			{
 				const SubItem& it = t.second[i];
-				if (!it.show.pics.empty() && !it.open_end && it.end < newest - kSubPictureKeep)
-					old.push_back({it.end, {t.first, i}});
+				if (it.show.pics.empty())
+					continue;
+				if (!it.open_end && it.end < newest - kSubPictureKeep)
+					old.push_back({newest - it.end, {t.first, i}});
+				else if (it.start > newest + kSubPictureKeep)
+					old.push_back({it.start - newest, {t.first, i}});
 			}
-		std::sort(old.begin(), old.end());
+		std::sort(old.begin(), old.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
 		const size_t before = sub_pic_bytes;
 		size_t dropped = 0;
-		double upto = 0;
 		for (const auto& o : old)
 		{
 			if (sub_pic_bytes <= sub_pic_budget / 2)
@@ -1142,16 +1147,15 @@ struct Player::Impl
 			sh.pics.clear();
 			sh.pics.shrink_to_fit();
 			dropped++;
-			upto = o.first;
 		}
 		// the lines with nothing left to show
 		for (auto& t : subs)
 			t.second.erase(std::remove_if(t.second.begin(), t.second.end(), [](const SubItem& it) { return it.show.Empty(); }),
 				t.second.end());
 		if (dropped)
-			OrbisLog("[subs] bitmap subtitles over %zu MiB (%zu MiB): %zu picture(s) of lines that ended by %.1f s let go, "
+			OrbisLog("[subs] bitmap subtitles over %zu MiB (%zu MiB): %zu picture(s) of lines over %.0f s from %.1f s let go, "
 					 "%zu MiB kept",
-				sub_pic_budget >> 20, before >> 20, dropped, upto, sub_pic_bytes >> 20);
+				sub_pic_budget >> 20, before >> 20, dropped, kSubPictureKeep, newest, sub_pic_bytes >> 20);
 		else if (std::fabs(newest - sub_trim_said) > 60)
 		{
 			sub_trim_said = newest;

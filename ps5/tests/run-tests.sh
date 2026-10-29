@@ -1752,21 +1752,24 @@ expect "grep -q -- '-o build/host/port/player/mpc_app.o player/mpc_app.cpp' $WOR
 fi
 
 if want 30; then
-echo "== 30. 1.5.2: bitmap subtitles kept within a budget; a font's huge glyph box; a screenshot's name; a huge cover"
+echo "== 30. 1.5.2: bitmap subtitles kept within a budget; a font's huge glyph box; a screenshot's name; a huge cover; passwords off the screen"
 # a: an MKV with a Blu-ray (PGS) track, a 1000x200 picture every second for 60 s (800 KB each, 48 MB in all): with a
-# 4 MiB budget (the console's is 256 MiB) the pictures read ahead at the start are kept (all within 30 s), and a seek
-# to 50 s lets go those of the lines that ended 30 s before it; the line at 50 s still shows
+# 4 MiB budget (the console's is 256 MiB) the pictures read ahead at the start are kept (all within 30 s), a seek
+# to 50 s lets go those of the lines that ended 30 s before it, and a seek back to 5 s those that start 30 s after it;
+# the line at 50 s still shows
 T=$(newroot t30)
 python3 tests/make_pgs.py $T/subs.sup 60 1.0 0.98 1000 200
 ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=25:d=61 -c:v libx264 -preset ultrafast -pix_fmt yuv420p $T/v.mp4 &&
 	ffmpeg -v error -i $T/v.mp4 -i $T/subs.sup -map 0 -map 1 -c copy $T/root/media/pgs.mkv
-rc=$(MPCPS5_HOST_SUB_BUDGET_MB=4 run "$T" "0:0" "40:state;60:seek 50;150:state;160:quit" "140" "$T/root/media/pgs.mkv")
+rc=$(MPCPS5_HOST_SUB_BUDGET_MB=4 run "$T" "0:0" "40:state;60:seek 50;150:state;160:seek 5;220:state;230:quit" "140" "$T/root/media/pgs.mkv")
 expect "[ $rc = 0 ] && grep -q 'opened .*pgs.mkv' $T/root/logs/boot.log && grep -q '\[subs\] bitmap subtitles over 4 MiB ([0-9]* MiB), all within 30 s' $T/root/logs/boot.log" "PGS: over the budget at the start, every picture within 30 s of the newest: kept"
-expect "grep -q '\[subs\] bitmap subtitles over 4 MiB ([0-9]* MiB): [0-9]* picture(s) of lines that ended by [0-9.]* s let go' $T/root/logs/boot.log" "a seek 50 s on: the pictures of the lines that ended long before let go"
+expect "grep -q '\[subs\] bitmap subtitles over 4 MiB ([0-9]* MiB): [0-9]* picture(s) of lines over 30 s from 5[0-9]\.[0-9] s let go' $T/root/logs/boot.log" "a seek 50 s on: the pictures of the lines that ended long before let go"
+expect "grep -q '\[subs\] bitmap subtitles over 4 MiB ([0-9]* MiB): [0-9]* picture(s) of lines over 30 s from [0-9]\.[0-9] s let go' $T/root/logs/boot.log" "a seek back to 5 s: those of the lines far ahead let go too (decoded again when the film gets there)"
 expect "$REGION $T/dump/flip00140.ppm 500 700 1420 977 255 255 255 30 2000 >/dev/null" "the line at 50 s drawn (a white box at the bottom)"
 nosan "$T"
 # b: a font in the fonts folder whose 'A' says its box is 65535 units wide and high, at 16 units per em: not drawn
-# (its bitmap would be gigabytes), the app runs on
+# (its bitmap would be gigabytes), the app runs on; its line height and advances (DejaVu's, in units of 1/16 em: 128
+# times too big) are held to a few em, or each subtitle line's picture is hundreds of MB (the app stalled for minutes)
 T=$(newroot t30b)
 mkdir -p $T/root/fonts
 python3 tests/make_test_fonts.py hugebox $T/root/fonts /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
@@ -1775,7 +1778,9 @@ cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
 ini "$T" "SubFont=bf-hugebox.ttf"
 rc=$(run "$T" "0:0" "60:state;70:quit" "60" "$T/root/media/movie.mp4")
 expect "[ $rc = 0 ] && ! grep -q 'runtime error\|AddressSanitizer\|SEGV\|allocation' $T/out.txt && grep -q '\[fonts\] glyph [0-9]* of bf-hugebox.ttf: its box ([0-9]*x[0-9]* at [0-9]* px) is far bigger than the font: not drawn' $T/root/logs/boot.log" "a glyph whose box is far bigger than the font: not drawn, no crash"
-# c: File > Save Image of a file named ..%2F..%2Fescaped.mp4 (FileName decodes %2F): the picture stays in screenshots/
+expect "grep -q '\[fonts\] bf-hugebox.ttf says its lines are [0-9]* px high at [0-9]* px: taken as' $T/root/logs/boot.log && [ \"\$(field $T 1 1)\" = 2 ]" "its lines far taller than its size: taken at a few em, the film plays on"
+# c: File > Save Image of a file named ..%2F..%2Fescaped.mp4 (FileName decodes %2F): the picture stays in screenshots/,
+# under a name that doesn't start with a dot (the glob below skips hidden files)
 T=$(newroot t30c)
 cp "$MEDIA/red.mp4" "$T/root/media/..%2F..%2Fescaped.mp4"
 rc=$(run "$T" "0:0" "60:cmd saveimage;80:quit" "" "$T/root/media/..%2F..%2Fescaped.mp4")
@@ -1787,6 +1792,15 @@ ffmpeg -v error -f lavfi -i color=c=blue:size=8200x8200 -frames:v 1 $T/big.png &
 		-b:a 128k -c:v copy -disposition:v attached_pic $T/root/media/bigcover.mp3
 rc=$(run "$T" "0:0" "40:state;50:quit" "35" "$T/root/media/bigcover.mp3")
 expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && grep -q \"the cover picture ([0-9]* bytes) can't be read, or is over 8192 pixels a side\" $T/root/logs/boot.log && ! $CHECK $T/dump/flip00035.ppm 960 500 blue >/dev/null" "a cover over 8192 pixels a side: not decoded, the file plays (the logo shown)"
+nosan "$T"
+# e: an http:// address with a password in the Recent Files: the Open dialog shows it without the password (1.5.1
+# hid it in smb:// addresses only), and OK opens it with its password (the log shows that one as ***)
+T=$(newroot t30e)
+printf '[Settings]\n[Recent File List]\nFile1=http://bob:s3cret@127.0.0.1:9/x.mp4\n' >$T/root/mpc-hc.ini
+rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "30:cmd open;60:key menu;120:quit" "")
+touch $T/drawn.txt
+expect "[ $rc = 0 ] && grep -qx 'http://bob@127.0.0.1:9/x.mp4' $T/drawn.txt && ! grep -q s3cret $T/drawn.txt" "an http:// password in the Recent Files: shown without it in the Open dialog"
+expect "grep -q '\[ui\] open http://bob:\*\*\*@127.0.0.1:9/x.mp4' $T/root/logs/boot.log" "OK opens the address with its password"
 nosan "$T"
 fi
 

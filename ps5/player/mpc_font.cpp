@@ -27,6 +27,8 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <tuple>
 #include <unordered_map>
 
@@ -312,17 +314,18 @@ const Glyph& GetGlyph(const Face* f, int em, int glyph, bool synth)
 	const float scale = f->ScaleFor(em);
 	int adv = 0, lsb = 0;
 	stbtt_GetGlyphHMetrics(&f->info, glyph, &adv, &lsb);
-	g.advance = adv * scale;
+	// 1.5.2: a glyph box far bigger than its size (a damaged or made-up font in the fonts folder: the glyph header's
+	// bounds are taken as they are, up to 32767 units at 16 units per em) isn't drawn: its bitmap would be gigabytes
+	// (a crash on the console, where an allocation that fails ends the app). Real glyphs stay within a few em; so do
+	// their advances (one far bigger made a subtitle's picture as big)
+	const int64_t limit = 16 * int64_t(std::max(em, 1)) + 64;
+	g.advance = std::max(0.0f, std::min(float(limit), adv * scale));
 	int x0, y0, x1, y1;
 	stbtt_GetGlyphBitmapBox(&f->info, glyph, scale, scale, &x0, &y0, &x1, &y1);
 	g.w = x1 - x0;
 	g.h = y1 - y0;
 	g.xoff = x0;
 	g.yoff = y0;
-	// 1.5.2: a glyph box far bigger than its size (a damaged or made-up font in the fonts folder: the glyph header's
-	// bounds are taken as they are, up to 32767 units at 16 units per em) isn't drawn: its bitmap would be gigabytes
-	// (a crash on the console, where an allocation that fails ends the app). Real glyphs stay within a few em.
-	const int64_t limit = 16 * int64_t(std::max(em, 1)) + 64;
 	if (g.w > limit || g.h > limit)
 	{
 		OrbisLog("[fonts] glyph %d of %s: its box (%dx%d at %d px) is far bigger than the font: not drawn", glyph,
@@ -397,7 +400,7 @@ float Layout(const Font& font, const std::string& utf8, Fn fn)
 		if (!f)
 			continue;
 		if (prev_face == f && prev_glyph)
-			x += stbtt_GetGlyphKernAdvance(&f->info, prev_glyph, glyph) * f->ScaleFor(em);
+			x += std::max(-float(em), std::min(float(em), stbtt_GetGlyphKernAdvance(&f->info, prev_glyph, glyph) * f->ScaleFor(em)));
 		const Glyph& g = GetGlyph(f, em, glyph, synth && f == primary);
 		fn(g, x);
 		x += g.advance;
@@ -421,6 +424,15 @@ Font::Font(int em, bool bold, const void* face, bool synth_bold) : em_(em), bold
 		const float scale = f->ScaleFor(em);
 		ascent_ = int(std::ceil(f->win_ascent * scale));
 		descent_ = int(std::ceil(f->win_descent * scale));
+		// 1.5.2: a font in the fonts folder saying its lines are far taller than its size (a damaged or made-up one:
+		// every subtitle line's picture would be that tall) is taken at a few em
+		if (ascent_ > 3 * em + 8 || descent_ > 2 * em + 8 || ascent_ < 0 || descent_ < 0)
+		{
+			OrbisLog("[fonts] %s says its lines are %d px high at %d px: taken as %d", f->file.empty() ? "a font" : f->file.c_str(),
+				ascent_ + descent_, em, std::max(0, std::min(ascent_, 3 * em + 8)) + std::max(0, std::min(descent_, 2 * em + 8)));
+			ascent_ = std::max(0, std::min(ascent_, 3 * em + 8));
+			descent_ = std::max(0, std::min(descent_, 2 * em + 8));
+		}
 	}
 	else
 	{
@@ -451,8 +463,30 @@ int Font::Measure(const std::string& utf8) const
 	return int(std::ceil(Layout(*this, utf8, [](const Glyph&, float) {})));
 }
 
+#ifndef __PROSPERO__
+// the host tests: every text drawn, once (MPCPS5_HOST_DRAWN=<file>): what reached the screen, checked for passwords
+static void RecordDrawn(const std::string& text)
+{
+	static const char* path = getenv("MPCPS5_HOST_DRAWN");
+	if (!path || text.empty())
+		return;
+	static std::mutex m;
+	static std::set<std::string> seen;
+	std::lock_guard<std::mutex> lock(m);
+	if (seen.insert(text).second)
+		if (FILE* f = fopen(path, "a"))
+		{
+			fprintf(f, "%s\n", text.c_str());
+			fclose(f);
+		}
+}
+#endif
+
 int Font::Draw(CDC& dc, int x, int y, const std::string& utf8, COLORREF c, int opacity) const
 {
+#ifndef __PROSPERO__
+	RecordDrawn(utf8);
+#endif
 	const int base = y + ascent_;
 	const float w = Layout(*this, utf8, [&](const Glyph& g, float gx) {
 		if (!g.bits.empty())
