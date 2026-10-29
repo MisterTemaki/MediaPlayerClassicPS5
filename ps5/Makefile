@@ -67,14 +67,32 @@ PORT_WARN := -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-init
 FF_LIBS = -lavformat -lavcodec -lavfilter -lswscale -lswresample -lavutil -ldav1d -lsmb2 -lmbedtls -lmbedx509 -lmbedcrypto -lz \
 	-lass -lharfbuzz -lfribidi -lfreetype -ldvdnav -ldvdread -lbluray -ludfread
 
-# stb and NanoSVG inside mpc_res.o / mpc_font.o have warnings of their own; the resources are built in
+# stb and NanoSVG inside mpc_res.o / mpc_font.o have warnings of their own; the resources are built in (their files:
+# OBJ_DEPS below)
 %/port/player/mpc_res.o: EXTRA_FLAGS = -Wno-error -Wno-sign-compare -Wno-unused-function -Wno-unused-but-set-variable \
 	-Wno-implicit-fallthrough -Wno-missing-field-initializers
-%/port/player/mpc_res.o: $(wildcard assets/res/* assets/fonts/*)
 %/port/player/mpc_font.o: EXTRA_FLAGS = -Wno-error -Wno-sign-compare -Wno-unused-function
-%/port/player/mpc_app.o: assets/data/cacert.pem
 # the helper payload is installer_main.cpp without the install step
 %/port/installer/helper_main.o: EXTRA_FLAGS = -DMPCPS5_HELPER_ONLY
+
+# 1.5.2: what an object is built from besides its own source and the headers, as explicit targets for both builds (a
+# pattern rule without a recipe adds no prerequisite -- it only cancels an implicit rule --, so up to 1.5.1 mpc_res.o
+# and mpc_app.o weren't rebuilt when the fonts, the toolbar, the logo or the CA list they carry changed)
+define OBJ_DEPS
+build/ps5/port/$(1).o build/host/port/$(1).o: $(2)
+endef
+$(eval $(call OBJ_DEPS,player/mpc_res,$(wildcard assets/res/* assets/fonts/*)))
+$(eval $(call OBJ_DEPS,player/mpc_app,assets/data/cacert.pem))
+# 1.5.2: the flags the objects are compiled with (the version, the title, the repository, the release key...) written to
+# build/<ps5|host>/flags.txt when they change, and every object depends on it: a VERSION or UPDATE_REPO given to make
+# rebuilds what carries it instead of leaving the old value in the objects (up to 1.5.1 that took a make clean)
+# ($(2): the name of the variable holding them -- they have commas, which call's arguments can't carry)
+define FLAGS_STAMP
+$$(shell mkdir -p $(1))
+ifneq ($$(file < $(1)/flags.txt),$$($(2)))
+$$(file > $(1)/flags.txt,$$($(2)))
+endif
+endef
 
 # ---------------- PS5 ----------------
 PS5_CC  := $(PS5_PAYLOAD_SDK)/bin/prospero-clang
@@ -84,6 +102,8 @@ PS5_OUT := build/ps5
 PS5_OPT := -O3 -fPIC -march=znver2 -fno-strict-aliasing
 PS5_PAYLOAD_LIBS := -lkernel_sys -lSceNet -lSceNetCtl -lSceSsl -lSceHttp2 -lpthread
 PS5_DEP_INCS := -isystem $(DEPS_PS5)/include
+PS5_FLAGS_TEXT = $(strip $(PS5_CXX) $(PS5_CC) $(PS5_OPT) $(DEFS) $(INCS) $(PS5_DEP_INCS) $(PORT_WARN))
+$(eval $(call FLAGS_STAMP,build/ps5,PS5_FLAGS_TEXT))
 
 PS5_EMU_OBJ := $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(EMU_SRC)) $(patsubst %.c,$(PS5_OUT)/port/%.o,$(MONO_SRC))
 PS5_HELPER_OBJ := $(PS5_OUT)/port/installer/helper_main.o $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(HELPER_SRC))
@@ -100,7 +120,7 @@ deps-subs:
 deps-disc:
 	bash tools/build-deps.sh disc
 
-$(PS5_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h
+$(PS5_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h $(PS5_OUT)/flags.txt
 	@mkdir -p $(dir $@)
 	$(PS5_CXX) -std=c++17 $(PS5_OPT) $(DEFS) $(INCS) $(PS5_DEP_INCS) $(PORT_WARN) $(EXTRA_FLAGS) -c -o $@ $<
 
@@ -108,7 +128,8 @@ $(PS5_OUT)/port/third_party/%.o: third_party/%.c
 	@mkdir -p $(dir $@)
 	$(PS5_CC) -std=c99 $(PS5_OPT) -c -o $@ $<
 
-$(PS5_OUT)/port/installer/helper_main.o: installer/installer_main.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h
+$(PS5_OUT)/port/installer/helper_main.o: installer/installer_main.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h \
+		$(PS5_OUT)/flags.txt
 	@mkdir -p $(dir $@)
 	$(PS5_CXX) -std=c++17 $(PS5_OPT) $(DEFS) $(INCS) $(PORT_WARN) $(EXTRA_FLAGS) -c -o $@ $<
 
@@ -116,7 +137,8 @@ $(PS5_OUT)/port/installer/helper_main.o: installer/installer_main.cpp coreorbis/
 $(PS5_OUT)/MediaPlayerClassicPS5-helper.elf: $(PS5_HELPER_OBJ)
 	$(PS5_CXX) -o $@ $^ $(PS5_PAYLOAD_LIBS)
 
-$(PS5_OUT)/helper_data.o: coreorbis/orbis-shims/helper_data.cpp coreorbis/orbis-shims/ProsperoJailbreak.h $(PS5_OUT)/MediaPlayerClassicPS5-helper.elf
+$(PS5_OUT)/helper_data.o: coreorbis/orbis-shims/helper_data.cpp coreorbis/orbis-shims/ProsperoJailbreak.h $(PS5_OUT)/MediaPlayerClassicPS5-helper.elf \
+		$(PS5_OUT)/flags.txt
 	$(PS5_CXX) -std=c++17 $(PS5_OPT) $(DEFS) $(INCS) $(PORT_WARN) -DHELPER_ELF='"$(abspath $(PS5_OUT)/MediaPlayerClassicPS5-helper.elf)"' -c -o $@ $<
 
 # 3. the installer + helper, with the app folder built in
@@ -135,7 +157,7 @@ APP_DATA_DEFS = -DAPP_EBOOT='"$(abspath $(ZIPPED)/eboot.bin.z)"' -DAPP_PARAM='"$
 	-DAPP_EBOOT_SIZE=$$(stat -c %s $(APP_OUT)/eboot.bin) -DAPP_PIC0_SIZE=$$(stat -c %s $(APP_OUT)/sce_sys/pic0.dds) \
 	-DAPP_PIC1_SIZE=$$(stat -c %s $(APP_OUT)/sce_sys/pic1.dds)
 
-$(PS5_OUT)/install_data.o: coreorbis/orbis-shims/install_data.cpp coreorbis/orbis-shims/ProsperoInstall.h $(APP_FILES) \
+$(PS5_OUT)/install_data.o: coreorbis/orbis-shims/install_data.cpp coreorbis/orbis-shims/ProsperoInstall.h $(APP_FILES) $(PS5_OUT)/flags.txt \
 		$(ZIPPED)/eboot.bin.z $(ZIPPED)/sce_sys/pic0.dds.z $(ZIPPED)/sce_sys/pic1.dds.z
 	$(PS5_CXX) -std=c++17 $(PS5_OPT) $(DEFS) $(INCS) $(PORT_WARN) $(APP_DATA_DEFS) -c -o $@ $<
 
@@ -271,6 +293,8 @@ $(PS5_OUT)/port/coreorbis/orbis-shims/ProsperoAppPlaceApp.o $(HOST_OUT)/port/cor
 HOST_SAN ?= -fsanitize=address,undefined -fno-omit-frame-pointer
 HOST_OPT := -O1 -g -mavx2 -fno-strict-aliasing
 HOST_DEP_INCS := -isystem $(DEPS_HOST)/include
+HOST_FLAGS_TEXT = $(strip $(HOST_CXX) $(HOST_CC) $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN))
+$(eval $(call FLAGS_STAMP,build/host,HOST_FLAGS_TEXT))
 
 HOST_EMU_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(EMU_SRC) host/sce_host.cpp host/sce_host_vdec.cpp) \
 	$(patsubst %.c,$(HOST_OUT)/port/%.o,$(MONO_SRC))
@@ -280,7 +304,7 @@ HOST_INSTALLER_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(INSTALLER_SRC) hos
 
 host: $(HOST_OUT)/mpc-ps5-host $(HOST_OUT)/mpc-ps5-installer $(HOST_OUT)/mpc-ps5-helper $(HOST_OUT)/mpc-disc-test
 
-$(HOST_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h
+$(HOST_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h $(HOST_OUT)/flags.txt
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) $(EXTRA_FLAGS) -c -o $@ $<
 
@@ -288,7 +312,8 @@ $(HOST_OUT)/port/third_party/%.o: third_party/%.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -std=c99 $(HOST_OPT) $(HOST_SAN) -c -o $@ $<
 
-$(HOST_OUT)/port/installer/helper_main.o: installer/installer_main.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h
+$(HOST_OUT)/port/installer/helper_main.o: installer/installer_main.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h \
+		$(HOST_OUT)/flags.txt
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(PORT_WARN) $(EXTRA_FLAGS) -c -o $@ $<
 
@@ -305,12 +330,13 @@ build/zipped-host/%.z: app/sce_sys/%
 	python3 -c "import sys, zlib; open(sys.argv[2], 'wb').write(zlib.compress(open(sys.argv[1], 'rb').read(), 9))" $< $@
 $(HOST_OUT)/port/coreorbis/orbis-shims/ProsperoInstall.o: EXTRA_FLAGS = $(HOST_DEP_INCS)
 
-$(HOST_OUT)/install_data.o: coreorbis/orbis-shims/install_data.cpp coreorbis/orbis-shims/ProsperoInstall.h \
+$(HOST_OUT)/install_data.o: coreorbis/orbis-shims/install_data.cpp coreorbis/orbis-shims/ProsperoInstall.h $(HOST_OUT)/flags.txt \
 		tests/fake-eboot.bin tests/fake-libc.prx app/sce_sys/param.json app/sce_sys/icon0.png build/zipped-host/pic0.dds.z build/zipped-host/pic1.dds.z
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(DEFS) $(INCS) $(PORT_WARN) $(HOST_APP_DEFS) -c -o $@ $<
 
-$(HOST_OUT)/helper_data.o: coreorbis/orbis-shims/helper_data.cpp coreorbis/orbis-shims/ProsperoJailbreak.h $(HOST_OUT)/mpc-ps5-helper
+$(HOST_OUT)/helper_data.o: coreorbis/orbis-shims/helper_data.cpp coreorbis/orbis-shims/ProsperoJailbreak.h $(HOST_OUT)/mpc-ps5-helper \
+		$(HOST_OUT)/flags.txt
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(DEFS) $(INCS) $(PORT_WARN) -DHELPER_ELF='"$(abspath $(HOST_OUT)/mpc-ps5-helper)"' -c -o $@ $<
 
@@ -324,7 +350,7 @@ $(HOST_OUT)/mpc-ps5-host: $(HOST_EMU_OBJ) $(HOST_OUT)/helper_data.o
 	$(HOST_CXX) $(HOST_SAN) -o $@ $^ -L$(DEPS_HOST)/lib $(FF_LIBS) -lpthread -lm -ldl
 
 # player/mpc_disc.cpp on its own, with faults put into the drive (tests/disc_test.cpp)
-$(HOST_OUT)/mpc-disc-test: tests/disc_test.cpp player/mpc_disc.cpp player/mpc_disc.h player/mpc_i18n.h
+$(HOST_OUT)/mpc-disc-test: tests/disc_test.cpp player/mpc_disc.cpp player/mpc_disc.h player/mpc_i18n.h $(HOST_OUT)/flags.txt
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) -o $@ $< \
 		-L$(DEPS_HOST)/lib $(FF_LIBS) -lpthread -lm -ldl

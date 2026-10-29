@@ -1722,6 +1722,13 @@ if [ -d "$SDKLIB" ] && command -v ld.lld >/dev/null && command -v clang >/dev/nu
 else
 	echo "  (skipped: no SDK, ld.lld or clang for the check's own test)"
 fi
+# 1.5.2: the objects follow what they are built from (make -n -W: what would be rebuilt, nothing built): mpc_app.o the CA
+# list it carries, mpc_res.o the fonts, every object the flags (VERSION...); up to 1.5.1 the first two were recipe-less
+# pattern rules, which add no prerequisite
+make -n -W assets/data/cacert.pem build/host/port/player/mpc_app.o >"$WORK/mk1.txt" 2>&1
+make -n -W assets/fonts/Roboto-Regular.ttf build/host/port/player/mpc_res.o >"$WORK/mk2.txt" 2>&1
+make -n -W build/host/flags.txt build/host/port/player/mpc_ui.o >"$WORK/mk3.txt" 2>&1
+expect "grep -q -- '-o build/host/port/player/mpc_app.o player/mpc_app.cpp' $WORK/mk1.txt && grep -q -- '-o build/host/port/player/mpc_res.o player/mpc_res.cpp' $WORK/mk2.txt && grep -q -- '-o build/host/port/player/mpc_ui.o player/mpc_ui.cpp' $WORK/mk3.txt" "the Makefile: mpc_app.o rebuilt for a new CA list, mpc_res.o for a new font, every object for new flags"
 fi
 
 echo
