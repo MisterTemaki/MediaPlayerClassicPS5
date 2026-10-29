@@ -1096,6 +1096,15 @@ void SetCurrentVersion(const std::string& version)
 		g_config.version = version;
 }
 
+void SetInstallPlace(const std::string& app_dir, const std::string& cant_install)
+{
+	std::lock_guard<std::mutex> l(g_mu);
+	if (g_busy) // an install under way keeps its folder
+		return;
+	g_config.app_dir = app_dir;
+	g_config.cant_install = cant_install;
+}
+
 const Config& CurrentConfig()
 {
 	return g_config;

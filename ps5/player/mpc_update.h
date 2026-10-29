@@ -21,6 +21,9 @@ bool DailyCheckDue();
 std::string EbootPath();
 // 1.5: where the app runs from and where an update goes (ProsperoAppPlace.h), found at Init.
 const AppPlace& Place();
+// 1.5.1: when the place at start didn't come from the helper (it was silent, or not there yet), look again now --
+// before an update is offered -- so a helper that answers now is asked (#3)
+void RefreshPlace();
 // An update installed: noted (<root>/update-pending.txt) so that the next start can tell whether it runs the new
 // version.
 void NoteInstalled(const std::string& version);

@@ -82,6 +82,8 @@ int RecoverInterrupted(const std::string& app_dir);
 std::string StartupProblem();
 // The version installed (the app says which when it asks: a helper of an older build may be the one running).
 void SetCurrentVersion(const std::string& version);
+// 1.5.1: where an update goes, found again (the app's place looked up after start): app_dir, and why not ("" = it can)
+void SetInstallPlace(const std::string& app_dir, const std::string& cant_install);
 const Config& CurrentConfig();
 // Start a check / an install of the release the last check found; false when one is running (or nothing to install).
 // notify: a check of the app's own (at start, once a day): on_newer is told when it finds a newer version.

@@ -772,6 +772,20 @@ PY
 }
 expect "[ $rc = 0 ] && grep -q 'not asking the helper where the app is: at start it no reply within 5 s' $T/root/logs/boot.log && python3 -c \"import sys; sys.exit(0 if \$(el16) < 7.5 else 1)\"" "a helper that never answers: asked once (5 s), not again where the app is"
 stop16
+# p: a helper silent at start that answers later: Check for updates asks it again and goes by its answer
+rm -rf $SX/app/PPSA99015 && ln -s $U $SX/app/PPSA99015; ver $U $CVER; echo "eboot usb" >$U/eboot.bin
+printf 'place=1\nmount=%s\nsource=%s\ndir=%s\nfs=exfatfs\nwritable=1\nimage=0\nunsure=0\nvia_link=0\nimage_pending=0\nreason=\nlog=the late answer\n' \
+	"$SX/app/PPSA99015" "$U" "$SX/app/PPSA99015" >$T/place-late.txt
+python3 tests/fake_helper.py $MPCPS5_HELPER_PORT late $T/place-late.txt >"$T/lateh.txt" 2>&1 &
+FH=$!
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+sleep 0.5
+release v9.9 99.000.000
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_PS5_SYSTEM_EX=$SX MPCPS5_PS5_USER_APP=$M/userapp u16run "$T" "0:0" "100:cmd 601;200:key enter;300:quit" "")
+kill $FH 2>/dev/null; wait $FH 2>/dev/null
+stop16
+expect "grep -q 'not asking the helper where the app is: at start' $T/root/logs/boot.log && grep -q '\[update\] looked again: (from the helper) the late answer' $T/root/logs/boot.log && grep -q 'Download it' $T/root/logs/boot.log && ! grep -q \"The app can't tell for sure\" $T/root/logs/boot.log" "a helper silent at start, answering later: Check for updates asks again and offers the update"
 rm -rf $M/userapp $M/other2 $M/other3
 [ "$M" = "$T" ] || rm -rf "$M"
 fi

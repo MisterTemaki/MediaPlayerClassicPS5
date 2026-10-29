@@ -220,6 +220,15 @@ void Init()
 	});
 }
 
+void RefreshPlace()
+{
+	if (g_place.from_helper)
+		return;
+	g_place = FindAppPlace(MPCPS5_TITLE_ID, EnvOr("MPCPS5_PS5_HOMEBREW", "/data/homebrew") + "/" MPCPS5_TITLE_ID);
+	OrbisLog("[update] looked again: %s", g_place.log.c_str());
+	update::SetInstallPlace(g_place.dir, g_place.writable ? "" : g_place.reason);
+}
+
 bool DailyCheckDue()
 {
 	const std::string stamp = OrbisRoot() + "/update-check.txt";

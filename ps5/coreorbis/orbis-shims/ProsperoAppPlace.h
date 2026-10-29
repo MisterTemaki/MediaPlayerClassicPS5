@@ -24,6 +24,7 @@ struct AppPlace
 	bool unsure = false; // the folder couldn't be identified for sure (or isn't there): nothing is written anywhere
 	bool via_link = false; // no mount yet: the folder from ShadowMount+'s link (/user/app/<TITLE_ID>/mount.lnk)
 	bool image_pending = false; // that folder is in an image ShadowMount+ hasn't mounted yet (not written)
+	bool from_helper = false;   // the app: the helper payload's answer (not sent; set by the app's FindAppPlace)
 	std::string reason; // !writable: why, a sentence for the user (English, through T())
 	std::string log;    // what was found, for boot.log
 };

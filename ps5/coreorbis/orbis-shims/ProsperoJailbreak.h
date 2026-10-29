@@ -59,8 +59,10 @@ bool RequestForSelf(std::string& how);
 // `background`: the helper downloads them itself (the app downloads nothing at start).
 bool FetchWantedCovers(std::string& text, bool* background = nullptr);
 
-// The app side: the helper's answer to kCmdAppPlace (no helper started for it). False when none came.
-bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, std::string& text);
+// The app side: the helper's answer to kCmdAppPlace (no helper started for it). False when none came. at_start: the
+// lookup at start, skipped when the helper didn't answer the unlock just before (it would only wait again); a later
+// one (Check for updates) always asks, and an answer marks the helper as answering again.
+bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, std::string& text, bool at_start);
 
 // The helper ELF built into the app (helper_data.cpp in the native eboot; nothing elsewhere).
 struct Blob

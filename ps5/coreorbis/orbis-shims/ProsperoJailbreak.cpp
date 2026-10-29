@@ -262,11 +262,11 @@ bool FetchWantedCovers(std::string& text, bool* background)
 	return r == 1;
 }
 
-bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, std::string& text)
+bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, std::string& text, bool at_start)
 {
 	text.clear();
 	const int port = PortFromEnv("MPCPS5_HELPER_PORT", kHelperPort);
-	if (g_own_reply == Reply::TimedOut || g_own_reply == Reply::Closed)
+	if (at_start && (g_own_reply == Reply::TimedOut || g_own_reply == Reply::Closed))
 	{
 		// it didn't answer the unlock either: asking again would only wait
 		OrbisLog("[update] not asking the helper where the app is: at start it %s", ReplyName(g_own_reply));
@@ -299,6 +299,7 @@ bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, 
 			got += size_t(n);
 		}
 	const Reply r = ReplyOf(got, sizeof(req), n, e, req.magic == kMagic);
+	g_own_reply = r; // a helper silent at start may answer now (or the other way round)
 	if (r != Reply::Answered || req.cmd != kCmdAppPlace || req.ret < 0 || req.ret > kMaxAppPlaceBytes)
 	{
 		close(fd);

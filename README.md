@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 469 host tests
+> **Status (1.5.1):** builds with the ps5-payload-dev SDK into a signed native app and passes 470 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). It has **not been run on a PS5 yet** -- please report what works and what
@@ -547,7 +547,8 @@ Honest limits:
   link, or with one to another folder, nothing is written and Check for updates says it can't tell.
   The helper's answer isn't taken on trust either: a folder it names is written only if its `param.json` names
   PPSA99015. And when the helper didn't answer the unlock at start (none, or a wedged one), the app doesn't ask it
-  again, so a start never waits twice.
+  again then, so a start never waits twice; Check for updates asks it once more before offering an update, so a
+  helper that answers by then is used.
 - **No mount yet** (the payload autoloaded before ShadowMount+ has mounted the app): the folder ShadowMount+ last
   mounted is in its link `/user/app/PPSA99015/mount.lnk`; the payload updates that folder (if it names PPSA99015), so
   **no second copy** is made in `/data/homebrew`. If that folder isn't there (a drive not connected yet) nothing is

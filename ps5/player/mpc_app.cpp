@@ -2348,7 +2348,9 @@ void MainFrame::OfferUpdate(const update::Status& st)
 			T("Check for updates"), MB_OK, 1);
 		return;
 	}
-	// the copy the console runs can't take it (an image, a read-only folder): said before anything is downloaded
+	// the copy the console runs can't take it (an image, a read-only folder): said before anything is downloaded.
+	// Looked for again if the helper didn't say at start (1.5.1)
+	mpcupdate::RefreshPlace();
 	const AppPlace& place = mpcupdate::Place();
 	if (!place.writable)
 	{

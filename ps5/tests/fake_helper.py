@@ -3,6 +3,7 @@
 #   fake_helper.py <port> old            a 1.4 / 1.5 helper: unlocks (cmd 5), closes the connection on cmd 7
 #   fake_helper.py <port> silent         a wedged helper: takes the request, never answers
 #   fake_helper.py <port> place <file>   unlocks, and answers cmd 7 with <file>'s text (where the app is)
+#   fake_helper.py <port> late <file>    silent on the first request (the unlock at start), then as "place"
 import socket
 import struct
 import sys
@@ -23,12 +24,21 @@ def recv_all(c, n):
     return data
 
 
+first = [True]
+
+
 def serve(c, mode, extra):
     try:
         req = recv_all(c, SIZE)
         if len(req) != SIZE:
             return
         magic, cmd, pid, ret = struct.unpack_from("<IiiI", req)
+        if mode == "late":
+            if first[0]:
+                first[0] = False
+                time.sleep(30)
+                return
+            mode = "place"
         if mode == "silent":
             time.sleep(30)
             return

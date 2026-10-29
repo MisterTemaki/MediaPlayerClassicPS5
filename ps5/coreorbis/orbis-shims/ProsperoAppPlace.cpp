@@ -531,11 +531,16 @@ AppPlace FindAppPlace(const std::string& title_id, const std::string& default_di
 {
 	// the helper payload reads the mount table (FindAppPlace in its build); an old one (1.4, 1.5) doesn't know the
 	// request and closes the connection
+	// the first lookup is the one at start (mpcupdate::Init); later ones (Check for updates) ask whatever happened then
+	static bool looked = false;
+	const bool at_start = !looked;
+	looked = true;
 	std::string text;
 	AppPlace a;
-	if (jailbreak::FetchAppPlace(title_id, default_dir, text) && ParseAppPlace(text, a))
+	if (jailbreak::FetchAppPlace(title_id, default_dir, text, at_start) && ParseAppPlace(text, a))
 	{
 		a.log = "(from the helper) " + a.log;
+		a.from_helper = true;
 		// not taken on trust: a folder the app would write must be this app's (its param.json names the title), and
 		// so must the folder it says the console runs, when it is one (a link's, an image's)
 		const bool dir_ok = NamesTitle(a.dir, title_id);
