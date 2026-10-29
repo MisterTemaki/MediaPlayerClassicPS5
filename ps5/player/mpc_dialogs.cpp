@@ -161,16 +161,26 @@ std::string Join(const std::string& dir, const std::string& name)
 
 std::string HideSecret(const std::string& url)
 {
-	const size_t at = url.find('@');
-	if (url.compare(0, 6, "smb://") == 0 && at != std::string::npos)
-	{
-		const size_t colon = url.find(':', 6);
-		if (colon != std::string::npos && colon < at)
-			return url.substr(0, colon) + url.substr(at);
-	}
-	return url;
+	return HidePassword(url);
 }
 } // namespace
+
+std::string HidePassword(const std::string& url)
+{
+	// scheme://user:password@host/... -> scheme://user@host/... (any scheme: smb://, http://, rtsp://...)
+	const size_t sch = url.find("://");
+	if (sch == std::string::npos)
+		return url;
+	const size_t auth = sch + 3;
+	const size_t end = std::min(url.find('/', auth), url.size());
+	const size_t at = url.rfind('@', end);
+	if (at == std::string::npos || at < auth)
+		return url;
+	const size_t colon = url.find(':', auth);
+	if (colon == std::string::npos || colon > at)
+		return url;
+	return url.substr(0, colon) + url.substr(at);
+}
 
 bool IsMediaFile(const std::string& name)
 {
@@ -906,11 +916,20 @@ void ShowOpenDialog(std::function<void(const std::string&, const std::string&, b
 		ComboBox *open = nullptr, *dub = nullptr;
 		CheckBox* add = nullptr;
 		std::function<void(const std::string&, const std::string&, bool)> done;
+		// 1.5.2: the Recent Files are listed without their passwords (as the title bar and the menu show them); the
+		// one chosen opens with its own
+		std::vector<std::string> recent;
 		void OnOk() override
 		{
-			const std::string url = open->Text();
+			std::string url = open->Text();
 			if (url.empty())
 				return;
+			for (const std::string& r : recent)
+				if (url == HidePassword(r))
+				{
+					url = r;
+					break;
+				}
 			auto cb = done;
 			const std::string d = dub->Text();
 			const bool a = add->checked;
@@ -938,7 +957,9 @@ void ShowOpenDialog(std::function<void(const std::string&, const std::string&, b
 	d->open = d->Add(new ComboBox);
 	d->open->editable = true;
 	d->open->rect = d->DuRect(10, 42, 188, 14);
-	d->open->items = AppSettings().recent;
+	d->recent = AppSettings().recent;
+	for (const std::string& r : d->recent)
+		d->open->items.push_back(HidePassword(r));
 	if (!d->open->items.empty())
 		d->open->text = d->open->items.front();
 	Button* b1 = d->Add(new Button);

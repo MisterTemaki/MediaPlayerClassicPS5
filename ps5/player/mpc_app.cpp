@@ -373,10 +373,12 @@ std::string MainFrame::Title() const
 	if (current_url_.empty() || player_.State() == PlayState::Closed)
 		return app;
 	std::string name = s_.title_bar == 0 ? current_url_ : FileName(current_url_);
-	// a password in an smb:// address stays off the screen
+	// a password in an smb:// address stays off the screen (1.5.2: in any address, http:// and the others too)
 	const size_t at = name.find('@');
 	if (name.compare(0, 6, "smb://") == 0 && at != std::string::npos)
 		name = "smb://" + name.substr(at + 1);
+	else
+		name = HidePassword(name);
 	if (s_.title_bar == 2)
 		return name;
 	return name + " - " + app;
@@ -1271,6 +1273,8 @@ std::vector<MenuItem> MainFrame::FileMenu() const
 		const size_t at = shown.find('@');
 		if (shown.compare(0, 6, "smb://") == 0 && at != std::string::npos)
 			shown = "smb://" + shown.substr(at + 1);
+		else
+			shown = HidePassword(shown); // 1.5.2: http://user:password@... too
 		recent.push_back(M::Cmd("&" + std::to_string((i + 1) % 10) + " " + shown, ID_RECENT_FIRST + int(i)));
 	}
 	if (recent.empty())

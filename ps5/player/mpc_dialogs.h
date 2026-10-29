@@ -49,6 +49,8 @@ bool IsPlaylistFile(const std::string& name);
 // a folder's media files, sorted as Explorer sorts (natural order), local or smb://
 std::vector<std::string> ListFolderMedia(const std::string& folder);
 std::string FileName(const std::string& path);
+// an address as shown on the screen: scheme://user:password@host... without the password (scheme://user@host...)
+std::string HidePassword(const std::string& url);
 std::string ParentFolder(const std::string& path);
 // "1.4 GB"
 std::string SizeText(uint64_t bytes);
