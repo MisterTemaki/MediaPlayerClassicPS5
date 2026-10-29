@@ -10,6 +10,9 @@
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_BMP
 #define STBI_NO_STDIO
+// 1.5.2: an audio file's cover (DecodeImage) is the file's: a small PNG can say 16384 x 16384 (1 GiB of pixels, twice
+// over with the copy made of it), so a picture over 8192 a side isn't decoded (stb_image allows 2^24 by default)
+#define STBI_MAX_DIMENSIONS 8192
 #include "stb_image.h"
 
 #define NANOSVG_IMPLEMENTATION

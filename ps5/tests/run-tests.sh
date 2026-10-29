@@ -1745,6 +1745,45 @@ make -n -W build/host/flags.txt build/host/port/player/mpc_ui.o >"$WORK/mk3.txt"
 expect "grep -q -- '-o build/host/port/player/mpc_app.o player/mpc_app.cpp' $WORK/mk1.txt && grep -q -- '-o build/host/port/player/mpc_res.o player/mpc_res.cpp' $WORK/mk2.txt && grep -q -- '-o build/host/port/player/mpc_ui.o player/mpc_ui.cpp' $WORK/mk3.txt" "the Makefile: mpc_app.o rebuilt for a new CA list, mpc_res.o for a new font, every object for new flags"
 fi
 
+if want 30; then
+echo "== 30. 1.5.2: bitmap subtitles kept within a budget; a font's huge glyph box; a screenshot's name; a huge cover"
+# a: an MKV with a Blu-ray (PGS) track, a 1000x200 picture every second for 60 s (800 KB each, 48 MB in all): with a
+# 4 MiB budget (the console's is 256 MiB) the pictures read ahead at the start are kept (all within 30 s), and a seek
+# to 50 s lets go those of the lines that ended 30 s before it; the line at 50 s still shows
+T=$(newroot t30)
+python3 tests/make_pgs.py $T/subs.sup 60 1.0 0.98 1000 200
+ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=25:d=61 -c:v libx264 -preset ultrafast -pix_fmt yuv420p $T/v.mp4 &&
+	ffmpeg -v error -i $T/v.mp4 -i $T/subs.sup -map 0 -map 1 -c copy $T/root/media/pgs.mkv
+rc=$(MPCPS5_HOST_SUB_BUDGET_MB=4 run "$T" "0:0" "40:state;60:seek 50;150:state;160:quit" "140" "$T/root/media/pgs.mkv")
+expect "[ $rc = 0 ] && grep -q 'opened .*pgs.mkv' $T/root/logs/boot.log && grep -q '\[subs\] bitmap subtitles over 4 MiB ([0-9]* MiB), all within 30 s' $T/root/logs/boot.log" "PGS: over the budget at the start, every picture within 30 s of the newest: kept"
+expect "grep -q '\[subs\] bitmap subtitles over 4 MiB ([0-9]* MiB): [0-9]* picture(s) of lines that ended by [0-9.]* s let go' $T/root/logs/boot.log" "a seek 50 s on: the pictures of the lines that ended long before let go"
+expect "$REGION $T/dump/flip00140.ppm 500 700 1420 977 255 255 255 30 2000 >/dev/null" "the line at 50 s drawn (a white box at the bottom)"
+nosan "$T"
+# b: a font in the fonts folder whose 'A' says its box is 65535 units wide and high, at 16 units per em: not drawn
+# (its bitmap would be gigabytes), the app runs on
+T=$(newroot t30b)
+mkdir -p $T/root/fonts
+python3 tests/make_test_fonts.py hugebox $T/root/fonts /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+printf '1\r\n00:00:00,000 --> 00:00:09,000\r\nAAA\r\n' >$T/root/media/movie.srt
+cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
+ini "$T" "SubFont=bf-hugebox.ttf"
+rc=$(run "$T" "0:0" "60:state;70:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && ! grep -q 'runtime error\|AddressSanitizer\|SEGV\|allocation' $T/out.txt && grep -q '\[fonts\] glyph [0-9]* of bf-hugebox.ttf: its box ([0-9]*x[0-9]* at [0-9]* px) is far bigger than the font: not drawn' $T/root/logs/boot.log" "a glyph whose box is far bigger than the font: not drawn, no crash"
+# c: File > Save Image of a file named ..%2F..%2Fescaped.mp4 (FileName decodes %2F): the picture stays in screenshots/
+T=$(newroot t30c)
+cp "$MEDIA/red.mp4" "$T/root/media/..%2F..%2Fescaped.mp4"
+rc=$(run "$T" "0:0" "60:cmd saveimage;80:quit" "" "$T/root/media/..%2F..%2Fescaped.mp4")
+expect "[ $rc = 0 ] && ls $T/root/screenshots/*escaped_snapshot_*.png >/dev/null 2>&1 && [ -z \"\$(find $T -name '*escaped_snapshot*' -not -path '*/screenshots/*')\" ]" "Save Image of ..%2F..%2Fescaped.mp4: the PNG in screenshots/, nowhere above it"
+# d: an MP3 whose cover says 8200 x 8200 (a small PNG that would take 2 x 256 MiB): not decoded, the logo instead
+T=$(newroot t30d)
+ffmpeg -v error -f lavfi -i color=c=blue:size=8200x8200 -frames:v 1 $T/big.png &&
+	ffmpeg -v error -f lavfi -i sine=frequency=660:sample_rate=44100:duration=6 -i $T/big.png -map 0 -map 1 -c:a libmp3lame \
+		-b:a 128k -c:v copy -disposition:v attached_pic $T/root/media/bigcover.mp3
+rc=$(run "$T" "0:0" "40:state;50:quit" "35" "$T/root/media/bigcover.mp3")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && grep -q \"the cover picture ([0-9]* bytes) can't be read, or is over 8192 pixels a side\" $T/root/logs/boot.log && ! $CHECK $T/dump/flip00035.ppm 960 500 blue >/dev/null" "a cover over 8192 pixels a side: not decoded, the file plays (the logo shown)"
+nosan "$T"
+fi
+
 echo
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]

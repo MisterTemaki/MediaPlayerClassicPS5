@@ -9,6 +9,8 @@
                                                class counts don't fit in it; 'A' a composite glyph of 8 bytes
                                                whose component (read from the bytes after it) is 'A' itself; 'A' a
                                                simple glyph whose point count runs past its data
+  make_test_fonts.py hugebox <dir> <font.ttf>  1.5.2: bf-hugebox.ttf, 16 units per em and 'A' saying its box is
+                                               65535 units wide and high (a bitmap of gigabytes if drawn as it says)
 """
 import os
 import struct
@@ -141,4 +143,18 @@ def crafted(d, src):
     open(os.path.join(d, 'be-lastoff.ttf'), 'wb').write(b)
 
 
-{'bad': bad, 'weights': weights, 'crafted': crafted}[sys.argv[1]](sys.argv[2], sys.argv[3])
+def hugebox(d, src):
+    data = open(src, 'rb').read()
+    t = tables(data)
+    b = bytearray(data)
+    head = t[b'head'][1]
+    b[head + 18:head + 20] = struct.pack('>H', 16)  # unitsPerEm: the smallest the player takes
+    a = glyph_of(data, 0x41)
+    loca, fmt, glyf = loca_of(data)
+    at = struct.unpack('>I', data[loca + 4 * a:loca + 4 * a + 4])[0] if fmt else 2 * struct.unpack('>H', data[loca + 2 * a:loca + 2 * a + 2])[0]
+    g0 = glyf + at
+    b[g0 + 2:g0 + 10] = struct.pack('>hhhh', -32768, -32768, 32767, 32767)  # xMin yMin xMax yMax
+    open(os.path.join(d, 'bf-hugebox.ttf'), 'wb').write(b)
+
+
+{'bad': bad, 'weights': weights, 'crafted': crafted, 'hugebox': hugebox}[sys.argv[1]](sys.argv[2], sys.argv[3])

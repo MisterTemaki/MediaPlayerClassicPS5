@@ -319,6 +319,16 @@ const Glyph& GetGlyph(const Face* f, int em, int glyph, bool synth)
 	g.h = y1 - y0;
 	g.xoff = x0;
 	g.yoff = y0;
+	// 1.5.2: a glyph box far bigger than its size (a damaged or made-up font in the fonts folder: the glyph header's
+	// bounds are taken as they are, up to 32767 units at 16 units per em) isn't drawn: its bitmap would be gigabytes
+	// (a crash on the console, where an allocation that fails ends the app). Real glyphs stay within a few em.
+	const int64_t limit = 16 * int64_t(std::max(em, 1)) + 64;
+	if (g.w > limit || g.h > limit)
+	{
+		OrbisLog("[fonts] glyph %d of %s: its box (%dx%d at %d px) is far bigger than the font: not drawn", glyph,
+			f->file.empty() ? "a font" : f->file.c_str(), g.w, g.h, em);
+		g.w = g.h = 0;
+	}
 	if (g.w > 0 && g.h > 0)
 	{
 		g.bits.assign(size_t(g.w) * g.h, 0);

@@ -38,6 +38,7 @@ extern "C" {
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -198,6 +199,29 @@ struct SubItem
 	bool open_end = false; // shown until the next one
 	SubtitleShow show;
 };
+
+size_t PictureBytes(const SubtitleShow& s)
+{
+	size_t n = 0;
+	for (const auto& p : s.pics)
+		n += size_t(p.img.Width()) * size_t(p.img.Height()) * 4;
+	return n;
+}
+
+// the bitmap subtitles' memory budget: 256 MiB (the host tests set a smaller one with MPCPS5_HOST_SUB_BUDGET_MB)
+size_t SubPictureBudget()
+{
+#ifndef __PROSPERO__
+	if (const char* e = getenv("MPCPS5_HOST_SUB_BUDGET_MB"))
+		if (atoi(e) > 0)
+			return size_t(atoi(e)) << 20;
+#endif
+	return size_t(256) << 20;
+}
+
+// lines that ended this long before the newest one decoded keep their pictures whatever the budget (a seek back a
+// little finds them; further back, the demuxer decodes them again from the packets)
+constexpr double kSubPictureKeep = 30;
 
 const char* const kChannelNames[] = {"", "mono", "stereo", "2.1", "4.0", "5.0", "5.1", "6.1", "7.1"};
 
@@ -536,6 +560,12 @@ struct Player::Impl
 	// subtitles
 	mutable std::mutex smu;
 	std::map<int, std::vector<SubItem>> subs; // per track id
+	// 1.5.2: the bitmap subtitles' pictures kept (PGS, VobSub, DVB: every track is decoded as it is demuxed), in bytes;
+	// over the budget, the pictures of lines that ended well behind are let go (a Blu-ray remux's dozen PGS tracks
+	// kept every picture of the film: gigabytes by its end)
+	size_t sub_pic_bytes = 0;
+	size_t sub_pic_budget = SubPictureBudget();
+	double sub_trim_said = -1e18; // when (stream time) the log last said nothing could go
 	std::vector<std::pair<int, std::string>> external_names;
 	// ASS/SSA tracks: drawn by libass (mpc_ass.h), made the first time one turns up
 	std::mutex ass_mu;
@@ -767,6 +797,9 @@ struct Player::Impl
 			const AVPacket& pic = ic->streams[v]->attached_pic;
 			if (pic.data && pic.size > 0 && res::DecodeImage(pic.data, size_t(pic.size), cover))
 				has_cover = true;
+			else if (pic.data && pic.size > 0)
+				OrbisLog("[player] the cover picture (%d bytes) can't be read, or is over 8192 pixels a side: not shown",
+					pic.size);
 			v = -1;
 			for (unsigned i = 0; i < ic->nb_streams; i++)
 				if (ic->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
@@ -1067,13 +1100,64 @@ struct Player::Impl
 			}
 		if (item.show.Empty())
 			return; // an empty one only ends the last (PGS)
+		const double start = item.start;
+		const size_t bytes = PictureBytes(item.show);
 		// keep the list sorted by start; replace an identical start (a seek replays packets)
 		auto pos = std::lower_bound(list.begin(), list.end(), item.start,
 			[](const SubItem& a, double s) { return a.start < s; });
 		if (pos != list.end() && std::fabs(pos->start - item.start) < 0.001)
+		{
+			sub_pic_bytes -= std::min(sub_pic_bytes, PictureBytes(pos->show));
 			*pos = std::move(item);
+		}
 		else
 			list.insert(pos, std::move(item));
+		sub_pic_bytes += bytes;
+		if (bytes && sub_pic_bytes > sub_pic_budget)
+			TrimSubtitlePictures(start);
+	}
+
+	// (smu held) over the budget: the pictures of every track's lines that ended kSubPictureKeep s before `newest` go,
+	// those furthest behind first, until half the budget is used; a line left with no text goes with them
+	void TrimSubtitlePictures(double newest)
+	{
+		std::vector<std::pair<double, std::pair<int, size_t>>> old; // end, (track, index)
+		for (auto& t : subs)
+			for (size_t i = 0; i < t.second.size(); i++)
+			{
+				const SubItem& it = t.second[i];
+				if (!it.show.pics.empty() && !it.open_end && it.end < newest - kSubPictureKeep)
+					old.push_back({it.end, {t.first, i}});
+			}
+		std::sort(old.begin(), old.end());
+		const size_t before = sub_pic_bytes;
+		size_t dropped = 0;
+		double upto = 0;
+		for (const auto& o : old)
+		{
+			if (sub_pic_bytes <= sub_pic_budget / 2)
+				break;
+			SubtitleShow& sh = subs[o.second.first][o.second.second].show;
+			sub_pic_bytes -= std::min(sub_pic_bytes, PictureBytes(sh));
+			sh.pics.clear();
+			sh.pics.shrink_to_fit();
+			dropped++;
+			upto = o.first;
+		}
+		// the lines with nothing left to show
+		for (auto& t : subs)
+			t.second.erase(std::remove_if(t.second.begin(), t.second.end(), [](const SubItem& it) { return it.show.Empty(); }),
+				t.second.end());
+		if (dropped)
+			OrbisLog("[subs] bitmap subtitles over %zu MiB (%zu MiB): %zu picture(s) of lines that ended by %.1f s let go, "
+					 "%zu MiB kept",
+				sub_pic_budget >> 20, before >> 20, dropped, upto, sub_pic_bytes >> 20);
+		else if (std::fabs(newest - sub_trim_said) > 60)
+		{
+			sub_trim_said = newest;
+			OrbisLog("[subs] bitmap subtitles over %zu MiB (%zu MiB), all within %.0f s of %.1f s: kept",
+				sub_pic_budget >> 20, before >> 20, kSubPictureKeep, newest);
+		}
 	}
 
 	void DecodeSubtitle(int idx, AVCodecContext* c, AVPacket* pkt)

@@ -1858,6 +1858,13 @@ void MainFrame::Command(int id)
 			const size_t dot = base.find_last_of('.');
 			if (dot != std::string::npos)
 				base = base.substr(0, dot);
+			// 1.5.2: FileName decodes %2F (URLs): a name like "..%2F..%2Fx.mp4" must not take the picture out of the
+			// screenshots folder, so no path separators or control characters stay in it
+			for (char& ch : base)
+				if (ch == '/' || ch == '\\' || static_cast<unsigned char>(ch) < 0x20)
+					ch = '_';
+			if (base.empty() || base == "." || base == "..")
+				base = "snapshot";
 			const std::string path = OrbisDir("screenshots") + "/" + base + "_snapshot_" +
 									 FormatTime(player_.Position(), true) + "_[" + stamp + "].png";
 			std::string fixed = path;
