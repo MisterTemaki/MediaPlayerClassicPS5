@@ -538,6 +538,20 @@ expect "grep -q \"failed: The new files couldn't be written to the disk for sure
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:quit" "")
 expect "grep -q 'the old version put back' $T/root/logs/boot.log && ! grep -q 'without their old copy\|its old copy is gone' $T/root/logs/boot.log && sums | cmp -s - $T/before.sums" "the next start: already back (the old files recognised by their SHA-256), the journal goes"
+# b6c (1.5.2): an eboot.bin over 1 MiB (the real one is tens of MB): the journal holds its whole SHA-256 -- 1.5.1 hashed
+# its first MiB only, so a file whose first MiB matched was taken as the old one -- and a start after the install was
+# cut off recognises it as already back by that
+head -c 3145728 /dev/urandom >$T/eboot.big
+cp $T/eboot.big $H/eboot.bin
+release v9.9 99.000.000
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=manifest.sha256 MPCPS5_HOST_UPDATE_FAIL_RESTORE=eboot.bin u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
+expect "grep -q \"^1	$(sha $T/eboot.big)	eboot.bin\$\" $H/update.journal && ls $H/eboot.bin.old.* >/dev/null" "an eboot.bin of 3 MiB not put back: the journal keeps its whole SHA-256"
+mv $H/eboot.bin.old.* $H/eboot.bin
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:quit" "")
+expect "grep -q 'the old version put back' $T/root/logs/boot.log && ! grep -q 'without their old copy\|its old copy is gone' $T/root/logs/boot.log && [ ! -e $H/update.journal ] && cmp -s $H/eboot.bin $T/eboot.big" "its old copy put back meanwhile: the next start recognises it by that SHA-256, the journal goes"
+cp $T/eboot.before $H/eboot.bin
 # b7: a damaged journal (empty): nothing guessed, nothing installed, the payload repairs the app
 : >$H/update.journal
 echo "something" >$H/eboot.bin.old.9-9

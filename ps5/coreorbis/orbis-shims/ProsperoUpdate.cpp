@@ -436,6 +436,7 @@ void* CheckMain(void*)
 		why = status < 0 ? "Couldn't reach GitHub (is the console online?)." : "GitHub answered " + std::to_string(status) + ".";
 	else if (!ParseRelease(std::string(data.begin(), data.end()), g_config.title_id, r, &why))
 		why = "The newest release has no " + g_config.title_id + " zip (" + why + ").";
+	std::function<void(const std::string&)> tell; // called after g_mu is let go (see below)
 	{
 		std::lock_guard<std::mutex> l(g_mu);
 		g_busy = false;
@@ -452,11 +453,15 @@ void* CheckMain(void*)
 		g_status.error.clear();
 		g_status.phase = CompareVersions(r.version, g_config.version) > 0 ? Phase::Available : Phase::UpToDate;
 		if (g_status.phase == Phase::Available && g_notify && g_on_newer)
-			g_on_newer(r.version);
+			tell = g_on_newer;
 		OrbisLog("[update] newest release %s (%s, %llu bytes, sha-256 %s); this is %s: %s", r.tag.c_str(),
 			r.zip_name.c_str(), (unsigned long long)r.size, r.sha256.empty() ? "not given" : r.sha256.c_str(),
 			g_config.version.c_str(), g_status.phase == Phase::Available ? "newer" : "up to date");
 	}
+	// 1.5.2: the app's notification (a toast, sent and waited for) outside g_mu: under it, the UI thread's GetStatus()
+	// at every frame waited for the system's toast
+	if (tell)
+		tell(r.version);
 	return nullptr;
 }
 
@@ -688,10 +693,22 @@ struct JournalEntry
 	std::string old_sha; // the replaced file's SHA-256: tells "already put back" from "lost" when its copy is gone
 };
 
+// The whole file's SHA-256, read in blocks (a file that can't be opened hashes as empty, as before). Up to 1.5.1 this
+// went through ReadText, which stops after 1 MiB: the journal's "old SHA-256" of eboot.bin (tens of MB) and of the
+// backgrounds was that of their first MiB only, so a file whose first MiB matched the old one's was taken as "already
+// put back" after an interrupted install.
 static std::string FileSha(const std::string& path)
 {
-	const std::string t = ReadText(path);
-	return Sha256Hex(reinterpret_cast<const uint8_t*>(t.data()), t.size());
+	Sha256 s;
+	if (FILE* f = fopen(path.c_str(), "rb"))
+	{
+		std::vector<uint8_t> buf(1 << 16);
+		size_t n;
+		while ((n = fread(buf.data(), 1, buf.size(), f)) > 0)
+			s.Add(buf.data(), n);
+		fclose(f);
+	}
+	return s.Hex();
 }
 
 struct Journal
