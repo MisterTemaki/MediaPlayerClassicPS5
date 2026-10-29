@@ -1715,6 +1715,9 @@ if [ -f build/app/mpc-pie.elf ] && [ -d "$SDKLIB" ]; then
 		for s in $slots; do llvm-readelf-18 -rW $P | grep -qi "^0*$s .*R_X86_64_RELATIVE *0*$pers\$" || ok=0; done
 		llvm-readelf-18 -sW $P | awk '$NF=="__eh_frame_hdr_start" {print $2}' | grep -qi "0*$hdr\$" || ok=0
 		expect "[ $ok = 1 ] && grep -q '^check_imports: ok' $WORK/imports.txt && ! grep -q 'the C++ runtime' $WORK/imports.txt" "the eboot's C++ runtime is its own: __gxx_personality_v0 at 0x$pers, every CIE's personality slot ($(echo $slots | tr ' ' ,)) relocated to it, __eh_frame_hdr_start = .eh_frame_hdr"
+		# 1.5.2: the CRT shaders inherited from the emulator ports (never called by the player, their licences not in
+		# the README) are out of the eboot
+		expect "! llvm-readelf-18 -sW $P | grep -q '_ZN6ps5crt'" "no CRT shader code (ps5crt) in the eboot: the player never drew with it"
 	fi
 else
 	echo "  (skipped: build/app/mpc-pie.elf or the SDK isn't there -- make ps5 first)"
