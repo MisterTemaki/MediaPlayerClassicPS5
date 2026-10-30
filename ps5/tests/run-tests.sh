@@ -554,6 +554,18 @@ mv $H/eboot.bin.old.* $H/eboot.bin
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:quit" "")
 expect "grep -q 'the old version put back' $T/root/logs/boot.log && ! grep -q 'without their old copy\|its old copy is gone' $T/root/logs/boot.log && [ ! -e $H/update.journal ] && cmp -s $H/eboot.bin $T/eboot.big" "its old copy put back meanwhile: the next start recognises it by that SHA-256, the journal goes"
+# b6d (1.5.2): a journal 1.5.1 wrote names a file over 1 MiB by the SHA-256 of its first MiB: put back meanwhile, it is
+# recognised by that too (taken as lost, its old copy gone, by the first 1.5.2 build)
+cp $T/eboot.big $H/eboot.bin
+rm -f $T/root/logs/boot.log
+rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=manifest.sha256 MPCPS5_HOST_UPDATE_FAIL_RESTORE=eboot.bin u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
+first=$(head -c 1048576 $T/eboot.big | sha256sum | cut -c1-64)
+sed -i "s/^1	$(sha $T/eboot.big)	eboot.bin\$/1	$first	eboot.bin/" $H/update.journal
+edited=$(grep -c "^1	$first	eboot.bin\$" $H/update.journal)
+mv $H/eboot.bin.old.* $H/eboot.bin
+rm -f $T/root/logs/boot.log
+rc=$(u16run "$T" "0:0" "60:quit" "")
+expect "[ $edited = 1 ] && grep -q 'the old version put back' $T/root/logs/boot.log && ! grep -q 'without their old copy\|its old copy is gone' $T/root/logs/boot.log && [ ! -e $H/update.journal ] && cmp -s $H/eboot.bin $T/eboot.big" "a 1.5.1 journal (the first MiB's SHA-256 of a 3 MiB eboot.bin), its old copy put back meanwhile: recognised, the journal goes"
 cp $T/eboot.before $H/eboot.bin
 # b7: a damaged journal (empty): nothing guessed, nothing installed, the payload repairs the app
 : >$H/update.journal
@@ -1817,6 +1829,68 @@ rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "30:cmd open;60:key menu;120:
 touch $T/drawn.txt
 expect "[ $rc = 0 ] && grep -qx 'http://bob@127.0.0.1:9/x.mp4' $T/drawn.txt && ! grep -q s3cret $T/drawn.txt" "an http:// password in the Recent Files: shown without it in the Open dialog"
 expect "grep -q '\[ui\] open http://bob:\*\*\*@127.0.0.1:9/x.mp4' $T/root/logs/boot.log" "OK opens the address with its password"
+nosan "$T"
+fi
+
+if want 31; then
+echo "== 31. 1.5.2 review: a file's name without its address's user and password; threads the console refuses; .sup and VobSub files"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+# a: an address with nothing past its host (http://bob:s3cret@127.0.0.1:9/) was named "bob:s3cret@127.0.0.1:9" by
+# FileName: in the title bar, the failure message, the notification and boot.log. And smb://'s "Not a file on a share"
+# message showed the whole address. Neither shows the password now (every text drawn is recorded on the host).
+T=$(newroot t31a)
+rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "20:open http://bob:s3cret@127.0.0.1:9/;80:key enter;100:open smb://bob:s3cret@127.0.0.1:9/share;180:key enter;200:quit" "")
+touch $T/drawn.txt
+expect "[ $rc = 0 ] && grep -q '127.0.0.1:9' $T/drawn.txt && grep -q 'Not a file on a share: smb://bob@127.0.0.1:9/share' $T/drawn.txt && ! grep -q s3cret $T/drawn.txt" "a failed http:// address and an smb:// one with no file: their passwords never drawn"
+expect "! grep -q s3cret $T/root/logs/boot.log && ! grep -q s3cret $T/out.txt && grep -q 'Failed to open \"127.0.0.1:9\"' $T/root/logs/boot.log" "nor in boot.log or the notification (the name is the host)"
+nosan "$T"
+# b: threads the console refuses (MPCPS5_HOST_REFUSE_THREADS stands for it): each place gives up what needed one,
+# says so, and the app runs on (1.5.1: std::terminate, the app gone). b1: the file's opener and the notification
+T=$(newroot t31b1)
+cp "$MEDIA/red.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_REFUSE_THREADS=opener,notify run "$T" "0:0" "60:key enter;80:quit" "" "$T/root/media/red.mp4")
+expect "[ $rc = 0 ] && log $T '\[player\] a new thread refused: opener: ' && log $T 'failed: The console refused a new thread' && log $T '\[notify\] a new thread refused: notify: .*: sent from the caller' && grep -q '\[host\] notification: .*could not open red.mp4' $T/out.txt" "the opener refused: the file fails with a message, the notification sent by the caller"
+nosan "$T"
+# b2: the video thread (the demuxer already running): the file fails, the demuxer stops with it
+T=$(newroot t31b2)
+cp "$MEDIA/red.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_REFUSE_THREADS=video run "$T" "0:0" "60:key enter;80:quit" "" "$T/root/media/red.mp4")
+expect "[ $rc = 0 ] && log $T '\[player\] a new thread refused: video: ' && log $T 'failed: The console refused a new thread'" "the video thread refused: the file fails, the app quits cleanly"
+nosan "$T"
+# b3: the audio output, the disc watcher and the tone mapping's workers: no sound, no disc, the caller tone maps all
+T=$(newroot t31b3)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_REFUSE_THREADS=audio-out,disc-watch,tonemap run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "[ $rc = 0 ] && log $T '\[audio\] a new thread refused: audio-out: .*: no sound' && log $T '\[disc\] a new thread refused: disc-watch: .*: the disc drives aren.t watched' && log $T 'a new thread refused: tonemap: .* (worker 1): its bands done by the caller' && log $T '\[tonemap\] 0 worker threads started'" "the audio output, the disc watcher, the tone mapping workers refused: logged"
+expect "grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "the film plays, tone mapped whole by the caller (100 and 1000 nits as in group 14)"
+nosan "$T"
+# b4: a disc's reading thread: its sectors read straight from the drive, the DVD plays; b5: the thread of an audio
+# track chosen later: that track off, the film plays on
+T=$(newroot t31b4)
+rc=$(MPCPS5_HOST_REFUSE_THREADS=disc-io,audio-track MPCPS5_HOST_DISC=$MEDIA/dvd.iso run "$T" "0:0" "30:cmd disc0;58:state;60:cmd 2002;120:state;130:quit" "55")
+expect "[ $rc = 0 ] && log $T 'cd0: a new thread refused: disc-io: .*: read straight from the drive' && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00055.ppm 960 400 red >/dev/null" "the disc's reading thread refused: read straight from the drive, the DVD plays (red)"
+expect "log $T 'a new thread refused: audio-track: .*: audio track [0-9]* off' && [ \"\$(field $T 2 1)\" = 2 ] && [ \"\$(field $T 2 5)\" = -1 ]" "an audio track's thread refused: that track off, the film plays on"
+nosan "$T"
+# c: a Blu-ray .sup beside the film (60 lines of 1000x200, a picture a second): up to 1.5.1 it went through the text
+# conversion and never loaded. Its packets are kept, each line's pictures decoded when it shows; with a 1 MiB budget,
+# a seek to 50 s lets the pictures of the first lines (shown at the start) go, a seek back to 1.3 s those far ahead,
+# and the line at 1.2 s shows again, decoded anew from its packets
+T=$(newroot t31c)
+python3 tests/make_pgs.py $T/root/media/film.sup 60 1.0 0.98 1000 200
+ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=25:d=61 -c:v libx264 -preset ultrafast -pix_fmt yuv420p $T/root/media/film.mp4
+rc=$(MPCPS5_HOST_SUB_BUDGET_MB=1 run "$T" "0:0" "30:state;40:seek 50;100:state;110:seek 1.3;170:state;180:quit" "95,125" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'subtitles loaded: .*film.sup (bitmaps: 60 line(s), [0-9]* KB of packets kept)'" "film.sup beside film.mp4: loaded, 60 lines"
+expect "$REGION $T/dump/flip00095.ppm 500 700 1420 977 255 255 255 30 2000 >/dev/null && $REGION $T/dump/flip00125.ppm 500 700 1420 977 255 255 255 30 2000 >/dev/null" "its line at 50 s and, after a seek back, the one at 1.2 s (let go meanwhile) drawn"
+expect "grep -q 'bitmap subtitles over 1 MiB ([0-9]* MiB): [0-9]* picture(s) of lines over 30 s from 5[0-9]\.[0-9] s let go' $T/root/logs/boot.log && grep -q 'bitmap subtitles over 1 MiB ([0-9]* MiB): [0-9]* picture(s) of lines over 30 s from [0-9]\.[0-9] s let go' $T/root/logs/boot.log" "the budget held: pictures far from the line shown let go (decoded again from the packets when needed)"
+nosan "$T"
+# d: a VobSub pair (film.idx + film.sub, made from a PGS file by FFmpeg): read with FFmpeg's VobSub reader, the line
+# at 1 s drawn
+T=$(newroot t31d)
+python3 tests/make_pgs.py $T/vs.sup 6 1.0 0.98 1000 200
+python3 tests/make_vobsub.py $T/vs.sup $T/root/media/film 2>/dev/null
+cp "$MEDIA/grey.mp4" "$T/root/media/film.mp4"
+rc=$(run "$T" "0:0" "60:state;70:quit" "60" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'subtitles loaded: .*film.idx (bitmaps: 6 line(s)' && $REGION $T/dump/flip00060.ppm 500 700 1420 977 255 255 255 60 2000 >/dev/null" "film.sub with its film.idx beside the film: VobSub loaded (6 lines), the line at 1 s drawn"
 nosan "$T"
 fi
 

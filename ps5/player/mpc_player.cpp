@@ -14,6 +14,7 @@
 
 #include "OrbisPaths.h"
 #include "ProsperoAudio.h"
+#include "ProsperoThread.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -42,6 +43,7 @@ extern "C" {
 #include <cstring>
 #include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -198,7 +200,14 @@ struct SubItem
 	double start = 0, end = 1e18;
 	bool open_end = false; // shown until the next one
 	SubtitleShow show;
+	// 1.5.2: a line of an external bitmap subtitle file: the packets it is decoded from (ExtBitmap::pkts), and whether
+	// its pictures are to be decoded (not yet, or let go by the budget)
+	int first_pkt = -1, last_pkt = -1;
+	bool need_pics = false;
 };
+
+// 1.5.2: the compressed packets of an external bitmap subtitle file kept at most (a film's .sup is tens of MB)
+constexpr size_t kMaxExtBitmapBytes = size_t(128) << 20;
 
 size_t PictureBytes(const SubtitleShow& s)
 {
@@ -567,6 +576,22 @@ struct Player::Impl
 	size_t sub_pic_budget = SubPictureBudget();
 	double sub_trim_said = -1e18; // when (stream time) the log last said nothing could go
 	std::vector<std::pair<int, std::string>> external_names;
+	// 1.5.2: external bitmap subtitle files (.sup, VobSub .idx/.sub), by track: their packets kept (compressed), each
+	// line's pictures decoded from them when it shows, and let go by the budget like an embedded track's (smu). Up to
+	// 1.5.1 such a file went through the text conversion and never loaded.
+	struct ExtBitmap
+	{
+		AVCodecContext* c = nullptr;
+		std::vector<AVPacket*> pkts;
+		int ref_w = 0, ref_h = 0;
+		~ExtBitmap()
+		{
+			for (AVPacket*& p : pkts)
+				av_packet_free(&p);
+			avcodec_free_context(&c);
+		}
+	};
+	std::map<int, std::unique_ptr<ExtBitmap>> ext_bitmaps;
 	// ASS/SSA tracks: drawn by libass (mpc_ass.h), made the first time one turns up
 	std::mutex ass_mu;
 	std::unique_ptr<ass::Renderer> ass_r;
@@ -902,11 +927,21 @@ struct Player::Impl
 		ps5audio::SetPaused(start_paused);
 		state = start_paused ? PlayState::Paused : PlayState::Playing;
 
-		demuxer = std::thread([this] { DemuxThread(); });
-		if (vdec)
-			vthread = std::thread([this] { VideoThread(); });
-		if (adec)
-			athread = std::thread([this] { AudioThread(); });
+		// 1.5.2: a thread the console refuses fails the open (up to 1.5.1: std::terminate); the ones started stop
+		// when the app closes the file
+		try
+		{
+			demuxer = ps5::StartThread("demuxer", [this] { DemuxThread(); });
+			if (vdec)
+				vthread = ps5::StartThread("video", [this] { VideoThread(); });
+			if (adec)
+				athread = ps5::StartThread("audio", [this] { AudioThread(); });
+		}
+		catch (const std::system_error& e)
+		{
+			OrbisLog("[player] a new thread refused: %s", e.what());
+			SetFailed("The console refused a new thread");
+		}
 	}
 
 	void AutoLoadSubtitles()
@@ -918,13 +953,14 @@ struct Player::Impl
 		if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
 			return;
 		const std::string base = url.substr(0, dot);
-		static const char* const exts[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".pt-BR.srt", ".pt.srt", ".por.srt",
-			".en.srt", ".eng.srt"};
+		// 1.5.2: .sup too; a VobSub pair through its .sub (AddSubtitleFile reads the .idx beside it)
+		static const char* const exts[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".sup", ".pt-BR.srt", ".pt.srt",
+			".por.srt", ".en.srt", ".eng.srt"};
 		bool any = false;
 		for (const char* e : exts)
 		{
 			const std::string p = base + e;
-			if (url.compare(0, 6, "smb://") == 0 ? smb::Exists(p) : url.compare(0, 7, "disc://") == 0 ? disc::Exists(p) : OrbisIsFile(p))
+			if (AnyExists(p))
 			{
 				std::string err;
 				if (AddSubtitleFile(p, &err))
@@ -1051,7 +1087,7 @@ struct Player::Impl
 		av_packet_free(&pkt);
 	}
 
-	void StoreSubtitle(int track, const AVSubtitle& sub, double pts, int ref_w, int ref_h)
+	static SubItem ItemTimes(const AVSubtitle& sub, double pts, int ref_w, int ref_h)
 	{
 		SubItem item;
 		item.start = pts + sub.start_display_time / 1000.0;
@@ -1059,13 +1095,37 @@ struct Player::Impl
 		item.end = item.open_end ? 1e18 : pts + sub.end_display_time / 1000.0;
 		item.show.ref_w = ref_w;
 		item.show.ref_h = ref_h;
+		return item;
+	}
+
+	void StoreSubtitle(int track, const AVSubtitle& sub, double pts, int ref_w, int ref_h)
+	{
+		SubItem item = ItemTimes(sub, pts, ref_w, ref_h);
+		ShowFromSubtitle(sub, item.show);
+		InsertSubtitle(track, std::move(item));
+	}
+
+	// an external bitmap file's line: its times now, its pictures when it shows (DecodeShown)
+	void StoreExternalBitmap(int track, const AVSubtitle& sub, double pts, int ref_w, int ref_h, int first_pkt, int last_pkt)
+	{
+		SubItem item = ItemTimes(sub, pts, ref_w, ref_h);
+		for (unsigned i = 0; i < sub.num_rects; i++)
+			if (sub.rects[i]->type == SUBTITLE_BITMAP && sub.rects[i]->w > 0 && sub.rects[i]->h > 0)
+				item.need_pics = true;
+		item.first_pkt = first_pkt;
+		item.last_pkt = last_pkt;
+		InsertSubtitle(track, std::move(item));
+	}
+
+	static void ShowFromSubtitle(const AVSubtitle& sub, SubtitleShow& show)
+	{
 		for (unsigned i = 0; i < sub.num_rects; i++)
 		{
 			const AVSubtitleRect* r = sub.rects[i];
 			if (r->type == SUBTITLE_ASS || r->type == SUBTITLE_TEXT)
 			{
 				const std::string text = r->type == SUBTITLE_ASS ? AssEventText(r->ass) : std::string(r->text ? r->text : "");
-				AssToText(text, item.show.lines, item.show.italic, item.show.top);
+				AssToText(text, show.lines, show.italic, show.top);
 			}
 			else if (r->type == SUBTITLE_BITMAP && r->w > 0 && r->h > 0 && r->data[0] && r->data[1])
 			{
@@ -1085,9 +1145,13 @@ struct Player::Impl
 						o[3] = c >> 24;
 					}
 				pic.img.FromRGBA(rgba.data(), r->w, r->h);
-				item.show.pics.push_back(std::move(pic));
+				show.pics.push_back(std::move(pic));
 			}
 		}
+	}
+
+	void InsertSubtitle(int track, SubItem&& item)
+	{
 		std::lock_guard<std::mutex> l(smu);
 		std::vector<SubItem>& list = subs[track];
 		// a line that was shown "until the next one" ends here
@@ -1098,7 +1162,7 @@ struct Player::Impl
 				it->open_end = false;
 				break;
 			}
-		if (item.show.Empty())
+		if (item.show.Empty() && !item.need_pics)
 			return; // an empty one only ends the last (PGS)
 		const double start = item.start;
 		const size_t bytes = PictureBytes(item.show);
@@ -1120,7 +1184,8 @@ struct Player::Impl
 	// (smu held) over the budget: the pictures of every track's lines more than kSubPictureKeep s from `newest` (the
 	// line just decoded) go -- those that ended before it, and, after a seek back, those that start long after it --
 	// the furthest first, until half the budget is used; a line left with no text goes with them. A line let go is
-	// decoded again when the film gets back to it (a seek replays the packets).
+	// decoded again when the film gets back to it (a seek replays the packets; an external file's from its packets kept,
+	// DecodeShown).
 	void TrimSubtitlePictures(double newest)
 	{
 		std::vector<std::pair<double, std::pair<int, size_t>>> old; // distance from newest, (track, index)
@@ -1142,15 +1207,18 @@ struct Player::Impl
 		{
 			if (sub_pic_bytes <= sub_pic_budget / 2)
 				break;
-			SubtitleShow& sh = subs[o.second.first][o.second.second].show;
+			SubItem& item = subs[o.second.first][o.second.second];
+			SubtitleShow& sh = item.show;
 			sub_pic_bytes -= std::min(sub_pic_bytes, PictureBytes(sh));
 			sh.pics.clear();
 			sh.pics.shrink_to_fit();
+			item.need_pics = item.first_pkt >= 0; // an external file's: decoded again from its packets when it shows
 			dropped++;
 		}
 		// the lines with nothing left to show
 		for (auto& t : subs)
-			t.second.erase(std::remove_if(t.second.begin(), t.second.end(), [](const SubItem& it) { return it.show.Empty(); }),
+			t.second.erase(std::remove_if(t.second.begin(), t.second.end(),
+							   [](const SubItem& it) { return it.show.Empty() && !it.need_pics; }),
 				t.second.end());
 		if (dropped)
 			OrbisLog("[subs] bitmap subtitles over %zu MiB (%zu MiB): %zu picture(s) of lines over %.0f s from %.1f s let go, "
@@ -1162,6 +1230,54 @@ struct Player::Impl
 			OrbisLog("[subs] bitmap subtitles over %zu MiB (%zu MiB), all within %.0f s of %.1f s: kept",
 				sub_pic_budget >> 20, before >> 20, kSubPictureKeep, newest);
 		}
+	}
+
+	// (smu held) an external bitmap file's lines showing at t whose pictures aren't in memory: decoded from their
+	// packets, then the budget kept
+	void DecodeShown(int track, double t)
+	{
+		auto e = ext_bitmaps.find(track);
+		auto li = subs.find(track);
+		if (e == ext_bitmaps.end() || li == subs.end())
+			return;
+		std::vector<SubItem>& list = li->second;
+		auto end = std::upper_bound(list.begin(), list.end(), t, [](double v, const SubItem& a) { return v < a.start; });
+		bool added = false;
+		int seen = 0;
+		for (auto i = end; i != list.begin() && seen < 64;)
+		{
+			--i;
+			seen++;
+			if (t >= i->start && t < i->end && i->need_pics)
+			{
+				i->need_pics = false; // tried once, whatever comes of it
+				ExtBitmap& x = *e->second;
+				AVSubtitle sub = {};
+				bool have = false;
+				for (int k = i->first_pkt; k >= 0 && k <= i->last_pkt && k < int(x.pkts.size()); k++)
+				{
+					AVSubtitle one = {};
+					int got = 0;
+					if (avcodec_decode_subtitle2(x.c, &one, &got, x.pkts[size_t(k)]) >= 0 && got)
+					{
+						if (have)
+							avsubtitle_free(&sub);
+						sub = one;
+						have = true;
+					}
+				}
+				if (!have)
+					continue;
+				SubtitleShow show;
+				ShowFromSubtitle(sub, show);
+				avsubtitle_free(&sub);
+				i->show.pics = std::move(show.pics);
+				sub_pic_bytes += PictureBytes(i->show);
+				added = true;
+			}
+		}
+		if (added && sub_pic_bytes > sub_pic_budget)
+			TrimSubtitlePictures(t);
 	}
 
 	void DecodeSubtitle(int idx, AVCodecContext* c, AVPacket* pkt)
@@ -1686,8 +1802,155 @@ struct Player::Impl
 		ps5audio::SetPaused(false);
 	}
 
+	static bool AnyExists(const std::string& p)
+	{
+		return p.compare(0, 6, "smb://") == 0 ? smb::Exists(p) : p.compare(0, 7, "disc://") == 0 ? disc::Exists(p) : OrbisIsFile(p);
+	}
+
+	// 1.5.2: a .sup (Blu-ray PGS) or a VobSub pair (.idx + .sub): read by FFmpeg as it is, never through the text
+	// conversion; each line's times now, its pictures when it shows (DecodeShown)
+	bool AddBitmapSubtitleFile(const std::string& path, std::string* err)
+	{
+		const bool vobsub = Ext(path) == "idx";
+		const bool on_smb = path.compare(0, 6, "smb://") == 0, on_disc = path.compare(0, 7, "disc://") == 0;
+		if (vobsub && (on_smb || on_disc))
+		{
+			// FFmpeg's VobSub reader opens the .sub beside the .idx by itself, from a local path only
+			OrbisLog("[player] %s: VobSub from a share or a disc isn't read (copy it to the console)", path.c_str());
+			if (err)
+				*err = "Not a subtitle file this player can read";
+			return false;
+		}
+		AVFormatContext* sc = avformat_alloc_context();
+		AVIOContext* io = nullptr;
+		void* owner = nullptr;
+		std::string ioerr;
+		if (on_smb)
+			io = smb::OpenAvio(path, &owner, &ioerr);
+		else if (on_disc)
+			io = disc::OpenAvio(path, &owner, &ioerr);
+		if ((on_smb || on_disc) && !io)
+		{
+			avformat_free_context(sc);
+			if (err)
+				*err = ioerr.empty() ? "Can't read the file" : ioerr;
+			return false;
+		}
+		if (io)
+		{
+			sc->pb = io;
+			sc->flags |= AVFMT_FLAG_CUSTOM_IO;
+		}
+		bool ok = false;
+		size_t kept = 0, lines = 0;
+		double last = 0;
+		bool cut = false;
+		if (avformat_open_input(&sc, path.c_str(), av_find_input_format(vobsub ? "vobsub" : "sup"), nullptr) >= 0)
+		{
+			const int si = avformat_find_stream_info(sc, nullptr) >= 0
+							   ? av_find_best_stream(sc, AVMEDIA_TYPE_SUBTITLE, -1, -1, nullptr, 0)
+							   : AVERROR_STREAM_NOT_FOUND;
+			const AVCodec* codec = si >= 0 ? avcodec_find_decoder(sc->streams[si]->codecpar->codec_id) : nullptr;
+			auto x = std::make_unique<ExtBitmap>();
+			x->c = codec ? avcodec_alloc_context3(codec) : nullptr;
+			if (x->c && avcodec_parameters_to_context(x->c, sc->streams[si]->codecpar) >= 0)
+			{
+				AVStream* st = sc->streams[si];
+				x->c->pkt_timebase = st->time_base;
+				if (avcodec_open2(x->c, codec, nullptr) >= 0)
+				{
+					x->ref_w = x->c->width;
+					x->ref_h = x->c->height;
+					int track;
+					{
+						std::lock_guard<std::mutex> l(smu);
+						track = 1000 + int(external_names.size());
+						const size_t slash = path.find_last_of('/');
+						external_names.push_back({track, path.substr(slash == std::string::npos ? 0 : slash + 1)});
+					}
+					AVPacket* pkt = av_packet_alloc();
+					int first = 0;
+					while (av_read_frame(sc, pkt) >= 0)
+					{
+						if (pkt->stream_index != si)
+						{
+							av_packet_unref(pkt);
+							continue;
+						}
+						if (kept + size_t(pkt->size) > kMaxExtBitmapBytes)
+						{
+							cut = true;
+							av_packet_unref(pkt);
+							break;
+						}
+						kept += size_t(pkt->size);
+						x->pkts.push_back(av_packet_clone(pkt));
+						const int k = int(x->pkts.size()) - 1;
+						AVSubtitle sub = {};
+						int got = 0;
+						if (avcodec_decode_subtitle2(x->c, &sub, &got, pkt) >= 0 && got)
+						{
+							double pts = 0;
+							if (sub.pts != AV_NOPTS_VALUE)
+								pts = sub.pts / double(AV_TIME_BASE);
+							else if (pkt->pts != AV_NOPTS_VALUE)
+								pts = pkt->pts * av_q2d(st->time_base);
+							for (unsigned r = 0; r < sub.num_rects; r++)
+								if (sub.rects[r]->type == SUBTITLE_BITMAP)
+								{
+									lines++; // a line with a picture (not the empty one that ends the last)
+									break;
+								}
+							StoreExternalBitmap(track, sub, pts, x->ref_w, x->ref_h, first, k);
+							avsubtitle_free(&sub);
+							first = k + 1;
+							last = pts;
+						}
+						av_packet_unref(pkt);
+					}
+					av_packet_free(&pkt);
+					{
+						std::lock_guard<std::mutex> l(smu);
+						ext_bitmaps[track] = std::move(x);
+					}
+					ok = true;
+				}
+			}
+			avformat_close_input(&sc);
+		}
+		else
+			avformat_free_context(sc);
+		if (io)
+		{
+			if (on_disc)
+				disc::CloseAvio(io, owner);
+			else
+				smb::CloseAvio(io, owner);
+		}
+		if (!ok)
+		{
+			if (err)
+				*err = "Not a subtitle file this player can read";
+			return false;
+		}
+		OrbisLog("[player] subtitles loaded: %s (bitmaps: %zu line(s), %zu KB of packets kept%s)", path.c_str(), lines,
+			kept >> 10, cut ? Fmt(", cut at %.0f s: over 128 MB", last).c_str() : "");
+		return true;
+	}
+
 	bool AddSubtitleFile(const std::string& path, std::string* err)
 	{
+		// 1.5.2: bitmap subtitle files read as they are (up to 1.5.1 they went through the text conversion below and
+		// never loaded); a .sub with an .idx beside it is VobSub's picture file
+		const std::string kind = Ext(path);
+		if (kind == "sup" || kind == "idx")
+			return AddBitmapSubtitleFile(path, err);
+		if (kind == "sub")
+		{
+			const std::string idx = path.substr(0, path.size() - 3) + (path.compare(path.size() - 3, 3, "SUB") == 0 ? "IDX" : "idx");
+			if (AnyExists(idx))
+				return AddBitmapSubtitleFile(idx, err);
+		}
 		std::vector<uint8_t> data;
 		if (!ReadWholeFile(path, data, 16u << 20))
 		{
@@ -1891,7 +2154,15 @@ void Player::Open(const std::string& url, double start_s, bool start_paused)
 	m->state = PlayState::Opening;
 	m->clock.SetPaused(true);
 	Impl* impl = m.get();
-	m->opener = std::thread([impl] { impl->OpenThread(); });
+	try
+	{
+		m->opener = ps5::StartThread("opener", [impl] { impl->OpenThread(); });
+	}
+	catch (const std::system_error& e)
+	{
+		OrbisLog("[player] a new thread refused: %s", e.what());
+		m->SetFailed("The console refused a new thread");
+	}
 }
 
 void Player::Close()
@@ -2192,7 +2463,18 @@ void Player::SelectTrack(TrackType type, int id)
 	m->adec = c;
 	m->astream = id;
 	Impl* impl = m.get();
-	m->athread = std::thread([impl] { impl->AudioThread(); });
+	try
+	{
+		m->athread = ps5::StartThread("audio-track", [impl] { impl->AudioThread(); });
+	}
+	catch (const std::system_error& e)
+	{
+		// no thread for the new track: the film plays on without sound, as one with no audio track
+		OrbisLog("[player] a new thread refused: %s: audio track %d off", e.what(), id);
+		m->ic->streams[id]->discard = AVDISCARD_ALL;
+		m->astream = -1;
+		avcodec_free_context(&m->adec);
+	}
 	Seek(pos, true);
 }
 
@@ -2518,6 +2800,7 @@ SubtitleShow Player::Subtitles() const
 		return out;
 	const double t = Position() - m->sub_delay;
 	std::lock_guard<std::mutex> l(m->smu);
+	m->DecodeShown(track, t); // an external bitmap file's lines: their pictures now (1.5.2)
 	auto it = m->subs.find(track);
 	if (it == m->subs.end())
 		return out;

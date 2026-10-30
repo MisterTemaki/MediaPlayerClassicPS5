@@ -6,6 +6,7 @@
 
 #include "OrbisPaths.h"
 #include "ProsperoCrash.h"
+#include "ProsperoThread.h"
 
 extern "C" {
 #include <libavutil/mastering_display_metadata.h>
@@ -237,10 +238,22 @@ class Pool
 public:
 	Pool()
 	{
+		// 1.5.2: only the threads the console starts count (bands 1..n); the caller does the bands of those it refused
+		// (up to 1.5.1, a refused one ended in std::terminate)
 		for (int i = 1; i < kBands; i++)
-			threads_.emplace_back([this, i] { Work(i); });
-		started_ += kBands - 1;
-		OrbisLog("[tonemap] %d worker threads started (kept for the run)", kBands - 1);
+		{
+			try
+			{
+				threads_.push_back(ps5::StartThread("tonemap", [this, i] { Work(i); }));
+			}
+			catch (const std::system_error& e)
+			{
+				OrbisLog("[tonemap] a new thread refused: %s (worker %d): its bands done by the caller", e.what(), i);
+				break;
+			}
+		}
+		started_ += int(threads_.size());
+		OrbisLog("[tonemap] %d worker threads started (kept for the run)", int(threads_.size()));
 	}
 
 	// Stops the workers and waits for them (none is in a picture then: Convert holds g_mu around Run).
@@ -260,11 +273,16 @@ public:
 	{
 		std::unique_lock<std::mutex> l(m_);
 		job_ = job;
-		left_ = kBands - 1;
+		const int workers = int(threads_.size());
+		left_ = workers;
 		gen_++;
 		l.unlock();
 		cv_.notify_all();
 		Rows(*job.t, job.src, job.src_pitch, job.dst, job.dst_pitch, job.w, 0, job.h / kBands);
+		// the bands of the workers the console refused
+		for (int band = workers + 1; band < kBands; band++)
+			Rows(*job.t, job.src, job.src_pitch, job.dst, job.dst_pitch, job.w, job.h * band / kBands,
+				job.h * (band + 1) / kBands);
 		l.lock();
 		done_cv_.wait(l, [this] { return left_ == 0; });
 	}

@@ -11,6 +11,7 @@
 #include "mpc_i18n.h"
 
 #include "OrbisPaths.h"
+#include "ProsperoThread.h"
 
 extern "C" {
 #include <dvdread/dvd_filesystem.h>
@@ -230,6 +231,7 @@ struct DriveIO
 	std::deque<uint64_t> want; // chunks to read: asked for at the front, read-ahead at the back
 	uint64_t clock = 0, last_idx = UINT64_MAX;
 	bool running = false;
+	bool refused_said = false; // (mu) "no reading thread" logged
 
 	DriveIO()
 	{
@@ -441,7 +443,15 @@ public:
 				}
 				if (!c && std::find(io->want.begin(), io->want.end(), idx) == io->want.end())
 					io->want.push_front(idx);
-				Wake();
+				if (!Wake())
+				{
+					// no reading thread: this read straight from the drive (nothing else would read the chunk)
+					io->want.clear();
+					l.unlock();
+					if (!io->DeviceRead(lba, n, out, true))
+						return false;
+					break;
+				}
 				io->cv.wait_for(l, std::chrono::milliseconds(50));
 				if (gone || io->stop || Cancelled())
 					return false;
@@ -476,15 +486,29 @@ public:
 	int Fd() const { return io->fd; }
 
 private:
-	// (io->mu held) the reading thread, started when first needed
-	void Wake()
+	// (io->mu held) the reading thread, started when first needed; false when the console refused it (1.5.2: up to
+	// 1.5.1, std::terminate)
+	bool Wake()
 	{
 		if (!io->want.empty() && !io->running)
 		{
-			io->running = true;
-			std::thread(IoThread, io).detach();
+			try
+			{
+				ps5::StartThread("disc-io", [d = io] { IoThread(d); }).detach();
+				io->running = true;
+			}
+			catch (const std::system_error& e)
+			{
+				if (!io->refused_said)
+					OrbisLog("[disc] %s: a new thread refused: %s: read straight from the drive, no read-ahead",
+						io->id.c_str(), e.what());
+				io->refused_said = true;
+				io->cv.notify_all();
+				return false;
+			}
 		}
 		io->cv.notify_all();
+		return true;
 	}
 };
 
@@ -2044,7 +2068,17 @@ void Start()
 	// libbluray's messages to the log, its serious ones only
 	bd_set_debug_handler(BdLog);
 	bd_set_debug_mask(DBG_CRIT);
-	g_thread = std::thread(WatchThread);
+	try
+	{
+		g_thread = ps5::StartThread("disc-watch", WatchThread);
+	}
+	catch (const std::system_error& e)
+	{
+		// 1.5.2: the drives aren't watched (no disc shows up), the app runs on (up to 1.5.1: std::terminate)
+		OrbisLog("[disc] a new thread refused: %s: the disc drives aren't watched", e.what());
+		std::lock_guard<std::mutex> l(g_mu);
+		g_started = g_watching = false;
+	}
 }
 
 void Stop()
@@ -2321,11 +2355,20 @@ bool ReadFileWithin(const std::string& url, std::vector<uint8_t>& out, size_t ma
 		bool ok = false;
 	};
 	auto job = std::make_shared<Job>();
-	std::thread t([job, url, max_bytes] {
-		CancelScope scope(&job->cancel);
-		job->ok = ReadFile(url, job->data, max_bytes);
-		job->done = true;
-	});
+	std::thread t;
+	try
+	{
+		t = ps5::StartThread("disc-read", [job, url, max_bytes] {
+			CancelScope scope(&job->cancel);
+			job->ok = ReadFile(url, job->data, max_bytes);
+			job->done = true;
+		});
+	}
+	catch (const std::system_error& e)
+	{
+		OrbisLog("[disc] %s: a new thread refused: %s: not read", url.c_str(), e.what());
+		return false;
+	}
 	const double t0 = Now();
 	while (!job->done)
 	{

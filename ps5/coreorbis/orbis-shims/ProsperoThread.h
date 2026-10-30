@@ -10,11 +10,35 @@
 
 #include "ProsperoCrash.h"
 
+#include <cstdlib>
 #include <functional>
 #include <pthread.h>
+#include <string>
+#include <system_error>
+#include <thread>
+#include <utility>
 
 namespace ps5
 {
+// 1.5.2: std::thread(fn), or std::system_error when the system refuses a new thread (the console caps a process's
+// threads); each caller catches it and gives up what needed the thread, with a log line, instead of ending in
+// std::terminate. The host tests: MPCPS5_HOST_REFUSE_THREADS=<name>[,<name>...] (or "all") stands for a system that
+// refuses those.
+template <typename Fn>
+std::thread StartThread(const char* name, Fn&& fn)
+{
+#ifndef __PROSPERO__
+	if (const char* e = getenv("MPCPS5_HOST_REFUSE_THREADS"))
+	{
+		const std::string list = std::string(",") + e + ",";
+		if (list == ",all," || list.find(std::string(",") + name + ",") != std::string::npos)
+			throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again),
+				name);
+	}
+#endif
+	return std::thread(std::forward<Fn>(fn));
+}
+
 class BigThread
 {
 public:

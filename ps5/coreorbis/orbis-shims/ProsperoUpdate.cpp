@@ -711,6 +711,47 @@ static std::string FileSha(const std::string& path)
 	return s.Hex();
 }
 
+// 1.5.1's "old SHA-256" of a file over 1 MiB: that of its first MiB (see FileSha). A journal 1.5.1 wrote, read by
+// 1.5.2 after the install was cut off, still names those files by it: "" when the file is 1 MiB or less (its whole
+// SHA-256 is the same then).
+static std::string FileShaFirstMiB(const std::string& path)
+{
+	FILE* f = fopen(path.c_str(), "rb");
+	if (!f)
+		return "";
+	Sha256 s;
+	std::vector<uint8_t> buf(1 << 16);
+	size_t total = 0, n;
+	bool more = false;
+	while ((n = fread(buf.data(), 1, buf.size(), f)) > 0)
+	{
+		if (total >= (1u << 20))
+		{
+			more = true;
+			break;
+		}
+		const size_t take = std::min(n, size_t(1u << 20) - total);
+		s.Add(buf.data(), take);
+		total += take;
+		if (take < n)
+		{
+			more = true;
+			break;
+		}
+	}
+	fclose(f);
+	return more ? s.Hex() : "";
+}
+
+// the file is the one the journal names (its whole SHA-256; or, for a journal of 1.5.1, its first MiB's)
+static bool SameAsJournal(const std::string& path, const std::string& old_sha)
+{
+	if (FileSha(path) == old_sha)
+		return true;
+	const std::string first = FileShaFirstMiB(path);
+	return !first.empty() && first == old_sha;
+}
+
 struct Journal
 {
 	std::string tx;
@@ -822,7 +863,7 @@ static std::vector<JournalEntry> PutBack(const std::string& app_dir, const Journ
 					continue;
 				}
 			}
-			else if (moved && FileSha(f) != it->old_sha && lost)
+			else if (moved && !SameAsJournal(f, it->old_sha) && lost)
 				lost->push_back(it->rel); // not the old file, and its old copy is gone (else: already put back)
 		}
 		else if (moved && Exists(f) && unlink(f.c_str()) != 0)

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "mpc_smb.h"
+#include "mpc_dialogs.h"
 
 #include "mpc_settings.h"
 
@@ -160,7 +161,7 @@ File* OpenFile(const std::string& url, std::string* error)
 	if (!Parse(url, u) || u.share.empty() || u.path.empty())
 	{
 		if (error)
-			*error = Fmt(T("Not a file on a share: %s"), url.c_str());
+			*error = Fmt(T("Not a file on a share: %s"), HidePassword(url).c_str());
 		return nullptr;
 	}
 	smb2_context* c = Connect(u, u.share, error);
@@ -283,7 +284,7 @@ bool List(const std::string& url, std::vector<Entry>& out, std::string* error)
 	if (!Parse(url, u) || u.share.empty())
 	{
 		if (error)
-			*error = Fmt(T("No share in %s"), url.c_str());
+			*error = Fmt(T("No share in %s"), HidePassword(url).c_str());
 		return false;
 	}
 	smb2_context* c = Connect(u, u.share, error);

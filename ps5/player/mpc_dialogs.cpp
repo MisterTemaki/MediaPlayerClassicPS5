@@ -207,8 +207,19 @@ std::string FileName(const std::string& path)
 	while (p.size() > 1 && p.back() == '/')
 		p.pop_back();
 	const size_t q = p.find('?');
-	if (p.find("://") != std::string::npos && q != std::string::npos)
+	const size_t sch = p.find("://");
+	if (sch != std::string::npos && q != std::string::npos)
 		p = p.substr(0, q);
+	// 1.5.2: an address with no path past its host (http://bob:secret@host:9/) was named by its authority, user and
+	// password with it (the title bar, the OSD, the messages): the user part goes, whatever the scheme
+	if (sch != std::string::npos)
+	{
+		const size_t auth = sch + 3;
+		const size_t end = std::min(p.find('/', auth), p.size());
+		const size_t at = p.rfind('@', end);
+		if (at != std::string::npos && at >= auth && at < end)
+			p.erase(auth, at + 1 - auth);
+	}
 	const size_t slash = p.find_last_of('/');
 	std::string n = slash == std::string::npos ? p : p.substr(slash + 1);
 	// %20 and friends in URLs

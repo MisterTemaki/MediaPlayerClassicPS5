@@ -10,6 +10,7 @@
 
 #include "OrbisPaths.h"
 #include "ProsperoSce.h"
+#include "ProsperoThread.h"
 
 #include <condition_variable>
 #include <cstdarg>
@@ -103,7 +104,7 @@ void ProsperoNotify(const char* fmt, ...)
 	va_end(ap);
 
 	Shared& s = S();
-	std::lock_guard<std::mutex> lock(s.lock);
+	std::unique_lock<std::mutex> lock(s.lock);
 	if (s.quit)
 		return;
 	if (s.queue.size() >= 8)
@@ -111,8 +112,22 @@ void ProsperoNotify(const char* fmt, ...)
 	s.queue.emplace_back(text);
 	if (!s.started)
 	{
-		s.started = true;
-		s.worker = std::thread(Worker);
+		try
+		{
+			s.worker = ps5::StartThread("notify", Worker);
+			s.started = true;
+		}
+		catch (const std::system_error& e)
+		{
+			// 1.5.2: no worker (the console refused a thread; up to 1.5.1, std::terminate): this one is sent from
+			// here, the caller waits for it; the next one tries the worker again
+			OrbisLog("[notify] a new thread refused: %s: sent from the caller", e.what());
+			const std::string t = s.queue.back();
+			s.queue.clear();
+			lock.unlock();
+			Send(t);
+			return;
+		}
 	}
 	s.wake.notify_one();
 }

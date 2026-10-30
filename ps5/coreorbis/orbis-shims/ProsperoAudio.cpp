@@ -15,6 +15,7 @@
 #include "OrbisPaths.h"
 #include "ProsperoCrash.h"
 #include "ProsperoSce.h"
+#include "ProsperoThread.h"
 
 #include <atomic>
 #include <cstring>
@@ -119,7 +120,19 @@ bool Init()
 		return false;
 	g = new State();
 	g->handle = handle;
-	g->thread = std::thread(Run);
+	try
+	{
+		g->thread = ps5::StartThread("audio-out", Run);
+	}
+	catch (const std::system_error& e)
+	{
+		// 1.5.2: no sound (as when the port can't be opened), the app runs on (up to 1.5.1: std::terminate)
+		OrbisLog("[audio] a new thread refused: %s: no sound", e.what());
+		sceAudioOutClose(handle);
+		delete g;
+		g = nullptr;
+		return false;
+	}
 	return true;
 }
 

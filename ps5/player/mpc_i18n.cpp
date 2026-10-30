@@ -367,6 +367,8 @@ const Entry kTable[] = {
 	{"Can't write %s", "No se puede escribir %s", "Não é possível gravar %s", "Impossible d'écrire %s",
 		"%s kann nicht geschrieben werden"},
 	{"Out of memory", "Sin memoria", "Memória insuficiente", "Mémoire insuffisante", "Nicht genug Speicher"},
+	{"The console refused a new thread", "La consola ha rechazado un hilo nuevo", "O console recusou uma nova thread",
+		"La console a refusé un nouveau fil d'exécution", "Die Konsole hat einen neuen Thread abgelehnt"},
 	{"Can't connect to \\\\%s\\%s: %s", "No se puede conectar a \\\\%s\\%s: %s", "Não é possível conectar a \\\\%s\\%s: %s",
 		"Impossible de se connecter à \\\\%s\\%s : %s", "Keine Verbindung zu \\\\%s\\%s: %s"},
 	{"Not a file on a share: %s", "No es un archivo de una carpeta compartida: %s",
