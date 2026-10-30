@@ -4,7 +4,16 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Bridges standard C++ allocation operators to the clean-room libc module
- * without introducing exceptions, RTTI, or the complete libc++ runtime.
+ * without introducing RTTI.
+ *
+ * Media Player Classic PS5 1.5.2: a failed allocation throws std::bad_alloc,
+ * as the C++ standard says, instead of __builtin_trap() (SIGILL). The eboot
+ * carries the whole C++ runtime since 1.5.2 (libc++abi, libunwind; ps5/Makefile),
+ * so the exception reaches the catch the code has for it -- the disc reader
+ * catches it (player/mpc_disc.cpp), where a damaged disc could ask for too
+ * much -- and one that nothing catches still ends in std::terminate, which the
+ * crash log reports. This file is built with -fexceptions (ps5/Makefile,
+ * APP_CRT_EH_*). As in Stella PS5 1.0.2.
  */
 
 #include <cstddef>
@@ -34,9 +43,9 @@ namespace
     return posix_memalign(&address, alignment, size == 0 ? 1 : size) == 0 ? address : nullptr;
 }
 
-[[noreturn]] void allocation_failure() noexcept
+[[noreturn]] void allocation_failure()
 {
-    __builtin_trap();
+    throw std::bad_alloc();
 }
 } // namespace
 

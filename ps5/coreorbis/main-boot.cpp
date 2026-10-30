@@ -24,9 +24,11 @@
 
 #include "mpc_app.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <pthread.h>
 #include <stdexcept>
 #include <string>
@@ -68,7 +70,9 @@ void WritePid()
 // (std::stoi), each caught by type, and a dynamic_cast (the dialogs use it) through the type_info vtables. Up to 1.5.1
 // the eboot took the personality routine and the type_info vtables from the system's libSceLibcInternal next to its own
 // static __cxa_throw and unwinder (the Makefile's link order), the mix that crashed Stella PS5 1.0 at its first throw.
-// boot.log says "exceptions: ok" when they work (a crash here names this stage).
+// boot.log says "exceptions: ok" when they work (a crash here names this stage). And operator new's std::bad_alloc: up
+// to the first 1.5.2 build, the console's operator new (proto/native/tooling/native/app_cpp_runtime.cpp) trapped
+// (SIGILL) instead, so the disc reader's catch of it could never run.
 struct SelfTestBase
 {
 	virtual ~SelfTestBase() = default;
@@ -122,9 +126,30 @@ void ExceptionSelfTest()
 	cast = dd && dd->value == 42 && dynamic_cast<SelfTestDerived*>(b) == nullptr;
 	delete d;
 	delete b;
-	OrbisLog("[boot] exceptions: %s (our throw %s, libc++'s std::invalid_argument %s, dynamic_cast %s)",
-		ours && libcxx && cast ? "ok" : "NOT OK", ours ? "caught" : "missed", libcxx ? "caught" : "missed",
-		cast ? "right" : "WRONG");
+	// the console's build only: the host's operator new is the system's, and its sanitizer stops at a request this big
+	bool oom = true;
+	const char* oom_how = "not tried on the host";
+#ifdef __PROSPERO__
+	oom = false;
+	oom_how = "missed";
+	try
+	{
+		// over PTRDIFF_MAX: the allocator refuses it itself, without asking the kernel for anything (never a huge but
+		// possible size the console's malloc might try to map)
+		volatile size_t huge = SIZE_MAX / 2 + 1;
+		void* p = ::operator new(huge);
+		::operator delete(p);
+	}
+	catch (const std::bad_alloc&)
+	{
+		oom = true;
+		oom_how = "caught";
+	}
+#endif
+	OrbisLog("[boot] exceptions: %s (our throw %s, libc++'s std::invalid_argument %s, dynamic_cast %s, operator new's "
+			 "std::bad_alloc %s)",
+		ours && libcxx && cast && oom ? "ok" : "NOT OK", ours ? "caught" : "missed", libcxx ? "caught" : "missed",
+		cast ? "right" : "WRONG", oom_how);
 	OrbisLogSync();
 }
 

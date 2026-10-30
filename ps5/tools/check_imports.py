@@ -31,6 +31,10 @@ ALLOWED = [
 
 # C runtime pieces the system's libc provides (not part of the exception ABI)
 CXA_FROM_LIBC = {"__cxa_atexit", "__cxa_finalize", "__cxa_thread_atexit", "__cxa_thread_atexit_impl"}
+# the C++ runtime's names outside the _Z / __gxx_ / _Unwind_ / __cxa_ families that libSceLibcInternal defines as well
+# as libc++abi (1.5.2: __dynamic_cast was one of 1.5.1's 36 split imports; the only other shared one, __muloti4, is a
+# compiler builtin with no state, harmless from either)
+CXX_RUNTIME_OTHER = {"__dynamic_cast"}
 
 
 def run(*cmd):
@@ -94,7 +98,8 @@ def main():
     # the C++ runtime must be the eboot's own, whole (Makefile): a personality routine, __cxa_* or type_info vtable from
     # the system's libSceLibcInternal next to the static __cxa_throw / libunwind breaks every throw
     for sym in sorted(undefined(elf)):
-        if sym.startswith(("_Z", "__gxx_", "_Unwind_")) or (sym.startswith("__cxa_") and sym not in CXA_FROM_LIBC):
+        if (sym.startswith(("_Z", "__gxx_", "_Unwind_")) or (sym.startswith("__cxa_") and sym not in CXA_FROM_LIBC)
+                or sym in CXX_RUNTIME_OTHER):
             errors.append("import %s: the C++ runtime (exceptions, type_info, std classes) must be the eboot's own, "
                           "not a system module's" % sym)
     print("check_imports: imports by module: " + ", ".join("%s %d" % (m, n) for m, n in count.items()))

@@ -64,7 +64,7 @@ T=$(newroot t1)
 rc=$(run "$T" "0:0;60:$OPTIONS;62:0;70:$UP;72:0;80:$CROSS;82:0" "" "40,75")
 expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
 expect "grep -q 'Media Player Classic PS5 $(sed -n 's/^VERSION ?= //p' Makefile), FFmpeg' $T/root/logs/boot.log" "boot log names the player and FFmpeg"
-expect "grep -q '\[boot\] exceptions: ok (our throw caught, libc++.s std::invalid_argument caught, dynamic_cast right)' $T/root/logs/boot.log" "1.5.2: the start checks C++ exceptions and dynamic_cast (debug logs on): ok"
+expect "grep -q '\[boot\] exceptions: ok (our throw caught, libc++.s std::invalid_argument caught, dynamic_cast right, operator new.s std::bad_alloc not tried on the host)' $T/root/logs/boot.log" "1.5.2: the start checks C++ exceptions and dynamic_cast (debug logs on): ok"
 expect "$CHECK $T/dump/flip00040.ppm 900 10 255 255 255 2 >/dev/null" "the white title bar"
 expect "$CHECK $T/dump/flip00040.ppm 960 1062 0 0 0 2 >/dev/null" "the black status bar"
 expect "$CHECK $T/dump/flip00040.ppm 900 1025 240 240 240 2 >/dev/null" "the toolbar in COLOR_BTNFACE"
@@ -1715,6 +1715,15 @@ if [ -f build/app/mpc-pie.elf ] && [ -d "$SDKLIB" ]; then
 		for s in $slots; do llvm-readelf-18 -rW $P | grep -qi "^0*$s .*R_X86_64_RELATIVE *0*$pers\$" || ok=0; done
 		llvm-readelf-18 -sW $P | awk '$NF=="__eh_frame_hdr_start" {print $2}' | grep -qi "0*$hdr\$" || ok=0
 		expect "[ $ok = 1 ] && grep -q '^check_imports: ok' $WORK/imports.txt && ! grep -q 'the C++ runtime' $WORK/imports.txt" "the eboot's C++ runtime is its own: __gxx_personality_v0 at 0x$pers, every CIE's personality slot ($(echo $slots | tr ' ' ,)) relocated to it, __eh_frame_hdr_start = .eh_frame_hdr"
+		# 1.5.2: the console's operator new throws std::bad_alloc when an allocation fails (1.5.1's trapped: ud2 right
+		# after malloc's null, SIGILL, so the disc reader's catch (const std::bad_alloc&) could never run): a __cxa_throw
+		# of std::bad_alloc's type in app_cpp_runtime.o, and the eboot's own __cxa_throw
+		O=build/app/app_cpp_runtime.o
+		ok=1
+		llvm-objdump-18 -dr $O | grep -q '__cxa_throw' || ok=0
+		llvm-objdump-18 -dr $O | grep -q '_ZTISt9bad_alloc' || ok=0
+		llvm-readelf-18 -sW $P | awk '$NF=="__cxa_throw" && $7!="UND"' | grep -q . || ok=0
+		expect "[ $ok = 1 ]" "operator new on the console: a failed allocation throws std::bad_alloc (no trap), the eboot's own __cxa_throw"
 		# 1.5.2: the CRT shaders inherited from the emulator ports (never called by the player, their licences not in
 		# the README) are out of the eboot
 		expect "! llvm-readelf-18 -sW $P | grep -q '_ZN6ps5crt'" "no CRT shader code (ps5crt) in the eboot: the player never drew with it"
@@ -1739,6 +1748,13 @@ if [ -d "$SDKLIB" ] && command -v ld.lld >/dev/null && command -v clang >/dev/nu
 	python3 tools/check_imports.py "$WORK/imp/cxx.elf" "$SDKLIB" >"$WORK/imp/cxx.txt" 2>&1
 	rc=$?
 	expect "[ $rc = 1 ] && grep -q 'import __gxx_personality_v0: the C++ runtime .* must be the eboot.s own' $WORK/imp/cxx.txt" "a PIE importing the C++ personality routine from the system: refused"
+	# and one importing __dynamic_cast (1.5.1 did: the dialogs' dynamic_casts ran on the console's copy): refused too
+	printf 'extern char __dynamic_cast;\nvoid* p = &__dynamic_cast;\nint _start(void) { return p != 0; }\n' >"$WORK/imp/dyn.c"
+	clang -fPIC -c -o "$WORK/imp/dyn.o" "$WORK/imp/dyn.c" &&
+		ld.lld -pie --no-dynamic-linker -e _start -o "$WORK/imp/dyn.elf" "$WORK/imp/dyn.o" --as-needed "$SDKLIB/libkernel.so" "$SDKLIB/libSceLibcInternal.so"
+	python3 tools/check_imports.py "$WORK/imp/dyn.elf" "$SDKLIB" >"$WORK/imp/dyn.txt" 2>&1
+	rc=$?
+	expect "[ $rc = 1 ] && grep -q 'import __dynamic_cast: the C++ runtime .* must be the eboot.s own' $WORK/imp/dyn.txt" "a PIE importing __dynamic_cast from the system: refused"
 else
 	echo "  (skipped: no SDK, ld.lld or clang for the check's own test)"
 fi

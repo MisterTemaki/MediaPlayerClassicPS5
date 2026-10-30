@@ -224,9 +224,13 @@ $(APP_OUT)/sce_module/libc.prx: build/app/libc.prx
 
 app: $(APP_FILES)
 
-build/app/app_crt.o build/app/app_cpp_runtime.o: build/app/%.o: $(NATIVE)/tooling/native/%.cpp
+# app_cpp_runtime.cpp (operator new / delete) with exceptions (1.5.2): a failed allocation throws std::bad_alloc
+# (1.5.1's trapped: SIGILL), caught where the code catches it; app_crt.cpp stays without
+APP_CRT_EH_app_crt := -fno-exceptions
+APP_CRT_EH_app_cpp_runtime := -fexceptions
+build/app/app_crt.o build/app/app_cpp_runtime.o: build/app/%.o: $(NATIVE)/tooling/native/%.cpp Makefile
 	@mkdir -p $(dir $@)
-	$(NATIVE_CLANG) -std=c++20 -O2 -Wall -Wextra -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections \
+	$(NATIVE_CLANG) -std=c++20 -O2 -Wall -Wextra $(APP_CRT_EH_$*) -fno-rtti -ffunction-sections -fdata-sections \
 		-c -o $@ $<
 
 FF_PS5_ARCHIVES = $(addprefix $(DEPS_PS5)/lib/,libavformat.a libavcodec.a libavfilter.a libswscale.a libswresample.a \
