@@ -1925,6 +1925,23 @@ nosan "$T"
 rm -f $T/root/logs/boot.log
 rc=$(run "$T" "0:0" "10:quit" "" "$T/root/media/film.mp4")
 expect "[ $rc = 0 ] && log $T 'subtitles: .*film.sup: reading stopped, the file closed'" "a quit while they are read (~2 s here): the reading stops, Close doesn't wait for it"
+# h (review 3): a PGS track in an MKV, a 0.1 s line every 0.5 s, the video at 5 frames a second (the demuxer reads a
+# minute -- ~120 lines -- ahead): after a seek back, each replayed line is stored again mid-list, open-ended, and its
+# clearing set must end it. b33e45c looked for the open line among the last 64 of the list (all later lines read
+# ahead): the replayed line never ended and stayed on screen (50 of 50 frames with the box; 8-9 without the seek)
+T=$(newroot t31h)
+python3 tests/make_pgs.py $T/s.sup 240 0.5 0.1 400 100
+ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=5:d=121 -c:v libx264 -preset ultrafast -pix_fmt yuv420p $T/v.mp4 &&
+	ffmpeg -v error -i $T/v.mp4 -i $T/s.sup -map 0 -map 1 -c copy $T/root/media/pgs5.mkv
+D=$(seq -s, 200 4 396)
+rc=$(run "$T" "0:0" "150:state;160:seek 1.0;400:quit" "$D" "$T/root/media/pgs5.mkv")
+boxed=0
+for f in $(seq 200 4 396); do
+	$REGION $(printf "$T/dump/flip%05d.ppm" $f) 500 700 1420 977 255 255 255 30 300 >/dev/null 2>&1 && boxed=$((boxed + 1))
+done
+rm -f $T/dump/*.ppm
+expect "[ $rc = 0 ] && [ $boxed -gt 0 ] && [ $boxed -lt 30 ]" "after a seek back, the replayed lines end again: the box on $boxed of 50 frames (a 0.1 s line every 0.5 s)"
+nosan "$T"
 fi
 
 echo

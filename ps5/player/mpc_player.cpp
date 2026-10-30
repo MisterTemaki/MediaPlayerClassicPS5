@@ -34,6 +34,7 @@ extern "C" {
 
 #include <algorithm>
 #include <atomic>
+#include <iterator>
 #include <new>
 #include <chrono>
 #include <cmath>
@@ -1197,11 +1198,14 @@ struct Player::Impl
 	{
 		std::lock_guard<std::mutex> l(smu);
 		std::vector<SubItem>& list = subs[track];
-		// a line that was shown "until the next one" ends here: one of the last few (1.5.2, review: the whole list was
-		// scanned back when none was open -- O(n^2) over a file's lines, minutes for 100,000)
+		// a line that was shown "until the next one" ends here: one of the few that start before this one (1.5.2, review:
+		// the whole list was scanned back when none was open -- O(n^2) over a file's lines, minutes for 100,000). The
+		// scan starts where this one goes, not at the list's end: after a seek back the lines read ahead are later, and
+		// a replayed line (stored again mid-list, open-ended) must still be ended by its clearing set
+		auto from = std::upper_bound(list.begin(), list.end(), item.start, [](double v, const SubItem& a) { return v < a.start; });
 		int back = 0;
-		for (auto it = list.rbegin(); it != list.rend() && back < 64; ++it, ++back)
-			if (it->open_end && it->start <= item.start)
+		for (auto it = std::make_reverse_iterator(from); it != list.rend() && back < 64; ++it, ++back)
+			if (it->open_end)
 			{
 				it->end = item.start;
 				it->open_end = false;
