@@ -1892,6 +1892,39 @@ cp "$MEDIA/grey.mp4" "$T/root/media/film.mp4"
 rc=$(run "$T" "0:0" "60:state;70:quit" "60" "$T/root/media/film.mp4")
 expect "[ $rc = 0 ] && log $T 'subtitles loaded: .*film.idx (bitmaps: 6 line(s)' && $REGION $T/dump/flip00060.ppm 500 700 1420 977 255 255 255 60 2000 >/dev/null" "film.sub with its film.idx beside the film: VobSub loaded (6 lines), the line at 1 s drawn"
 nosan "$T"
+# e (review): after a refused audio track's thread (astream -1), choosing tracks again: 1.5.2's first build stopped
+# reading streams[-1] (a heap overflow; the same when a file's first audio decoder didn't open)
+T=$(newroot t31e)
+rc=$(MPCPS5_HOST_REFUSE_THREADS=audio-track MPCPS5_HOST_DISC=$MEDIA/dvd.iso run "$T" "0:0" "30:cmd disc0;60:cmd 2002;90:cmd 2003;100:cmd 2002;150:state;160:quit" "")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ]" "audio tracks chosen again after one turned off: no write before the streams, the film plays"
+nosan "$T"
+# f (review): a .sup of 48 KB whose one line is an 8000 x 8000 picture on an 8000 x 8000 screen: not made (~1 GB, a few
+# frames a second; on the console an allocation that fails), the film plays
+T=$(newroot t31f)
+python3 tests/make_pgs.py $T/root/media/film.sup 1 1.0 3.0 8000 8000 8000 8000
+cp "$MEDIA/grey.mp4" "$T/root/media/film.mp4"
+rc=$(run "$T" "0:0" "60:state;70:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'a bitmap subtitle picture of 8000x8000 (on a 8000x8000 picture): over the bounds, not shown' && [ \"\$(field $T 1 1)\" = 2 ]" "an 8000 x 8000 subtitle picture: not made, the film plays"
+nosan "$T"
+# g (review): a .sup of 30,000 tiny lines: read up to 20,000 lines, quickly (each line's insertion scanned the whole
+# list back: O(n^2), 106 s for 100,000 lines in the opener, which Close waited for); a quit while it is read stops it
+T=$(newroot t31g)
+python3 tests/make_pgs.py $T/root/media/film.sup 30000 0.01 0.005 2 2
+cp "$MEDIA/grey.mp4" "$T/root/media/film.mp4"
+rc=$(run "$T" "0:0" "200:state;210:quit" "" "$T/root/media/film.mp4")
+secs=$(python3 -c "
+import re, sys
+t = {}
+for l in open('$T/root/logs/boot.log'):
+    m = re.match(r'\[ *([0-9.]+)\] \[player\] (opened|subtitles loaded)', l)
+    if m and m.group(2) not in t:
+        t[m.group(2)] = float(m.group(1))
+print(round(t['subtitles loaded'] - t['opened'], 1) if len(t) == 2 else 999)")
+expect "[ $rc = 0 ] && log $T 'subtitles loaded: .*film.sup (bitmaps: 20000 line(s), .*cut at .*: over 128 MB or 20000 lines' && python3 -c 'import sys; sys.exit(0 if $secs < 15 else 1)'" "30,000 tiny lines: 20,000 read, in $secs s"
+nosan "$T"
+rm -f $T/root/logs/boot.log
+rc=$(run "$T" "0:0" "10:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'subtitles: .*film.sup: reading stopped, the file closed'" "a quit while they are read (~2 s here): the reading stops, Close doesn't wait for it"
 fi
 
 echo

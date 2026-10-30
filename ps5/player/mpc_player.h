@@ -80,7 +80,8 @@ struct SubtitleShow
 	// bitmap subtitles (PGS, DVD, DVB): pictures in the video's coordinates (ref_w x ref_h)
 	struct Pic
 	{
-		Image img;
+		// shared, never changed once made (1.5.2: Subtitles() copied every picture at every frame)
+		std::shared_ptr<const Image> img;
 		int x = 0, y = 0;
 	};
 	std::vector<Pic> pics;

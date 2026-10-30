@@ -15,7 +15,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5.2):** builds with the ps5-payload-dev SDK into a signed native app and passes 512 host tests
+> **Status (1.5.2):** builds with the ps5-payload-dev SDK into a signed native app and passes 519 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). 1.5.1 was reported to open on a PS5; most of the

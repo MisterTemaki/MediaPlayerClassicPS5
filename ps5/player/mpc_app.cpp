@@ -1112,9 +1112,11 @@ void MainFrame::PaintSubtitles(CDC& dc)
 		const double sx = double(vr.Width()) / sub.ref_w, sy = double(vr.Height()) / sub.ref_h;
 		for (const auto& p : sub.pics)
 		{
-			CRect d(vr.left + int(p.x * sx), vr.top + int(p.y * sy), vr.left + int((p.x + p.img.Width()) * sx),
-				vr.top + int((p.y + p.img.Height()) * sy));
-			dc.StretchBlt(d, p.img.Bmp());
+			if (!p.img)
+				continue;
+			CRect d(vr.left + int(p.x * sx), vr.top + int(p.y * sy), vr.left + int((p.x + p.img->Width()) * sx),
+				vr.top + int((p.y + p.img->Height()) * sy));
+			dc.StretchBlt(d, p.img->Bmp());
 		}
 	}
 	if (sub.lines.empty())

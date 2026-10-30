@@ -34,6 +34,7 @@ extern "C" {
 
 #include <algorithm>
 #include <atomic>
+#include <new>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -206,14 +207,18 @@ struct SubItem
 	bool need_pics = false;
 };
 
-// 1.5.2: the compressed packets of an external bitmap subtitle file kept at most (a film's .sup is tens of MB)
+// 1.5.2: the compressed packets of an external bitmap subtitle file kept at most (a film's .sup is tens of MB), each
+// counted with its overhead; and its lines (a film has ~1,500; a made-up file 100,000 tiny ones)
 constexpr size_t kMaxExtBitmapBytes = size_t(128) << 20;
+constexpr size_t kExtPacketOverhead = 256; // an AVPacket, its buffer's reference and padding
+constexpr size_t kMaxExtBitmapLines = 20000;
 
 size_t PictureBytes(const SubtitleShow& s)
 {
 	size_t n = 0;
 	for (const auto& p : s.pics)
-		n += size_t(p.img.Width()) * size_t(p.img.Height()) * 4;
+		if (p.img)
+			n += size_t(p.img->Width()) * size_t(p.img->Height()) * 4;
 	return n;
 }
 
@@ -1117,8 +1122,37 @@ struct Player::Impl
 		InsertSubtitle(track, std::move(item));
 	}
 
+	// 1.5.2 (review): a bitmap subtitle's pictures are held in: over 4096 pixels a side, over twice the picture it goes
+	// on (show.ref_w x ref_h, when known), or over 4096 x 4096 pixels for the line, a picture isn't made -- a 48 KB .sup
+	// with one 8000 x 8000 line took ~1 GB -- and an allocation that fails drops the line instead of ending the app
+	static constexpr int kMaxSubPicSide = 4096;
+	static constexpr size_t kMaxSubLinePixels = size_t(4096) * 4096;
+	static bool SubPictureFits(const AVSubtitleRect* r, const SubtitleShow& show, size_t* pixels)
+	{
+		if (r->w > kMaxSubPicSide || r->h > kMaxSubPicSide)
+			return false;
+		if (show.ref_w > 0 && show.ref_h > 0 && (r->w > 2 * show.ref_w + 16 || r->h > 2 * show.ref_h + 16))
+			return false;
+		*pixels += size_t(r->w) * size_t(r->h);
+		return *pixels <= kMaxSubLinePixels;
+	}
+
 	static void ShowFromSubtitle(const AVSubtitle& sub, SubtitleShow& show)
 	{
+		try
+		{
+			ShowFromSubtitleRects(sub, show);
+		}
+		catch (const std::bad_alloc&)
+		{
+			OrbisLog("[subs] out of memory making a subtitle line's pictures: the line isn't shown");
+			show.pics.clear();
+		}
+	}
+
+	static void ShowFromSubtitleRects(const AVSubtitle& sub, SubtitleShow& show)
+	{
+		size_t pixels = 0;
 		for (unsigned i = 0; i < sub.num_rects; i++)
 		{
 			const AVSubtitleRect* r = sub.rects[i];
@@ -1129,22 +1163,31 @@ struct Player::Impl
 			}
 			else if (r->type == SUBTITLE_BITMAP && r->w > 0 && r->h > 0 && r->data[0] && r->data[1])
 			{
+				if (!SubPictureFits(r, show, &pixels))
+				{
+					static std::atomic<int> said{0};
+					if (said++ < 20)
+						OrbisLog("[subs] a bitmap subtitle picture of %dx%d (on a %dx%d picture): over the bounds, not shown",
+							r->w, r->h, show.ref_w, show.ref_h);
+					continue;
+				}
 				SubtitleShow::Pic pic;
 				pic.x = r->x;
 				pic.y = r->y;
-				std::vector<uint8_t> rgba(size_t(r->w) * r->h * 4);
+				// straight into the picture, premultiplied (Image::FromRGBA's arithmetic): one allocation, not two
+				auto img = std::make_shared<Image>(r->w, r->h);
+				uint32_t* out = img->Data();
 				const uint32_t* pal = reinterpret_cast<const uint32_t*>(r->data[1]);
 				for (int y = 0; y < r->h; y++)
 					for (int x = 0; x < r->w; x++)
 					{
 						const uint32_t c = pal[r->data[0][y * r->linesize[0] + x]]; // 0xAARRGGBB
-						uint8_t* o = &rgba[(size_t(y) * r->w + x) * 4];
-						o[0] = (c >> 16) & 0xff;
-						o[1] = (c >> 8) & 0xff;
-						o[2] = c & 0xff;
-						o[3] = c >> 24;
+						const uint32_t a = c >> 24;
+						const uint32_t rr = (((c >> 16) & 0xff) * a + 127) / 255, gg = (((c >> 8) & 0xff) * a + 127) / 255,
+									   bb = ((c & 0xff) * a + 127) / 255;
+						out[size_t(y) * r->w + x] = rr | (gg << 8) | (bb << 16) | (a << 24);
 					}
-				pic.img.FromRGBA(rgba.data(), r->w, r->h);
+				pic.img = std::move(img);
 				show.pics.push_back(std::move(pic));
 			}
 		}
@@ -1154,8 +1197,10 @@ struct Player::Impl
 	{
 		std::lock_guard<std::mutex> l(smu);
 		std::vector<SubItem>& list = subs[track];
-		// a line that was shown "until the next one" ends here
-		for (auto it = list.rbegin(); it != list.rend(); ++it)
+		// a line that was shown "until the next one" ends here: one of the last few (1.5.2, review: the whole list was
+		// scanned back when none was open -- O(n^2) over a file's lines, minutes for 100,000)
+		int back = 0;
+		for (auto it = list.rbegin(); it != list.rend() && back < 64; ++it, ++back)
 			if (it->open_end && it->start <= item.start)
 			{
 				it->end = item.start;
@@ -1269,6 +1314,8 @@ struct Player::Impl
 				if (!have)
 					continue;
 				SubtitleShow show;
+				show.ref_w = i->show.ref_w;
+				show.ref_h = i->show.ref_h;
 				ShowFromSubtitle(sub, show);
 				avsubtitle_free(&sub);
 				i->show.pics = std::move(show.pics);
@@ -1844,7 +1891,7 @@ struct Player::Impl
 		bool ok = false;
 		size_t kept = 0, lines = 0;
 		double last = 0;
-		bool cut = false;
+		bool cut = false, stopped = false;
 		if (avformat_open_input(&sc, path.c_str(), av_find_input_format(vobsub ? "vobsub" : "sup"), nullptr) >= 0)
 		{
 			const int si = avformat_find_stream_info(sc, nullptr) >= 0
@@ -1877,13 +1924,20 @@ struct Player::Impl
 							av_packet_unref(pkt);
 							continue;
 						}
-						if (kept + size_t(pkt->size) > kMaxExtBitmapBytes)
+						if (quit)
+						{
+							// the file closed meanwhile (1.5.2, review: Close waited for the whole file to be read)
+							stopped = true;
+							av_packet_unref(pkt);
+							break;
+						}
+						if (kept + size_t(pkt->size) + kExtPacketOverhead > kMaxExtBitmapBytes || lines >= kMaxExtBitmapLines)
 						{
 							cut = true;
 							av_packet_unref(pkt);
 							break;
 						}
-						kept += size_t(pkt->size);
+						kept += size_t(pkt->size) + kExtPacketOverhead;
 						x->pkts.push_back(av_packet_clone(pkt));
 						const int k = int(x->pkts.size()) - 1;
 						AVSubtitle sub = {};
@@ -1896,7 +1950,7 @@ struct Player::Impl
 							else if (pkt->pts != AV_NOPTS_VALUE)
 								pts = pkt->pts * av_q2d(st->time_base);
 							for (unsigned r = 0; r < sub.num_rects; r++)
-								if (sub.rects[r]->type == SUBTITLE_BITMAP)
+								if (sub.rects[r]->type == SUBTITLE_BITMAP && sub.rects[r]->w > 0 && sub.rects[r]->h > 0)
 								{
 									lines++; // a line with a picture (not the empty one that ends the last)
 									break;
@@ -1933,8 +1987,13 @@ struct Player::Impl
 				*err = "Not a subtitle file this player can read";
 			return false;
 		}
+		if (stopped)
+		{
+			OrbisLog("[player] subtitles: %s: reading stopped, the file closed", path.c_str());
+			return false;
+		}
 		OrbisLog("[player] subtitles loaded: %s (bitmaps: %zu line(s), %zu KB of packets kept%s)", path.c_str(), lines,
-			kept >> 10, cut ? Fmt(", cut at %.0f s: over 128 MB", last).c_str() : "");
+			kept >> 10, cut ? Fmt(", cut at %.0f s: over 128 MB or %zu lines", last, kMaxExtBitmapLines).c_str() : "");
 		return true;
 	}
 
@@ -2458,7 +2517,10 @@ void Player::SelectTrack(TrackType type, int id)
 		m->aq.abort = false;
 	}
 	m->a_stop = false;
-	m->ic->streams[m->astream]->discard = AVDISCARD_ALL;
+	// 1.5.2 (review): no track before (the first one's decoder didn't open, or a refused thread turned it off):
+	// astream is -1, nothing to stop reading (streams[-1] wrote before the array)
+	if (m->astream >= 0)
+		m->ic->streams[m->astream]->discard = AVDISCARD_ALL;
 	m->ic->streams[id]->discard = AVDISCARD_DEFAULT;
 	m->adec = c;
 	m->astream = id;
