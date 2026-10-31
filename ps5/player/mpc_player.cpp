@@ -523,6 +523,23 @@ struct Player::Impl
 	std::atomic<double> skip_until{-1e18}; // frames before this (in the current serial) are not shown
 	std::atomic<double> serial_start{0}; // where the current serial starts: the last seek's target, 0 at the start
 	std::atomic<bool> show_after_seek{false};
+	// 1.5.3 (second review): since when the demuxer has read nothing (queues full, the end, read errors) and for which
+	// serial -- a seek whose picture can never come (an exact seek past a video track's end with a long sound after it:
+	// the queues fill before the end) counts as done once it has stayed so a second with no video left to decode
+	std::mutex idle_mu;
+	double demux_idle_since = 0; // 0: reading
+	int demux_idle_serial = -1;
+	void DemuxIdle(bool idle)
+	{
+		std::lock_guard<std::mutex> l(idle_mu);
+		if (!idle)
+			demux_idle_since = 0;
+		else if (demux_idle_since == 0 || demux_idle_serial != serial.load())
+		{
+			demux_idle_serial = serial.load();
+			demux_idle_since = NowS();
+		}
+	}
 
 	// clock
 	Clock clock;
@@ -1031,6 +1048,7 @@ struct Player::Impl
 				skip_until = exact ? target - 0.001 : -1e18;
 				ps5audio::Clear();
 				clock.Set(target);
+				DemuxIdle(false);
 				seek_done = taken_gen;
 				eof = false;
 				ended = false;
@@ -1048,6 +1066,7 @@ struct Player::Impl
 							  ((vstream < 0 || vq.Count() > 300) && (astream < 0 || aq.Count() > 500));
 			if (full || eof)
 			{
+				DemuxIdle(true);
 				av_usleep(10000);
 				if (eof && vdone_serial == serial && (astream < 0 || adone_serial == serial) && !ended)
 					ended = true;
@@ -1062,6 +1081,7 @@ struct Player::Impl
 				if (!disc_gone)
 					OrbisLog("[player] the disc was taken out while playing %s", url.c_str());
 				disc_gone = true;
+				DemuxIdle(true);
 				av_usleep(20000);
 				continue;
 			}
@@ -1081,9 +1101,13 @@ struct Player::Impl
 				else if (r == AVERROR_EXIT)
 					break;
 				else
+				{
+					DemuxIdle(true); // a read error (it is tried again)
 					av_usleep(10000);
+				}
 				continue;
 			}
+			DemuxIdle(false);
 			const int idx = pkt->stream_index;
 			if (idx == vstream)
 				vq.Put(av_packet_clone(pkt), serial);
@@ -2728,7 +2752,18 @@ bool Player::SeekShown() const
 	std::lock_guard<std::mutex> l(s.fmu);
 	const int ser = s.serial;
 	// a picture from where it went shown, or the video ended there (a seek past the last picture)
-	return (s.cur_serial == ser && !s.show_after_seek) || s.vdone_serial == ser;
+	if ((s.cur_serial == ser && !s.show_after_seek) || s.vdone_serial == ser)
+		return true;
+	// (second review) or none can come: the demuxer has read nothing more for this seek for a second (its queues full,
+	// a read error) and no video is left to decode -- never while it is still reading, however slowly
+	double since;
+	int iser;
+	{
+		std::lock_guard<std::mutex> il(s.idle_mu);
+		since = s.demux_idle_since;
+		iser = s.demux_idle_serial;
+	}
+	return since > 0 && iser == ser && NowS() - since >= 1.0 && s.frames.empty() && s.vq.Count() == 0;
 }
 
 bool Player::SeekTaken() const

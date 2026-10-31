@@ -2138,6 +2138,49 @@ ini "$T" "KeySquare=NextAudio"
 rc=$(run "$T" "0:0;70:$SQUARE;73:0" "30:cmd pause;40:key menu;45:key right;55:mouse 150,217;100:quit" "" "$T/root/media/film.mp4")
 expect "[ $rc = 0 ] && grep -q '^ShowStatistics=1$' $T/root/mpc-hc.ini && ! log $T 'Square: NextAudio'" "Square (another action) in a menu, the pointer showing: the menu's right-click (View > Statistics run)"
 nosan "$T"
+# --- the second review ---
+# s: a seek whose picture can never come -- paused, the press's exact seek past the end of a video track (5 s) with
+# 400 s of sound after it: the queues fill (64 MiB) before the end, so the video track never ends there either. Held,
+# the next seeks go once the demuxer has read nothing for a second (d8f2f0b waited for that picture all hold long)
+T=$(newroot t32s)
+ffmpeg -v error -y -f lavfi -i testsrc=s=320x180:r=25:d=5 -f lavfi -i sine=frequency=300:sample_rate=48000:duration=400 \
+	-ac 2 -c:v libx264 -preset ultrafast -g 25 -pix_fmt yuv420p -c:a pcm_s16le "$T/root/media/short.mkv"
+rc=$(run "$T" "0:0;100:$RIGHT;300:0" "30:cmd pause;40:seek 2;400:state;410:quit" "" "$T/root/media/short.mkv")
+X=$(hf $T 1 5); P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && [ -n \"$X\" ] && [ \"$(hf $T 1 3)\" -ge 2 ] && near $P1 $X 0.05" "an exact seek past the video's end (no picture can come): held, $(hf $T 1 3) keyframe seeks follow; let go at ${X:-?} s ($P1 s)"
+rm -f "$T/root/media/short.mkv"
+nosan "$T"
+# t: the seek bar held as the file ends and the next one in the folder opens: the drag doesn't go on into it (d8f2f0b
+# ended it at the next Tick, seeking the new file to the old position if it was already playing)
+T=$(newroot t32t)
+cp "$MEDIA/chapters.mkv" "$T/root/media/a.mkv"
+cp "$MEDIA/red.mp4" "$T/root/media/b.mp4"
+ini "$T" "AfterPlayback=1"
+rc=$(run "$T" "0:0;40:$CROSS;200:0" "30:mouse 1900,995;230:state;240:quit" "" "$T/root/media/a.mkv")
+OPEN=$(line $T 'open .*b.mp4')
+expect "[ $rc = 0 ] && [ -n \"$OPEN\" ] && ! sed -n \"${OPEN:-1},\\\$p\" $T/root/logs/boot.log | grep -q 'seek bar' && [ \"\$(field $T 1 1)\" = 2 ] && python3 -c 'import sys; sys.exit(0 if $(field $T 1 2) < 3 else 1)'" "the seek bar held over the file's end: the next file plays from its start ($(field $T 1 2) s), the drag not carried into it"
+nosan "$T"
+# u / v: Stop, or File > Close, in the middle of a held jump (let go just after): no exact seek to the hold's target
+# afterwards (2c61437: Stop kept the hold, and its release seeked there; fixed in 9cb73ae); closed: nothing left
+T=$(newroot t32u)
+film "$T"
+rc=$(run "$T" "0:0;100:$RIGHT;152:0" "30:cmd pause;40:seek 5;150:cmd stop;200:state;210:quit" "" "$T/root/media/film.mp4")
+P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && log $T 'held: jumping by keyframes' && ! log $T 'let go after' && [ \"\$(field $T 1 1)\" = 4 ] && python3 -c 'import sys; sys.exit(0 if ${P1:-99} < 10 else 1)'" "Stop while a jump is held: stopped, no exact seek to the hold's target after it ($P1 s: a repeat in the frame after Stop may still jump 5 s from 0, as a press)"
+nosan "$T"
+T=$(newroot t32v)
+film "$T"
+rc=$(run "$T" "0:0;100:$RIGHT;152:0" "30:cmd pause;40:seek 5;150:cmd close;200:state;210:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'held: jumping by keyframes' && ! log $T 'let go after' && [ \"\$(field $T 1 1)\" = 0 ]" "File > Close while a jump is held: closed, nothing left to seek"
+nosan "$T"
+# w: File > Close while the seek bar is held: the drag ends with the file (no seek, nothing stuck: a later move and the
+# release do nothing; then a new file plays from its start)
+T=$(newroot t32w)
+film "$T"
+cp "$MEDIA/red.mp4" "$T/root/media/b.mp4"
+rc=$(run "$T" "0:0;100:$CROSS;102:$CROSS,200,128;130:$CROSS;150:$CROSS,200,128;160:$CROSS;180:0" "30:cmd pause;40:seek 5;90:mouse 200,995;140:cmd close;200:open $T/root/media/b.mp4;260:state;270:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && ! sed -n \"\$(line $T 'cmd close'),\\\$p\" $T/root/logs/boot.log | grep -q 'seek bar' && [ \"\$(field $T 1 1)\" = 2 ] && python3 -c 'import sys; sys.exit(0 if $(field $T 1 2) < 3 else 1)'" "File > Close while the seek bar is held: the drag ends with it; the next file plays from its start ($(field $T 1 2) s)"
+nosan "$T"
 fi
 
 echo

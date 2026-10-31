@@ -284,12 +284,14 @@ private:
 	void TickScrub();
 	void JumpBy(double d, PadButton from, bool repeat);
 	void EndJumpHold();
-	// a new file, closed, stopped (review): no held jump goes on from the last file's target, nothing waits to seek
+	// a new file, closed, stopped (review): no held jump or seek-bar drag goes on from the last file, nothing waits to
+	// seek
 	void ForgetJumps()
 	{
 		jump_hold_ = false;
 		jump_from_ = PadButton::Count;
 		scrub_pending_ = false;
+		seek_drag_ = false; // (second review: a drag over the file's end doesn't go on into the next one)
 	}
 	// the seek bar's drag ended by a menu or a dialog over it (its release goes there): exact where it was
 	void EndSeekDrag(const char* why);
@@ -2892,8 +2894,10 @@ void MainFrame::EndSeekDrag(const char* why)
 {
 	seek_drag_ = false;
 	scrub_pending_ = false;
+	// (a file closed by itself -- a failure, a disc taken out -- starts the player's count again)
+	const uint64_t pics = player_.Stats().seek_pictures;
 	OrbisLog("[ui] seek bar %s after %.2f s: %d keyframe seek(s), %llu picture(s) shown; exact seek to %.2f", why,
-		NowSeconds() - jump_hold_t_, scrub_seeks_, (unsigned long long)(player_.Stats().seek_pictures - jump_pictures_),
+		NowSeconds() - jump_hold_t_, scrub_seeks_, (unsigned long long)(pics >= jump_pictures_ ? pics - jump_pictures_ : 0),
 		seek_drag_pos_);
 	if (Loaded())
 		player_.Seek(seek_drag_pos_, true);
