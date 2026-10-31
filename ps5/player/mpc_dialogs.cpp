@@ -1502,7 +1502,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	// ---- Player > Keys (IDD_PPAGEACCELTBL): the controller's buttons in the window ----
 	p = d->NewPage("Keys", 1);
 	d->Text(p, "The controller's buttons in the window, without the pointer. Cross on a button: choose its action.", 5, 5, 286, 16);
-	ListView* keys = d->P(p, new ListView, 5, 23, 286, 126);
+	ListView* keys = d->P(p, new ListView, 5, 23, 286, 110); // 1.5.3: shorter, for the text under it
 	keys->columns = {{T("Button"), keys->rect.Width() * 38 / 100}, {T("Action"), keys->rect.Width() * 58 / 100}};
 	auto pad = std::make_shared<std::vector<PadAction>>(s.pad, s.pad + int(PadButton::Count));
 	auto fill_keys = [keys, pad] {
@@ -1512,11 +1512,11 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	};
 	fill_keys();
 	keys->sel = 0;
-	d->Text(p, "Action:", 5, 156, 40, 8);
-	ComboBox* act = d->Combo(p, 45, 154, 170, 13, {}, int((*pad)[0]));
+	d->Text(p, "Action:", 5, 140, 40, 8);
+	ComboBox* act = d->Combo(p, 45, 138, 170, 13, {}, int((*pad)[0]));
 	for (int a = 0; a < int(PadAction::Count); a++)
 		act->items.push_back(PadActionText(PadAction(a)));
-	Button* kdef = d->P(p, new Button, 225, 153, 66, 14);
+	Button* kdef = d->P(p, new Button, 225, 137, 66, 14);
 	kdef->text = T("Default");
 	keys->on_select = [keys, act, pad] {
 		if (keys->sel >= 0 && keys->sel < int(pad->size()))
@@ -1537,13 +1537,15 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		if (keys->sel >= 0)
 			act->sel = int((*pad)[keys->sel]);
 	};
-	CheckBox* touch = d->Check(p, "The touchpad as the pointer (press: click; two fingers: right-click)", 5, 172, 286, 8,
+	CheckBox* touch = d->Check(p, "The touchpad as the pointer (press: click; two fingers: right-click)", 5, 156, 286, 8,
 		s.touchpad_pointer);
-	d->Text(p, "Options given another action still opens the menu bar when held half a second. The pointer's clicks (Cross, "
-			   "Square, the touchpad) and the buttons in menus and dialogs stay as they are. While L2, R2 and R3 keep their "
-			   "default actions, L2 or R2 held with D-pad Left / Right jumps 20 s / 1 s, and R3 held with Square shows the "
-			   "statistics.",
-		5, 185, 286, 54);
+	// 1.5.3 (#3): Square given another action does it with the pointer showing too; the right-click is still there
+	d->Text(p, "Options given another action still opens the menu bar when held half a second. Square given another "
+			   "action does it with the pointer showing too (right-click: two fingers on the touchpad, or the menu bar). "
+			   "The pointer's Cross and touchpad clicks and the buttons in menus and dialogs stay as they are. While L2, R2 "
+			   "and R3 keep their default actions, L2 or R2 held with D-pad Left / Right jumps 20 s / 1 s, and R3 held "
+			   "with Square shows the statistics.",
+		5, 169, 286, 70);
 	d->apply_fns.push_back([&s, pad, touch] {
 		for (int i = 0; i < int(PadButton::Count); i++)
 			s.pad[i] = (*pad)[i];

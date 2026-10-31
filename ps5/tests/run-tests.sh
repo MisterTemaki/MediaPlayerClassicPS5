@@ -5,7 +5,7 @@
 # checked. The media are made by tests/make_media.sh with the host's ffmpeg.
 set -u
 cd "$(dirname "$0")/.."
-BIN=$PWD/build/host/mpc-ps5-host
+BIN=${MPC_HOST_BIN:-$PWD/build/host/mpc-ps5-host} # (another build: e.g. the last release's, for a fail-before)
 INSTALLER=$PWD/build/host/mpc-ps5-installer
 HELPER=$PWD/build/host/mpc-ps5-helper
 # ports nobody listens on, so the app's ordinary runs find no helper and no ELF loader
@@ -1941,6 +1941,144 @@ for f in $(seq 200 4 396); do
 done
 rm -f $T/dump/*.ppm
 expect "[ $rc = 0 ] && [ $boxed -gt 0 ] && [ $boxed -lt 30 ]" "after a seek back, the replayed lines end again: the box on $boxed of 50 frames (a 0.1 s line every 0.5 s)"
+nosan "$T"
+fi
+
+if want 32; then
+echo "== 32. 1.5.3 (Sulfurico-One64, #3): Square's own action with the pointer, the fullscreen controls when the pointer is over them, a held jump's pictures"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+count() { grep -c -- "$2" "$1/root/logs/boot.log"; }
+# a: Square given another action (Next audio track) does it with the pointer showing (moved just before) as without it
+# (3 s still); over Options (a dialog) it stays the right-click there; R3 held with it still shows the statistics; the
+# window's right-click is still the touchpad pressed with two fingers
+T=$(newroot t32a)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeySquare=NextAudio"
+TP2="100000,128,128,128,128,900,500,1100,500"
+P="0:0;40:0,200,128;46:0;50:$SQUARE;53:0;300:$SQUARE;303:0;340:0,200,128;346:0;360:$SQUARE;363:0"
+P="$P;400:0,60,128;406:0;410:$R3;413:8004;416:0;440:0,200,128;446:0;450:$TP2;454:0"
+rc=$(run "$T" "$P" "330:cmd options;380:key escape;470:key escape;480:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && [ \$(count $T '\[ui\] Square: NextAudio') = 2 ] && [ \$(count $T '\[osd\] Audio: ') -ge 2 ]" "Square as Next audio track: with the pointer showing and without it, the track changes ($(count $T '\[ui\] Square: NextAudio') times)"
+line() { grep -n -- "$2" "$1/root/logs/boot.log" | head -1 | cut -d: -f1; }
+expect "log $T '\[ui\] Square: Statistics'" "R3 held with Square (the pointer showing): the statistics, as before"
+expect "[ \$(count $T '\[ui\] right-click at') = 1 ] && [ \$(line $T 'right-click at') -gt \$(line $T 'Square: Statistics') ]" "no right-click from Square in the window (in Options: Options' own, nothing); the touchpad pressed with two fingers: the window's right-click"
+nosan "$T"
+# b: Square at its default: the right-click with the pointer showing, the context menu without it (as up to 1.5.2)
+T=$(newroot t32b)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0;40:0,200,128;46:0;50:$SQUARE;53:0;300:$SQUARE;303:0" "70:key escape;320:key escape;340:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && [ \$(count $T '\[ui\] right-click at') = 1 ] && [ \$(count $T '\[ui\] Square: ContextMenu') = 1 ]" "Square at its default: the right-click with the pointer, the context menu without it"
+nosan "$T"
+# the films for c..k: a test pattern under noise, 1920x1080 at 15 frames a second, 100 s, a keyframe every 10 s (an
+# exact seek decodes up to 150 pictures first: ~0.25-0.5 s here, as a 4K film read from a hard disk on the console),
+# with a subtitle line at the bottom the whole time; and 100 s of sound alone
+[ -f "$MEDIA/gop10.mp4" ] || ffmpeg -v error -y -f lavfi -i testsrc2=s=1920x1080:r=15:d=100 -vf noise=alls=12:allf=t+u \
+	-c:v libx264 -preset veryfast -crf 26 -g 150 -keyint_min 150 -sc_threshold 0 -pix_fmt yuv420p "$MEDIA/gop10.mp4"
+[ -f "$MEDIA/tone100.m4a" ] || ffmpeg -v error -y -f lavfi -i sine=frequency=500:sample_rate=48000:duration=100 -c:a aac "$MEDIA/tone100.m4a"
+film() {
+	cp "$MEDIA/gop10.mp4" "$1/root/media/film.mp4"
+	printf '1\r\n00:00:00,500 --> 00:01:40,000\r\nThe subtitles the bars would cover\r\n' >"$1/root/media/film.srt"
+}
+# the bars (the seek bar's and the toolbar's COLOR_BTNFACE) drawn between x0 and x1 at the bottom
+bars() { $REGION "$1" "$2" 985 "$3" 1040 240 240 240 6 $(( ($3 - $2) * 20 )) >/dev/null; }
+# c: Options > Fullscreen "Show when the pointer is over them": the pointer moving in the middle, then inside Options
+# over the picture: no bars (up to 1.5.2 any movement brought them, over the subtitles being styled); at the bottom:
+# the bars; it leaves: still there for a second, then gone; the seek bar dragged off the band keeps them; nothing open:
+# shown
+T=$(newroot t32c)
+film "$T"
+ini "$T" "FullScreen=1
+HideFullscreenControlsPolicy=1"
+S="100:cmd options;110:mouse 900,500;115:mouse 950,520;120:mouse 1000,560;150:key escape;160:mouse 960,1075;180:mouse 960,500"
+S="$S;280:mouse 960,995;400:cmd close;440:quit"
+rc=$(run "$T" "0:0;60:0,200,128;66:0;290:$CROSS;292:$CROSS,128,0;330:$CROSS;340:0" "$S" "80,125,170,190,260,330,425" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && ! bars $T/dump/flip00080.ppm 0 1920 && ! bars $T/dump/flip00125.ppm 0 1920" "over-them mode: the pointer moving over the picture, then inside Options: no bars"
+expect "bars $T/dump/flip00170.ppm 0 1920 && log $T 'fullscreen: the pointer over the controls (960,1075): shown'" "... the pointer at the bottom: the bars"
+expect "bars $T/dump/flip00190.ppm 0 1920 && ! bars $T/dump/flip00260.ppm 0 1920 && log $T 'fullscreen: the pointer left the controls: hidden'" "... it leaves: a second more, then hidden"
+expect "bars $T/dump/flip00330.ppm 0 1920 && log $T 'seek bar let go'" "... the seek bar dragged up off the bars: they stay while it is held"
+expect "bars $T/dump/flip00425.ppm 0 1920 && grep -q '^HideFullscreenControlsPolicy=1$' $T/root/mpc-hc.ini" "... nothing open: shown; the choice kept in mpc-hc.ini"
+nosan "$T"
+# d: Options moved to the bottom left, over the bars' band: the pointer over it there brings no bars; beside it, they show
+T=$(newroot t32d)
+film "$T"
+ini "$T" "FullScreen=1
+HideFullscreenControlsPolicy=1
+OptionsX=0
+OptionsY=1079"
+rc=$(run "$T" "0:0" "40:cmd options;50:mouse 100,1070;80:mouse 1850,1075;100:key escape;110:quit" "70,95" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && ! bars $T/dump/flip00070.ppm 1100 1920 && bars $T/dump/flip00095.ppm 1100 1920" "over-them mode, Options over the band: the pointer on Options there, no bars; beside it, the bars"
+nosan "$T"
+# e: an mpc-hc.ini without the new key (1.5.2's): "when the pointer moves", as before -- moving inside Options brings
+# the bars; saved with HideFullscreenControlsPolicy=2
+T=$(newroot t32e)
+film "$T"
+ini "$T" "FullScreen=1"
+rc=$(run "$T" "0:0;60:0,200,128;66:0" "100:cmd options;110:mouse 900,500;115:mouse 950,520;120:mouse 1000,560;150:key escape;160:quit" "80,125" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && bars $T/dump/flip00080.ppm 0 1920 && bars $T/dump/flip00125.ppm 0 1920 && grep -q '^HideFullscreenControlsPolicy=2$' $T/root/mpc-hc.ini" "1.5.2's mpc-hc.ini: the bars when the pointer moves (Options too), as before; the default saved"
+nosan "$T"
+# the held jumps: "<button> let go after S s: N jump(s), K keyframe seek(s), P picture(s) shown; exact seek to X"
+held() { grep "let go after" "$1/root/logs/boot.log" | sed -n "${2}p" | sed -E 's/.* after ([0-9.]+) s: ([0-9]+) jump\(s\), ([0-9]+) keyframe seek\(s\), ([0-9]+) picture\(s\) shown; exact seek to ([0-9.]+)/\1 \2 \3 \4 \5/'; }
+hf() { held "$1" "$2" | cut -d' ' -f"$3"; }
+# several pictures a second while held (the seek bar's line has no jumps: its fields one to the left)
+often() { python3 -c "import sys; s, p = float(sys.argv[1]), float(sys.argv[2]); sys.exit(0 if p >= 3 and p / s >= 2.5 else 1)" "${1:-1}" "${2:-0}"; }
+distinct() { python3 - "$@" <<'PY'
+import hashlib, sys
+# the picture's middle band (not the OSD's corner, not the subtitle at the bottom)
+print(len({hashlib.md5(open(f, 'rb').read()[-1920 * 3 * 800:-1920 * 3 * 300]).hexdigest() for f in sys.argv[1:]}))
+PY
+}
+# f: paused at 5 s, D-pad Right (5 s jumps) held: pictures while held (several a second, the screen changing), the
+# position counted from the jumps, an exact seek to it when let go; then Left pressed once: exactly 5 s back (a
+# keyframe seek would land on the keyframe before it, up to 10 s back)
+T=$(newroot t32f)
+film "$T"
+D=$(seq -s, 115 3 136)
+rc=$(run "$T" "0:0;100:$RIGHT;135:0;300:$LEFT;303:0" "30:cmd pause;40:seek 5;80:state;260:state;360:state;370:quit" "$D" "$T/root/media/film.mp4")
+N=$(hf $T 1 2); X=$(hf $T 1 5); DIST=$(distinct $T/dump/flip*.ppm); P1=$(field $T 1 2); P2=$(field $T 2 2); P3=$(field $T 3 2)
+expect "[ $rc = 0 ] && often $(hf $T 1 1) $(hf $T 1 4) && [ $DIST -ge 3 ]" "D-pad Right held (paused): $(hf $T 1 4) pictures in $(hf $T 1 1) s, the screen changed $DIST times in 8 frames (1.5.2: each repeat dropped the seek still decoding)"
+expect "[ -n \"$N\" ] && near $X \$(python3 -c 'print(min(100, $P1 + 5 * ($N + 1)))') 0.01 && [ \"\$(field $T 2 1)\" = 3 ] && near $P2 $X 0.07" "... let go: an exact seek to where the jumps added up to ($X s: $P1 + 5 x $((${N:-0} + 1))), paused there ($P2 s)"
+expect "[ -n \"$P2\" ] && near $P3 \$(python3 -c 'print($P2 - 5)') 0.1" "a single press: exact as before ($P2 s -> $P3 s; a keyframe seek: up to 10 s back)"
+rm -f $T/dump/*.ppm
+nosan "$T"
+# g: playing, the right stick held right (1 s jumps): pictures while held; it plays on from where they added up to
+T=$(newroot t32g)
+film "$T"
+rc=$(run "$T" "0:0;100:0,128,128,255,128;160:0,128,128,128,128" "60:seek 5;175:state;185:quit" "" "$T/root/media/film.mp4")
+X=$(hf $T 1 5); P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && log $T 'Right stick right held: jumping by keyframes' && often $(hf $T 1 1) $(hf $T 1 4) && [ \"\$(field $T 1 1)\" = 2 ] && python3 -c 'import sys; sys.exit(0 if $X <= $P1 <= $X + 1.5 else 1)'" "the right stick held (playing): $(hf $T 1 4) pictures in $(hf $T 1 1) s; plays on from $X s ($P1 s)"
+nosan "$T"
+# h: L2 held with D-pad Left (20 s jumps back), playing from 90 s: the combination held, by keyframes, to the start at most
+T=$(newroot t32h)
+film "$T"
+rc=$(run "$T" "0:0;100:$L2;105:$((L2 + LEFT));150:$L2;155:0" "60:seek 90;170:state;180:quit" "" "$T/root/media/film.mp4")
+N=$(hf $T 1 2); X=$(hf $T 1 5); P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && log $T 'D-pad Left: JumpBackLarge' && [ -n \"$N\" ] && near $X \$(python3 -c 'print(max(0, 90 - 20 * ($N + 1)))') 0.01 && python3 -c 'import sys; sys.exit(0 if $X <= $P1 <= $X + 1.5 else 1)'" "L2 + D-pad Left held: 20 s jumps back to $X s, playing on from there ($P1 s)"
+nosan "$T"
+# i: sound alone: held, it jumps (nothing to wait for), exact when let go
+T=$(newroot t32i)
+cp "$MEDIA/tone100.m4a" "$T/root/media/"
+rc=$(run "$T" "0:0;100:$RIGHT;150:0" "30:cmd pause;40:seek 5;200:state;210:quit" "" "$T/root/media/tone100.m4a")
+N=$(hf $T 1 2); X=$(hf $T 1 5); P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && [ -n \"$N\" ] && [ \"$(hf $T 1 3)\" -ge 1 ] && near $X \$(python3 -c 'print(min(100, 5 + 5 * ($N + 1)))') 0.01 && near $P1 $X 0.05" "sound alone: held, $N jump(s) by $(hf $T 1 3) seek(s); let go at $X s ($P1 s)"
+nosan "$T"
+# j: held past the end (the last seek finds nothing to show), then held back: the pictures come again (a seek that never
+# shows one doesn't stop the jumps)
+T=$(newroot t32j)
+film "$T"
+rc=$(run "$T" "0:0;100:$RIGHT;170:0;220:$LEFT;270:0" "30:cmd pause;40:seek 80;320:state;330:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && [ \"$(hf $T 1 5)\" = 100.00 ] && [ -n \"$(hf $T 2 4)\" ] && [ $(hf $T 2 4) -ge 2 ] && near \$(field $T 1 2) $(hf $T 2 5) 0.07" "held past the end, then back: $(hf $T 2 4) pictures on the way back, at $(hf $T 2 5) s"
+nosan "$T"
+# k: the seek bar dragged (Cross held on it, the stick): its keyframe seeks one at a time too (each pointer step dropped
+# the last one); let go, exact. (From 5 s to ~38 s there are four keyframes to show: 1.5.2 showed one)
+T=$(newroot t32k)
+film "$T"
+D=$(seq -s, 110 5 155)
+rc=$(run "$T" "0:0;100:$CROSS;102:$CROSS,200,128;160:$CROSS;165:0" "30:cmd pause;40:seek 5;90:mouse 200,995;220:state;230:quit" "$D" "$T/root/media/film.mp4")
+SB=$(grep 'seek bar let go after' $T/root/logs/boot.log | sed -E 's/.* after ([0-9.]+) s: ([0-9]+) keyframe seek\(s\), ([0-9]+) picture\(s\) shown; exact seek to ([0-9.]+)/\1 \2 \3 \4/')
+DIST=$(distinct $T/dump/flip*.ppm)
+P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && [ -n \"$SB\" ] && often $(echo $SB | cut -d' ' -f1) $(echo $SB | cut -d' ' -f3) && [ $DIST -ge 2 ] && near $P1 $(echo $SB | cut -d' ' -f4) 0.07" "the seek bar dragged (paused): $(echo $SB | cut -d' ' -f3) pictures in $(echo $SB | cut -d' ' -f1) s, the screen changed $DIST times in 10 frames; let go, exact at $(echo $SB | cut -d' ' -f4) s ($P1 s)"
+rm -f $T/dump/*.ppm
 nosan "$T"
 fi
 

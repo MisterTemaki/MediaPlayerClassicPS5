@@ -2770,6 +2770,9 @@ void MainFrame::OnLButtonDown(int x, int y)
 		{
 			seek_drag_ = true;
 			seek_drag_pos_ = SeekPosAt(r_seek_, x);
+			jump_hold_t_ = NowSeconds();
+			scrub_seeks_ = 0;
+			jump_pictures_ = player_.Stats().seek_pictures;
 			Scrub(seek_drag_pos_);
 		}
 		return;
@@ -2843,6 +2846,9 @@ void MainFrame::OnLButtonUp(int x, int y)
 	{
 		seek_drag_ = false;
 		scrub_pending_ = false;
+		OrbisLog("[ui] seek bar let go after %.2f s: %d keyframe seek(s), %llu picture(s) shown; exact seek to %.2f",
+			NowSeconds() - jump_hold_t_, scrub_seeks_, (unsigned long long)(player_.Stats().seek_pictures - jump_pictures_),
+			seek_drag_pos_);
 		player_.Seek(seek_drag_pos_, true);
 	}
 	vol_drag_ = false;
@@ -2875,6 +2881,7 @@ void MainFrame::OnRButtonDown(int x, int y)
 		});
 		return;
 	}
+	OrbisLog("[ui] right-click at %d,%d: the context menu", x, y);
 	TrackPopupMenu(BuildMenu(-1), x, y, [this](int id) {
 		if (id)
 			Command(id);

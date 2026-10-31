@@ -769,11 +769,13 @@ const Entry kTable[] = {
 	{"Exit fullscreen at the end of playback", "Salir de pantalla completa al terminar",
 		"Sair da tela cheia ao terminar", "Quitter le plein écran en fin de lecture",
 		"Vollbild am Ende der Wiedergabe beenden"},
-	{"Hide controls in fullscreen (shown when the pointer moves)",
-		"Ocultar controles en pantalla completa (aparecen al mover el puntero)",
-		"Ocultar controles em tela cheia (aparecem ao mover o ponteiro)",
-		"Masquer les contrôles en plein écran (réaffichés quand le pointeur bouge)",
-		"Steuerelemente im Vollbild ausblenden (bei Zeigerbewegung sichtbar)"},
+	{"Hide controls in fullscreen", "Ocultar controles en pantalla completa", "Ocultar controles em tela cheia",
+		"Masquer les contrôles en plein écran", "Steuerelemente im Vollbild ausblenden"},
+	// 1.5.3 (#3): when they show again (MPC-HC's "Show when moving the cursor" / "Show when hovering control")
+	{"Show when the pointer moves", "Mostrar al mover el puntero", "Mostrar ao mover o ponteiro",
+		"Afficher quand le pointeur bouge", "Anzeigen, wenn sich der Zeiger bewegt"},
+	{"Show when the pointer is over them", "Mostrar con el puntero encima", "Mostrar com o ponteiro sobre eles",
+		"Afficher quand le pointeur est dessus", "Anzeigen, wenn der Zeiger darauf ist"},
 	// Subtitles, Default Style
 	{"Delay", "Retardo", "Atraso", "Décalage", "Verzögerung"},
 	{"Delay interval:", "Intervalo de retardo:", "Intervalo de atraso:", "Intervalle de décalage :",
@@ -839,26 +841,31 @@ const Entry kTable[] = {
 	{"Action", "Acción", "Ação", "Action", "Aktion"},
 	{"Action:", "Acción:", "Ação:", "Action :", "Aktion:"},
 	{"Default", "Predeterminado", "Padrão", "Par défaut", "Standard"},
-	{"Options given another action still opens the menu bar when held half a second. The pointer's clicks (Cross, "
-	 "Square, the touchpad) and the buttons in menus and dialogs stay as they are. While L2, R2 and R3 keep their "
-	 "default actions, L2 or R2 held with D-pad Left / Right jumps 20 s / 1 s, and R3 held with Square shows the "
-	 "statistics.",
-		"Options con otra acción sigue abriendo la barra de menús si se mantiene medio segundo. Los clics del puntero "
-		"(Cruz, Cuadrado, el panel táctil) y los botones en menús y diálogos no cambian. Mientras L2, R2 y R3 tengan su "
-		"acción predeterminada, L2 o R2 pulsado con Cruceta izquierda / derecha salta 20 s / 1 s, y R3 pulsado con "
-		"Cuadrado muestra las estadísticas.",
-		"Options com outra ação ainda abre a barra de menus se for segurado por meio segundo. Os cliques do ponteiro "
-		"(X, Quadrado, o touchpad) e os botões em menus e diálogos não mudam. Enquanto L2, R2 e R3 tiverem a ação "
-		"padrão, L2 ou R2 segurado com Direcional esquerda / direita pula 20 s / 1 s, e R3 segurado com Quadrado mostra "
-		"as estatísticas.",
-		"Options avec une autre action ouvre toujours la barre de menus s'il est maintenu une demi-seconde. Les clics "
-		"du pointeur (Croix, Carré, le pavé tactile) et les boutons des menus et dialogues ne changent pas. Tant que "
-		"L2, R2 et R3 gardent leur action par défaut, L2 ou R2 maintenu avec Flèche gauche / droite saute de 20 s / "
-		"1 s, et R3 maintenu avec Carré affiche les statistiques.",
+	{"Options given another action still opens the menu bar when held half a second. Square given another "
+	 "action does it with the pointer showing too (right-click: two fingers on the touchpad, or the menu bar). "
+	 "The pointer's Cross and touchpad clicks and the buttons in menus and dialogs stay as they are. While L2, R2 "
+	 "and R3 keep their default actions, L2 or R2 held with D-pad Left / Right jumps 20 s / 1 s, and R3 held "
+	 "with Square shows the statistics.",
+		"Options con otra acción sigue abriendo la barra de menús si se mantiene medio segundo. Cuadrado con otra "
+		"acción la hace también con el puntero visible (clic derecho: dos dedos en el panel táctil, o la barra de "
+		"menús). Los clics del puntero con Cruz y el panel táctil y los botones en menús y diálogos no cambian. "
+		"Mientras L2, R2 y R3 tengan su acción predeterminada, L2 o R2 pulsado con Cruceta izquierda / derecha salta "
+		"20 s / 1 s, y R3 pulsado con Cuadrado muestra las estadísticas.",
+		"Options com outra ação ainda abre a barra de menus se for segurado por meio segundo. Quadrado com outra "
+		"ação a faz também com o ponteiro visível (clique direito: dois dedos no touchpad, ou a barra de menus). Os "
+		"cliques do ponteiro com X e o touchpad e os botões em menus e diálogos não mudam. Enquanto L2, R2 e R3 "
+		"tiverem a ação padrão, L2 ou R2 segurado com Direcional esquerda / direita pula 20 s / 1 s, e R3 segurado "
+		"com Quadrado mostra as estatísticas.",
+		"Options avec une autre action ouvre toujours la barre de menus s'il est maintenu une demi-seconde. Carré "
+		"avec une autre action la fait aussi quand le pointeur est affiché (clic droit : deux doigts sur le pavé "
+		"tactile, ou la barre de menus). Les clics du pointeur avec Croix et le pavé tactile et les boutons des menus "
+		"et dialogues ne changent pas. Tant que L2, R2 et R3 gardent leur action par défaut, L2 ou R2 maintenu avec "
+		"Flèche gauche / droite saute de 20 s / 1 s, et R3 maintenu avec Carré affiche les statistiques.",
 		"Options mit einer anderen Aktion öffnet die Menüleiste weiterhin, wenn es eine halbe Sekunde gehalten wird. "
-		"Die Klicks des Zeigers (Kreuz, Quadrat, das Touchpad) und die Tasten in Menüs und Dialogen bleiben gleich. "
-		"Solange L2, R2 und R3 ihre Standardaktion haben, springt L2 oder R2 gehalten mit Steuerkreuz links / rechts "
-		"20 s / 1 s, und R3 gehalten mit Quadrat zeigt die Statistiken."},
+		"Quadrat mit einer anderen Aktion führt sie auch bei sichtbarem Zeiger aus (Rechtsklick: zwei Finger auf dem "
+		"Touchpad oder die Menüleiste). Die Klicks des Zeigers mit Kreuz und Touchpad und die Tasten in Menüs und "
+		"Dialogen bleiben gleich. Solange L2, R2 und R3 ihre Standardaktion haben, springt L2 oder R2 gehalten mit "
+		"Steuerkreuz links / rechts 20 s / 1 s, und R3 gehalten mit Quadrat zeigt die Statistiken."},
 	{"The touchpad as the pointer (press: click; two fingers: right-click)",
 		"Panel táctil como puntero (pulsar: clic; dos dedos: clic derecho)",
 		"Touchpad como ponteiro (pressionar: clique; dois dedos: clique direito)",
