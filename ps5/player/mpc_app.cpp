@@ -268,7 +268,7 @@ private:
 	double options_down_ = 0; // Options pressed, given another action than the menu bar: when (held: the menu bar)
 	bool opened_ok_ = false;
 	// 1.5.3 (#3): a jump held (its repeats) and the seek bar dragged go to keyframes, one seek at a time: the next one
-	// only once the last one's picture is shown (Player::SeekShown; a second at most), the latest target waiting
+	// only once the last one's picture is shown (Player::SeekShown; two seconds at most), the latest target waiting
 	// meanwhile. Up to 1.5.2 each repeat (every 0.07 s) asked an exact seek that dropped the one still decoding, so a
 	// 4K film from a hard disk showed no picture until the button was let go. Let go, one exact seek to where the jumps
 	// added up to.
@@ -1753,9 +1753,9 @@ void MainFrame::EndJumpHold()
 	Seek(jump_to_);
 }
 
-// one keyframe seek at a time: the next only once the last one's picture is shown (or after a second: a seek that never
-// shows one -- a read error, the end -- doesn't stop the next)
-constexpr double kScrubWait = 1.0;
+// one keyframe seek at a time: the next only once the last one's picture is shown, or after two seconds (a seek that
+// never shows one -- a read that fails or stalls -- doesn't stop the jumps; a keyframe takes far less on the console)
+constexpr double kScrubWait = 2.0;
 
 void MainFrame::Scrub(double t)
 {
@@ -2619,9 +2619,14 @@ void MainFrame::Tick()
 {
 	TickUpdate();
 	TickOptionsButton();
-	// a held jump let go (or its file gone): the exact seek; the keyframe seek waiting, when the last one is shown
-	if (jump_hold_ && (!Loaded() || !PadHeld(jump_from_)))
+	// a held jump let go (or its file gone, or a menu or a dialog opened over it): the exact seek; a menu or a dialog
+	// also forgets the last jump's button (its repeats after it closes start again from a press: exact); the keyframe
+	// seek waiting, when the last one is shown
+	const bool modal = WindowManager::Get().HasModal();
+	if (jump_hold_ && (!Loaded() || modal || !PadHeld(jump_from_)))
 		EndJumpHold();
+	if (modal)
+		jump_from_ = PadButton::Count;
 	TickScrub();
 	TickBarsHover();
 	const PlayState st = player_.State();
