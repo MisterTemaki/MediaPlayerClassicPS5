@@ -148,6 +148,13 @@ public:
 	CRect exclude; // the menu bar item that opened it (a click there closes the menu)
 
 	explicit MenuTracker(bool kb) : keyboard(kb) { g_active = this; }
+	bool Covers(int x, int y) const override
+	{
+		for (const Level& l : levels)
+			if (l.r.PtInRect(x, y))
+				return true;
+		return false;
+	}
 	~MenuTracker() override
 	{
 		if (g_active == this)

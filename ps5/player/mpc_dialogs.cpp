@@ -1633,10 +1633,19 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	d->Combo(p, 8, 11, 280, 13, {"Current (TV)"}, 0)->enabled = false;
 	CheckBox* launchfs = d->Check(p, "Launch files in fullscreen", 8, 26, 280, 8, s.fullscreen);
 	d->Check(p, "Exit fullscreen at the end of playback", 8, 37, 280, 8, false, false);
-	CheckBox* hide = d->Check(p, "Hide controls in fullscreen (shown when the pointer moves)", 8, 54, 280, 8, s.hide_controls_fullscreen);
-	d->apply_fns.push_back([&s, launchfs, hide] {
+	// MPC-HC's group: the check box as its title, when they show again under it (1.5.3, #3: "Show when hovering
+	// control", for subtitles styled with Options open over the picture; MPC-HC's "hide after" delay is a fixed second)
+	GroupBox* hgroup = d->Group(p, "", 4, 52, 288, 34);
+	CheckBox* hide = d->Check(p, "Hide controls in fullscreen", 10, 53, 275, 8, s.hide_controls_fullscreen);
+	hgroup->title_check = hide;
+	ComboBox* hshow = d->Combo(p, 10, 66, 276, 13, {"Show when the pointer moves", "Show when the pointer is over them"},
+		s.fs_controls_show == Settings::kShowWhenHovered ? 1 : 0);
+	hshow->enabled = hide->checked;
+	hide->on_change = [hide, hshow] { hshow->enabled = hide->checked; };
+	d->apply_fns.push_back([&s, launchfs, hide, hshow] {
 		s.fullscreen = launchfs->checked;
 		s.hide_controls_fullscreen = hide->checked;
+		s.fs_controls_show = hshow->sel == 1 ? Settings::kShowWhenHovered : Settings::kShowWhenMoved;
 	});
 
 	// ---- Subtitles > Default Style (IDD_PPAGESUBTITLES, IDD_PPAGESUBSTYLE) ----

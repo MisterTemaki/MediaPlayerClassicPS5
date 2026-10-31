@@ -173,7 +173,14 @@ struct Settings
 	bool show_playlist = false;
 	bool show_caption_menu = true; // Caption&Menu
 	bool fullscreen = false;
-	bool hide_controls_fullscreen = true; // shown again when the cursor reaches the bottom
+	// Options > Fullscreen "Hide controls in fullscreen": the bars (seek bar, toolbar, status...) hidden over the
+	// picture, shown again as fs_controls_show says -- MPC-HC's HideFullscreenControlsPolicy (1.5.3, #3):
+	// kShowWhenMoved (the default, as up to 1.5.2): whenever the pointer moves (anywhere, a dialog over the picture too);
+	// kShowWhenHovered: while the pointer is over them (the bottom band they take), not over a dialog or a menu, and a
+	// second after it leaves
+	bool hide_controls_fullscreen = true;
+	static constexpr int kShowWhenHovered = 1, kShowWhenMoved = 2; // MPC-HC's values (0, "Never show", isn't offered)
+	int fs_controls_show = kShowWhenMoved;
 	VideoFrame video_frame = VideoFrame::FromInside;
 	int aspect_ratio = 0; // 0 DAR, 1 4:3, 2 5:4, 3 16:9, 4 2.35, 5 1.85, 6 SAR
 	double pan_x = 0, pan_y = 0, zoom_x = 1, zoom_y = 1; // Pan&Scan

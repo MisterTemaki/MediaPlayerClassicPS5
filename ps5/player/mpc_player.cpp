@@ -611,6 +611,7 @@ struct Player::Impl
 	double shown_fps = 0;
 	int shown_count = 0;
 	double shown_t0 = 0;
+	uint64_t seek_pictures = 0; // 1.5.3: seeks whose first picture was shown (under fmu)
 
 	~Impl() { Shutdown(); }
 
@@ -2662,6 +2663,7 @@ bool Player::UpdateVideo()
 	{
 		take = true;
 		s.show_after_seek = false;
+		s.seek_pictures++;
 		if (s.paused && !s.SeekPending())
 			s.clock.Set(s.frames.front().pts);
 	}
@@ -2705,6 +2707,22 @@ bool Player::UpdateVideo()
 		s.shown_t0 = now;
 	}
 	return true;
+}
+
+bool Player::SeekShown() const
+{
+	Impl& s = *m;
+	const PlayState st = s.state;
+	if (st != PlayState::Playing && st != PlayState::Paused && st != PlayState::Stopped)
+		return true;
+	if (s.SeekPending())
+		return false; // the demuxer hasn't taken it yet
+	if (s.vstream < 0)
+		return true; // the sound: nothing to wait for
+	std::lock_guard<std::mutex> l(s.fmu);
+	const int ser = s.serial;
+	// a picture from where it went shown, or the video ended there (a seek past the last picture)
+	return (s.cur_serial == ser && !s.show_after_seek) || s.vdone_serial == ser;
 }
 
 bool Player::HasPicture() const
@@ -3027,6 +3045,7 @@ PlayerStats Player::Stats() const
 	{
 		std::lock_guard<std::mutex> l(m->fmu);
 		st.queued_video = int(m->frames.size());
+		st.seek_pictures = m->seek_pictures;
 	}
 	st.underruns = ps5audio::Underruns();
 	return st;

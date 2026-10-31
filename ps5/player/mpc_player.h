@@ -101,6 +101,7 @@ struct PlayerStats
 	int queued_video = 0;
 	double buffered_s = 0;
 	uint64_t underruns = 0;
+	uint64_t seek_pictures = 0; // 1.5.3: seeks (and openings) whose first picture was shown
 };
 
 class Player
@@ -123,7 +124,13 @@ public:
 	void Pause();
 	void TogglePause();
 	void Stop(); // to the start, paused, the first picture shown (MPC-HC's Stop)
+	// exact: decoded from the keyframe before it up to it (the picture at that time); not exact: the keyframe's
+	// picture (fast: a seek bar dragged, a jump held). A seek asked replaces one not done yet.
 	void Seek(double seconds, bool exact = true);
+	// 1.5.3 (#3): the last seek asked is done and its first picture shown -- or there's none to wait for (no video, the
+	// video ended there, nothing open). A held jump or a dragged seek bar asks the next seek only then, so pictures
+	// keep coming (each new seek dropped the one still decoding: a 4K film from a hard disk showed nothing while held)
+	bool SeekShown() const;
 	void FrameStep();
 	double Position() const;
 	double Duration() const;

@@ -267,6 +267,29 @@ private:
 	double rate_ = 1.0; // the playing rate (Play > Increase / Decrease / Reset Rate)
 	double options_down_ = 0; // Options pressed, given another action than the menu bar: when (held: the menu bar)
 	bool opened_ok_ = false;
+	// 1.5.3 (#3): a jump held (its repeats) and the seek bar dragged go to keyframes, one seek at a time: the next one
+	// only once the last one's picture is shown (Player::SeekShown; a second at most), the latest target waiting
+	// meanwhile. Up to 1.5.2 each repeat (every 0.07 s) asked an exact seek that dropped the one still decoding, so a
+	// 4K film from a hard disk showed no picture until the button was let go. Let go, one exact seek to where the jumps
+	// added up to.
+	bool jump_hold_ = false; // a jump button held past its first repeat
+	PadButton jump_from_ = PadButton::Count; // the button of the last jump
+	double jump_to_ = 0; // where the jumps add up to (shown by the seek bar and the status while held)
+	double jump_hold_t_ = 0; // since when it is held
+	int jump_steps_ = 0, scrub_seeks_ = 0;
+	uint64_t jump_pictures_ = 0; // Player's seek_pictures when the hold started
+	bool scrub_pending_ = false; // a keyframe seek waiting for the last one's picture
+	double scrub_to_ = 0, scrub_sent_t_ = -100;
+	void Scrub(double t);
+	void TickScrub();
+	void JumpBy(double d, PadButton from, bool repeat);
+	void EndJumpHold();
+	bool PadHeld(PadButton b) const;
+	// 1.5.3 (#3): Options > Fullscreen "Show when the pointer is over them": the pointer over the bars' band (and not
+	// over a dialog or a menu), and when it last was
+	bool bars_hover_ = false;
+	double bars_hover_t_ = -100;
+	void TickBarsHover();
 
 	// video
 	Image video_layer_;
@@ -292,11 +315,14 @@ private:
 	std::vector<std::pair<std::string, std::string>> InfoRows() const;
 	std::vector<std::pair<std::string, std::string>> StatsRows() const;
 	int BarRows(bool info) const;
+	// the control bars' heights, from the bottom up: status, statistics, information, toolbar, seek bar (0: off)
+	void BarHeights(int h[5]) const;
 
 	void OnEvent(const InputEvent& ev);
 	void OnKey(Key k, bool repeat = false);
 	// Options > Player > Keys: what a button does in the window, and the first button doing an action (menus)
-	void DoPadAction(PadAction a);
+	// (from, repeat: the button and whether it is held -- a jump held goes by keyframes, 1.5.3)
+	void DoPadAction(PadAction a, PadButton from = PadButton::Count, bool repeat = false);
 	void ShowOptions(OptionsPage page);
 	void TickOptionsButton();
 	std::string Accel(PadAction a, const char* combination = "") const;
@@ -323,7 +349,6 @@ private:
 	void SavePosition();
 	void Osd(const std::string& text, double seconds = 1.5);
 	void Seek(double t);
-	void Jump(double d);
 	void SetVolume(int v);
 	void ApplyAudio();
 	void SkipBack();
@@ -423,14 +448,14 @@ void MainFrame::Layout()
 		bottom -= h;
 	};
 	const bool bars = !fs || ControlsOverlayVisible() || !s_.hide_controls_fullscreen;
-	take(r_status_, bars && s_.show_status, std::max(ScaleY(24), UiFont().Height() + ScaleY(8)));
-	const int sr = s_.show_stats ? BarRows(false) : 0, ir = s_.show_info ? BarRows(true) : 0;
-	take(r_stats_, bars && s_.show_stats && sr, sr * ScaleY(17) + ScaleY(2) * 2);
-	take(r_info_, bars && s_.show_info && ir, ir * ScaleY(17) + ScaleY(2) * 2);
+	int bh[5];
+	BarHeights(bh);
+	take(r_status_, bars, bh[0]);
+	take(r_stats_, bars, bh[1]);
+	take(r_info_, bars, bh[2]);
 	const int img = ScaleX(16);
-	const int tb_h = ScaleY(2) + img + 6 + ScaleY(2);
-	take(r_toolbar_, bars && s_.show_controls, tb_h);
-	take(r_seek_, bars && s_.show_seekbar, ScaleY(20) + (s_.show_controls ? 0 : 2));
+	take(r_toolbar_, bars, bh[3]);
+	take(r_seek_, bars, bh[4]);
 	take(r_playlist_, s_.show_playlist && !fs, ScaleY(170));
 	r_video_area_ = fs ? CRect(0, 0, kW, kH) : CRect(0, top, kW, bottom);
 
@@ -466,13 +491,60 @@ void MainFrame::Layout()
 	}
 }
 
+void MainFrame::BarHeights(int h[5]) const
+{
+	const int sr = s_.show_stats ? BarRows(false) : 0, ir = s_.show_info ? BarRows(true) : 0;
+	h[0] = s_.show_status ? std::max(ScaleY(24), UiFont().Height() + ScaleY(8)) : 0;
+	h[1] = sr ? sr * ScaleY(17) + ScaleY(2) * 2 : 0;
+	h[2] = ir ? ir * ScaleY(17) + ScaleY(2) * 2 : 0;
+	h[3] = s_.show_controls ? ScaleY(2) + ScaleX(16) + 6 + ScaleY(2) : 0; // CPlayerToolBar: the image + 6, borders
+	h[4] = s_.show_seekbar ? ScaleY(20) + (s_.show_controls ? 0 : 2) : 0;
+}
+
 bool MainFrame::ControlsOverlayVisible() const
 {
 	if (!Fullscreen())
 		return true;
 	if (!s_.hide_controls_fullscreen)
 		return true;
-	return input_.CursorVisible() || seek_drag_ || vol_drag_ || !Loaded();
+	if (seek_drag_ || vol_drag_ || !Loaded())
+		return true;
+	// 1.5.3: "Show when the pointer is over them" (TickBarsHover), else when it moves (anywhere: as up to 1.5.2)
+	if (s_.fs_controls_show == Settings::kShowWhenHovered)
+		return bars_hover_;
+	return input_.CursorVisible();
+}
+
+// 1.5.3 (#3, MPC-HC's "Show when hovering control"): the bars show while the pointer is in the band they take at the
+// bottom, not over a dialog or a menu drawn there; they hide a second after it leaves (or hides, 3 s still), so a
+// pointer moving inside Options over the picture -- styling the subtitles the bars would cover -- doesn't bring them
+constexpr double kBarsHideDelay = 1.0;
+
+void MainFrame::TickBarsHover()
+{
+	if (!Fullscreen() || !s_.hide_controls_fullscreen || s_.fs_controls_show != Settings::kShowWhenHovered)
+	{
+		bars_hover_ = false;
+		return;
+	}
+	int bh[5];
+	BarHeights(bh);
+	const int band = bh[0] + bh[1] + bh[2] + bh[3] + bh[4];
+	const int x = input_.CursorX(), y = input_.CursorY();
+	const bool over = band > 0 && input_.CursorVisible() && y >= kH - band && !WindowManager::Get().Covers(x, y);
+	const double now = NowSeconds();
+	if (over)
+	{
+		if (!bars_hover_)
+			OrbisLog("[ui] fullscreen: the pointer over the controls (%d,%d): shown", x, y);
+		bars_hover_ = true;
+		bars_hover_t_ = now;
+	}
+	else if (bars_hover_ && now - bars_hover_t_ >= kBarsHideDelay)
+	{
+		bars_hover_ = false;
+		OrbisLog("[ui] fullscreen: the pointer left the controls: hidden");
+	}
 }
 
 // ---- seek bar (CPlayerSeekBar) ----
@@ -514,7 +586,7 @@ double MainFrame::SeekPosAt(const CRect& client, int x) const
 
 double MainFrame::SeekPos() const
 {
-	return seek_drag_ ? seek_drag_pos_ : player_.Position();
+	return seek_drag_ ? seek_drag_pos_ : jump_hold_ ? jump_to_ : player_.Position();
 }
 
 void MainFrame::PaintSeekBar(CDC& dc, const CRect& r)
@@ -1637,9 +1709,77 @@ void MainFrame::Seek(double t)
 	Osd(FormatTime(t, dur >= 3600) + (dur > 0 ? " / " + FormatTime(dur, dur >= 3600) : ""));
 }
 
-void MainFrame::Jump(double d)
+// a jump: pressed, an exact seek (as up to 1.5.2); its repeats while held (from the same button), keyframe seeks one at
+// a time (Scrub) from where the jumps add up to, and an exact seek there when it is let go (EndJumpHold)
+void MainFrame::JumpBy(double d, PadButton from, bool repeat)
 {
-	Seek(player_.Position() + d);
+	if (!Loaded() || !player_.Seekable())
+		return;
+	const double dur = player_.Duration();
+	auto clamp = [dur](double t) { return std::max(0.0, dur > 0 ? std::min(t, dur) : t); };
+	if (repeat && from != PadButton::Count && from == jump_from_)
+	{
+		if (!jump_hold_)
+		{
+			jump_hold_ = true;
+			jump_hold_t_ = NowSeconds();
+			jump_steps_ = 0;
+			scrub_seeks_ = 0;
+			jump_pictures_ = player_.Stats().seek_pictures;
+			OrbisLog("[ui] %s held: jumping by keyframes from %.2f", PadButtonName(from), jump_to_);
+		}
+		jump_to_ = clamp(jump_to_ + d);
+		jump_steps_++;
+		Scrub(jump_to_);
+		Osd(FormatTime(jump_to_, dur >= 3600) + (dur > 0 ? " / " + FormatTime(dur, dur >= 3600) : ""));
+		return;
+	}
+	if (jump_hold_)
+		EndJumpHold();
+	jump_from_ = from;
+	jump_to_ = clamp(player_.Position() + d);
+	Seek(jump_to_);
+}
+
+void MainFrame::EndJumpHold()
+{
+	jump_hold_ = false;
+	scrub_pending_ = false;
+	if (!Loaded())
+		return;
+	const uint64_t pics = player_.Stats().seek_pictures - jump_pictures_;
+	OrbisLog("[ui] %s let go after %.2f s: %d jump(s), %d keyframe seek(s), %llu picture(s) shown; exact seek to %.2f",
+		PadButtonName(jump_from_), NowSeconds() - jump_hold_t_, jump_steps_, scrub_seeks_, (unsigned long long)pics, jump_to_);
+	Seek(jump_to_);
+}
+
+// one keyframe seek at a time: the next only once the last one's picture is shown (or after a second: a seek that never
+// shows one -- a read error, the end -- doesn't stop the next)
+constexpr double kScrubWait = 1.0;
+
+void MainFrame::Scrub(double t)
+{
+	scrub_to_ = t;
+	scrub_pending_ = true;
+	TickScrub();
+}
+
+void MainFrame::TickScrub()
+{
+	if (!scrub_pending_)
+		return;
+	if (!Loaded())
+	{
+		scrub_pending_ = false;
+		return;
+	}
+	const double now = NowSeconds();
+	if (!player_.SeekShown() && now - scrub_sent_t_ < kScrubWait)
+		return;
+	player_.Seek(scrub_to_, false);
+	scrub_pending_ = false;
+	scrub_sent_t_ = now;
+	scrub_seeks_++;
 }
 
 void MainFrame::SkipBack()
@@ -2479,6 +2619,11 @@ void MainFrame::Tick()
 {
 	TickUpdate();
 	TickOptionsButton();
+	// a held jump let go (or its file gone): the exact seek; the keyframe seek waiting, when the last one is shown
+	if (jump_hold_ && (!Loaded() || !PadHeld(jump_from_)))
+		EndJumpHold();
+	TickScrub();
+	TickBarsHover();
 	const PlayState st = player_.State();
 	if (st != last_state_)
 	{
@@ -2594,8 +2739,8 @@ void MainFrame::OnMouseMove(int x, int y)
 	if (seek_drag_)
 	{
 		seek_drag_pos_ = SeekPosAt(r_seek_, x);
-		// MoveThumb: the picture follows while dragging (keyframes, fast)
-		player_.Seek(seek_drag_pos_, false);
+		// MoveThumb: the picture follows while dragging (keyframes, fast; 1.5.3: one at a time, as a held jump)
+		Scrub(seek_drag_pos_);
 	}
 	if (vol_drag_)
 	{
@@ -2625,7 +2770,7 @@ void MainFrame::OnLButtonDown(int x, int y)
 		{
 			seek_drag_ = true;
 			seek_drag_pos_ = SeekPosAt(r_seek_, x);
-			player_.Seek(seek_drag_pos_, false);
+			Scrub(seek_drag_pos_);
 		}
 		return;
 	}
@@ -2697,6 +2842,7 @@ void MainFrame::OnLButtonUp(int x, int y)
 	if (seek_drag_)
 	{
 		seek_drag_ = false;
+		scrub_pending_ = false;
 		player_.Seek(seek_drag_pos_, true);
 	}
 	vol_drag_ = false;
@@ -2890,7 +3036,7 @@ void MainFrame::TickOptionsButton()
 	}
 }
 
-void MainFrame::DoPadAction(PadAction a)
+void MainFrame::DoPadAction(PadAction a, PadButton from, bool repeat)
 {
 	switch (a)
 	{
@@ -2901,22 +3047,22 @@ void MainFrame::DoPadAction(PadAction a)
 			Command(ID_PLAY_STOP);
 			break;
 		case PadAction::JumpBackMedium:
-			Jump(-s_.jump_medium);
+			JumpBy(-s_.jump_medium, from, repeat);
 			break;
 		case PadAction::JumpForwardMedium:
-			Jump(s_.jump_medium);
+			JumpBy(s_.jump_medium, from, repeat);
 			break;
 		case PadAction::JumpBackLarge:
-			Jump(-s_.jump_large);
+			JumpBy(-s_.jump_large, from, repeat);
 			break;
 		case PadAction::JumpForwardLarge:
-			Jump(s_.jump_large);
+			JumpBy(s_.jump_large, from, repeat);
 			break;
 		case PadAction::JumpBackSmall:
-			Jump(-s_.jump_small);
+			JumpBy(-s_.jump_small, from, repeat);
 			break;
 		case PadAction::JumpForwardSmall:
-			Jump(s_.jump_small);
+			JumpBy(s_.jump_small, from, repeat);
 			break;
 		case PadAction::Previous:
 			Command(ID_NAVIGATE_SKIPBACK);
@@ -3075,7 +3221,31 @@ void MainFrame::OnKey(Key k, bool repeat)
 		return;
 	if (a != PadAction::None && !repeat)
 		OrbisLog("[ui] %s: %s", PadButtonName(b), PadActionKey(a));
-	DoPadAction(a);
+	DoPadAction(a, b, repeat);
+}
+
+// whether a button is held now (a held jump ends when it is let go)
+bool MainFrame::PadHeld(PadButton b) const
+{
+	switch (b)
+	{
+		case PadButton::StickUp:
+			return input_.WheelDir() > 0;
+		case PadButton::StickDown:
+			return input_.WheelDir() < 0;
+		case PadButton::Options:
+			return input_.Held(Key::Menu);
+		default:
+			break;
+	}
+	static const Key kKeys[] = {Key::Enter, Key::Escape, Key::Triangle, Key::Square, Key::Left, Key::Right, Key::Up,
+		Key::Down, Key::L1, Key::R1, Key::L2, Key::R2, Key::L3, Key::R3};
+	for (const Key k : kKeys)
+		if (ButtonOf(k) == b)
+			return input_.Held(k);
+	if (b == PadButton::StickLeft || b == PadButton::StickRight)
+		return input_.Held(b == PadButton::StickLeft ? Key::StickLeft : Key::StickRight);
+	return false;
 }
 
 void MainFrame::OnEvent(const InputEvent& ev)
@@ -3110,7 +3280,7 @@ void MainFrame::OnEvent(const InputEvent& ev)
 				break;
 			if (!ev.repeat && a != PadAction::None)
 				OrbisLog("[ui] %s: %s", PadButtonName(b), PadActionKey(a));
-			DoPadAction(a);
+			DoPadAction(a, b, ev.repeat);
 			break;
 		}
 		case InputEvent::KeyDown:
@@ -3304,6 +3474,11 @@ int MainFrame::Run(const std::string& first)
 				}
 			}
 		std::vector<InputEvent> events;
+		// 1.5.3 (#3): Square given another action (Options > Player > Keys) does it with the pointer showing too, in the
+		// window; in a menu or a dialog it stays the right-click (then the touchpad's two-finger click and the menu bar
+		// are the window's right-click)
+		input_.SetSquareClick(s_.pad[int(PadButton::Square)] == DefaultPadAction(PadButton::Square) ||
+							  WindowManager::Get().HasModal());
 		input_.Poll(events);
 		for (const InputEvent& ev : events)
 		{

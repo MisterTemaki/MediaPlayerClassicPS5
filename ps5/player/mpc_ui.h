@@ -72,6 +72,8 @@ struct InputEvent
 // The pad as a mouse and a keyboard: the left stick moves the pointer, Cross clicks while the pointer is
 // shown (it hides after a few seconds still), Square right-clicks; the buttons are keys otherwise. 1.5: the
 // touchpad moves the pointer too (relative, as a laptop's), its click is a left click (two fingers: a right click).
+// 1.5.3 (#3): SetSquareClick(false) makes Square its key always, the pointer showing or not (the window sets it when
+// Options > Player > Keys gives Square another action and no menu or dialog is open).
 class InputMapper
 {
 public:
@@ -82,10 +84,12 @@ public:
 	void ShowCursorAt(int x, int y);
 	void HideCursor();
 	double IdleSeconds() const; // since the last input
-	bool Held(Key k) const;
+	bool Held(Key k) const; // 1.5.3: Cross (Enter), Square and the right stick's left / right (StickLeft / Right) too
 	double HeldFor(Key k) const; // how long a button has been seen held (a slow frame counts kMaxHeldStep at most)
 	void SetSpeed(int s) { speed_ = s; }
 	void SetTouchpad(bool on) { touchpad_ = on; }
+	void SetSquareClick(bool on) { square_clicks_ = on; }
+	int WheelDir() const { return wheel_dir_; } // 1.5.3: the right stick held up (1) / down (-1) / neither (0)
 
 private:
 	double cx_ = 960, cy_ = 540;
@@ -97,6 +101,7 @@ private:
 	double held_[32] = {};
 	double repeat_at_[32] = {};
 	bool cross_click_ = false, square_click_ = false;
+	bool square_clicks_ = true; // Square right-clicks while the pointer shows (1.5.3: false, always its key)
 	int speed_ = 3;
 	double wheel_acc_ = 0;
 	int wheel_dir_ = 0; // the right stick: -1 / 0 / 1 as it is pushed now
@@ -407,6 +412,8 @@ public:
 	virtual ~Popup() = default;
 	virtual void Paint(CDC& dc) = 0;
 	virtual bool OnEvent(const InputEvent& ev) = 0; // false: closed, give the event on
+	// 1.5.3: whether it is drawn over (x, y) (one not saying: anywhere)
+	virtual bool Covers(int x, int y) const { return true; }
 	bool closed = false;
 };
 
@@ -421,6 +428,8 @@ public:
 	void Paint(CDC& dc);
 	void Tick();
 	Dialog* Top() const { return dialogs_.empty() ? nullptr : dialogs_.back().get(); }
+	// 1.5.3: a dialog, a menu or a drop-down drawn over (x, y)
+	bool Covers(int x, int y) const;
 	CRect screen = CRect(0, 0, 1920, 1080);
 
 private:

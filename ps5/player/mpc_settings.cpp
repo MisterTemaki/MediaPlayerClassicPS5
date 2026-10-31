@@ -501,6 +501,8 @@ void Settings::Load()
 			fullscreen = b;
 		else if (k == "HideFullscreenControls")
 			hide_controls_fullscreen = b;
+		else if (k == "HideFullscreenControlsPolicy") // 1.5.3: missing in older files: when the pointer moves
+			fs_controls_show = n == kShowWhenHovered ? kShowWhenHovered : kShowWhenMoved;
 		else if (k == "VideoFrame")
 			video_frame = VideoFrame(Clamp(n, 0, 7));
 		else if (k == "AspectRatio")
@@ -689,8 +691,9 @@ void Settings::Save() const
 		show_osd, keep_history);
 	fprintf(f, "ShowSeekBar=%d\nShowControls=%d\nShowStatus=%d\nShowInfo=%d\nShowStatistics=%d\nShowPlaylist=%d\n",
 		show_seekbar, show_controls, show_status, show_info, show_stats, show_playlist);
-	fprintf(f, "ShowCaptionMenu=%d\nFullScreen=%d\nHideFullscreenControls=%d\nVideoFrame=%d\nAspectRatio=%d\n",
-		show_caption_menu, fullscreen, hide_controls_fullscreen, int(video_frame), aspect_ratio);
+	fprintf(f, "ShowCaptionMenu=%d\nFullScreen=%d\nHideFullscreenControls=%d\nHideFullscreenControlsPolicy=%d\nVideoFrame=%d\n"
+			   "AspectRatio=%d\n",
+		show_caption_menu, fullscreen, hide_controls_fullscreen, fs_controls_show, int(video_frame), aspect_ratio);
 	fprintf(f, "Volume=%d\nMute=%d\nLoop=%d\nAfterPlayback=%d\nJumpDistS=%d\nJumpDistM=%d\nJumpDistL=%d\n", volume, mute,
 		repeat, int(after_playback), jump_small, jump_medium, jump_large);
 	fprintf(f, "AutoloadSubtitles=%d\nAudioBoost=%d\nAudioDelay=%d\nAudioOutput=%d\n", auto_load_subtitles, audio_boost,

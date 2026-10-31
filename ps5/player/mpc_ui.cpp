@@ -98,6 +98,19 @@ double InputMapper::HeldFor(Key k) const
 
 bool InputMapper::Held(Key k) const
 {
+	switch (k)
+	{
+		case Key::Enter:
+			return (prev_ & SCE_PAD_BUTTON_CROSS) != 0;
+		case Key::Square:
+			return (prev_ & SCE_PAD_BUTTON_SQUARE) != 0;
+		case Key::StickLeft:
+			return stick_h_ < 0;
+		case Key::StickRight:
+			return stick_h_ > 0;
+		default:
+			break;
+	}
 	for (const auto& b : kButtons)
 		if (b.key == k)
 			return (prev_ & b.bit) != 0;
@@ -271,7 +284,8 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 	const uint32_t released = prev_ & ~cur;
 	if (pressed)
 		input_t_ = now;
-	// Cross and Square: clicks while the pointer shows, keys otherwise
+	// Cross and Square: clicks while the pointer shows, keys otherwise (1.5.3: Square its key always when the window
+	// says so -- Square given another action in Options > Player > Keys)
 	if (pressed & SCE_PAD_BUTTON_CROSS)
 	{
 		if (CursorVisible())
@@ -315,7 +329,7 @@ void InputMapper::Poll(std::vector<InputEvent>& out)
 	}
 	if (pressed & SCE_PAD_BUTTON_SQUARE)
 	{
-		if (CursorVisible())
+		if (CursorVisible() && square_clicks_)
 		{
 			square_click_ = true;
 			cursor_t_ = now;
@@ -1748,6 +1762,17 @@ void WindowManager::Tick()
 			i++;
 }
 
+bool WindowManager::Covers(int x, int y) const
+{
+	for (const auto& d : dialogs_)
+		if (d->rect.PtInRect(x, y))
+			return true;
+	for (const auto& p : popups_)
+		if (p->Covers(x, y))
+			return true;
+	return false;
+}
+
 void WindowManager::Paint(CDC& dc)
 {
 	for (auto& d : dialogs_)
@@ -1769,6 +1794,7 @@ public:
 	std::function<void(int)> done;
 
 	int RowH() const { return UiFont().Height() + ScaleY(4); }
+	bool Covers(int x, int y) const override { return r.PtInRect(x, y); }
 	void Paint(CDC& dc) override
 	{
 		dc.FillSolidRect(r, RGB(255, 255, 255));
