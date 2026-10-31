@@ -1726,6 +1726,8 @@ void MainFrame::JumpBy(double d, PadButton from, bool repeat)
 			jump_steps_ = 0;
 			scrub_seeks_ = 0;
 			jump_pictures_ = player_.Stats().seek_pictures;
+			// (the press's exact seek, if its picture hasn't come yet, is replaced by this first keyframe seek: the
+			// keyframe's picture comes sooner, and the exact one is asked again when the button is let go)
 			OrbisLog("[ui] %s held: jumping by keyframes from %.2f", PadButtonName(from), jump_to_);
 		}
 		jump_to_ = clamp(jump_to_ + d);

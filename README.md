@@ -15,11 +15,12 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5.2):** builds with the ps5-payload-dev SDK into a signed native app and passes 521 host tests
+> **Status (1.5.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 551 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). 1.5.1 was reported to open on a PS5, and 1.5.2 was
-> run on a PS5 before release by the author (it opens and plays); much of the rest **hasn't been confirmed on a console
+> run on a PS5 before release by the author (it opens and plays); 1.5.3's changes (Square, the fullscreen controls,
+> held jumps) have only been tested on the host build, and much of the rest **hasn't been confirmed on a console
 > yet** -- please report what works and what
 > doesn't (with **View > Options > Miscellaneous > Debug logs** on -- `debug_logs=1` in `/data/mpcps5/mpc-hc.ini` -- the
 > log goes to `/data/mpcps5/logs/boot.log`).
@@ -29,6 +30,30 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.5.3:** what **Sulfurico-One64** asked for on [#3](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/3),
+playing films from an external hard disk:
+- **Square given another action** in Options > Player > Keys (Next audio track, say) **does it with the pointer showing
+  too**. Up to 1.5.2 Square was the right-click whenever the pointer showed (3 s after it last moved), whatever Keys
+  gave it. With Square at its default nothing changes. The window's right-click is still there: the touchpad pressed
+  with two fingers, and the context menu's commands are in the menu bar (Options). In menus, dialogs and the on-screen
+  keyboard Square keeps its fixed meaning; R3 held with Square still shows the statistics.
+- **Options > Fullscreen > Hide controls in fullscreen** has MPC-HC's choice under it: **Show when the pointer moves**
+  (as before, the default) or **Show when the pointer is over them** (MPC-HC's "Show when hovering control"): the seek
+  bar, the toolbar and the status bar show only while the pointer is at the bottom of the screen where they appear,
+  and hide a second after it leaves. Moving the pointer inside a dialog over the picture (Options, styling the
+  subtitles those bars would cover) no longer brings them up, unless it goes to that band beside the dialog. Kept in
+  `mpc-hc.ini` (`HideFullscreenControlsPolicy`, MPC-HC's key: 1 over them, 2 when it moves); older files keep today's
+  behaviour.
+- **Holding a jump button, the picture follows**: each repeat (every 0.07 s) asked an exact seek, which decodes from
+  the keyframe before the target up to it, and every new one dropped the one still decoding -- with a 4K film on a
+  hard disk almost no picture showed until the button was let go. Now, while a jump is held (the D-pad, the right
+  stick, L2 / R2 with Left / Right, any button given a jump), the picture goes by keyframes, one seek at a time (the
+  next once the last one's picture is shown, the latest target waiting meanwhile), so it changes several times a
+  second (on the host build: 4-6 pictures a second on a 1080p film with a keyframe every 10 s; how often on a PS5
+  with a 4K film from a hard disk, only a console can tell); the time in the OSD and on the seek bar counts the jumps as before, and when it is let go one exact seek
+  puts playback exactly where they added up to. A single press is exact, as before. Dragging the seek bar had the same
+  problem (a keyframe seek at every step of the pointer, each dropping the last): it goes one seek at a time too.
 
 **1.5.2:** fixes from a full code review, nothing new to learn:
 - **C++ exceptions inside the app**: up to 1.5.1 the app's C++ runtime was half its own and half the console's (the
@@ -226,8 +251,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.5.2.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.2.elf`).
+1. Send `MediaPlayerClassicPS5-v1.5.3.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.3.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon -- or, 1.5, updates the folder ShadowMount+
    already runs it from, see [Updates](#updates)) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
@@ -241,7 +266,7 @@ FBNeo, Mesen2, NES FCEUmm) is touched.
 
 1.5 doesn't open on the console (#3: "Error in game PPSA99015: signal: 12 (SIGSYS)"); 1.5.1 fixes that. To get a
 working app:
-- **Send the newest payload** (`MediaPlayerClassicPS5-v1.5.2.elf`) and put it in your autoload instead of 1.5's. It is
+- **Send the newest payload** (`MediaPlayerClassicPS5-v1.5.3.elf`) and put it in your autoload instead of 1.5's. It is
   newer than the installed 1.5, so it writes itself over it -- into the folder ShadowMount+ runs the app from (found
   as described in [Updates](#updates)); then close the app if it is open and open it again. A 1.4 app updates to the newest
   from **Help > Check for updates** as well (1.4's updater writes `/data/homebrew/PPSA99015`: if ShadowMount+ runs
@@ -276,6 +301,11 @@ MPC-HC 1.7.13 maximized on Windows 10, at 150 % scale (Options > Miscellaneous c
 - **Dialogs** -- Open, Go To, Properties (Details, MediaInfo), Options (Player, Keys, Playback, Output, Fullscreen,
   Subtitles, Default Style, Audio Switcher, Miscellaneous), About, Add Favorite, Organize Favorites, and the
   Windows "Open" dialog behind every Browse... button.
+- **Full screen** (Triangle, the title bar's restore button) -- the picture alone. With Options > Fullscreen > **Hide
+  controls in fullscreen** (on by default) the seek bar, toolbar and status bar show over it **when the pointer moves**
+  (the default), or (1.5.3) **when the pointer is over them** -- at the bottom, where they appear: they hide a second
+  after it leaves, and a pointer moving in a dialog over the picture leaves them hidden. Dragging the seek bar or the
+  volume, or nothing open, shows them either way.
 
 | | |
 |---|---|
@@ -288,7 +318,8 @@ MPC-HC 1.7.13 maximized on Windows 10, at 150 % scale (Options > Miscellaneous c
 
 The DualSense is MPC-HC's mouse and keyboard. Move the **left stick** -- or a finger on the **touchpad** (1.5) --
 and the pointer appears: then **Cross** (or pressing the touchpad) clicks and **Square** (or pressing the touchpad
-with two fingers) right-clicks (the context menu), as with a mouse; it hides after 3 seconds still (then pressing
+with two fingers) right-clicks (the context menu), as with a mouse -- unless Options > Player > Keys gives Square
+another action, which it then does with the pointer too (1.5.3); it hides after 3 seconds still (then pressing
 the touchpad only shows it again, so a click never lands where it was hidden). Holding Cross
 (or the touchpad pressed) on a window's title bar drags the window (1.5). Without the pointer the buttons are keys:
 
@@ -297,7 +328,7 @@ the touchpad only shows it again, so a click never lands where it was hidden). H
 | Cross | Play / Pause (click, with the pointer) | Activate / OK (on an edit box: the keyboard) |
 | Circle | Leave full screen | Cancel / close |
 | Triangle | Full screen on/off | (file browser: up one folder) |
-| Square | The context menu (right-click, with the pointer) | -- |
+| Square | The context menu (right-click, with the pointer; given another action: that, always) | -- |
 | Options | The menu bar (File...), as Alt (given another action: held half a second) | OK |
 | D-pad Left / Right | Jump back / forward 5 s | Move between controls, change a value |
 | D-pad Up / Down | Volume up / down | Move between controls, lists |
@@ -324,12 +355,18 @@ touchpad as the pointer is turned off and on on the same page. **Default** puts 
 button doing each command, and each action shows MPC-HC's OSD message. For example L2 / R2 as subtitle delay - / +
 instead of the 20 s jumps, or L2 / R2 as slower / faster. **Options** given another action does it when let go,
 and still opens the menu bar when **held half a second**, so the menus (and Options > Player > Keys' Default) are
-always reachable; the pointer can click the menu bar too, and Square's context menu (MPC-HC's) has File, View, Navigate and Options... What stays
-fixed: the pointer's Cross / Square / touchpad clicks, and the buttons in menus, dialogs and the keyboard. The combinations work while their buttons keep their
+always reachable; the pointer can click the menu bar too, and Square's context menu (MPC-HC's) has File, View, Navigate and Options...
+**Square** given another action does it with the pointer showing too (1.5.3; up to 1.5.2 it was the right-click whenever
+the pointer showed): the window's right-click is then the touchpad pressed with two fingers, and the context menu's
+commands are in the menu bar. What stays fixed: the pointer's Cross and touchpad clicks (Square's too, while it keeps
+its default action), and the buttons in menus, dialogs and the keyboard. The combinations work while their buttons keep their
 default actions: L2 or R2 held with Left / Right jumps 20 s / 1 s, R3 held with Square shows the statistics; an L2,
 R2 or R3 given another action does that action instead. Held down, Cross, the D-pad, L1/R1, L2/R2 and the right
 stick (its four directions) repeat their action when it is a jump, the volume, a chapter, a delay or a frame step (L2/R2 with their default 20 s jumps
-don't repeat, as before; as subtitle delay - / + they do); Circle, Triangle, Square, L3 and R3 never repeat.
+don't repeat, as before; as subtitle delay - / + they do); Circle, Triangle, Square, L3 and R3 never repeat. A jump
+held down (1.5.3) goes by keyframes, one picture at a time, so the picture follows while the time counts the jumps; let
+go, playback goes on exactly where they added up to. Dragging the seek bar goes one keyframe at a time too, exact
+where it is let go.
 
 The menus work as Windows' keyboard menus: Up/Down choose, Right opens a submenu (or the next menu bar menu),
 Left goes back, Cross runs the command. The playlist, when it has the focus (a click on it): Up/Down, Cross
@@ -624,7 +661,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 ```
 /data/mpcps5/mpc-hc.ini      the settings (MPC-HC's names: RememberFilePos, Volume, Loop, AfterPlayback, AudioBoost,
                              AudioNormalize, AudioMaxNormFactor, AudioNormalizeRecover...), the keys ([Keys]),
-                             TouchpadPointer, where Options was moved (OptionsX / OptionsY),
+                             TouchpadPointer, where Options was moved (OptionsX / OptionsY), when the hidden
+                             fullscreen controls show (HideFullscreenControlsPolicy: 2 the pointer moves, 1 over them),
                              Recent Files, file positions, Favorites, network locations (without passwords)
 /data/mpcps5/credentials.ini the passwords of those network addresses (smb://user@server<TAB>password), with the
                              generation of mpc-hc.ini it goes with (credentials.ini.new while a save is half done)
@@ -657,7 +695,7 @@ make ps5           # build/ps5/MediaPlayerClassicPS5.elf (1.5.1: fails if the eb
                    # symbol a title can't -- libkernel_sys, libkernel_web: tools/check_imports.py, #3; 1.5.2: or take
                    # any of the C++ runtime from the console)
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.5.2.elf, the release zip, mpc-ps5-v1.5.2-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.5.3.elf, the release zip, mpc-ps5-v1.5.3-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 

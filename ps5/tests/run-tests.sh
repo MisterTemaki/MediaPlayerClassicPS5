@@ -1131,7 +1131,8 @@ P="$P;150:key menu;165:key r2;200:cmd options;215:key r1;220:key r1;225:key r1;2
 rc=$(run "$T" "0:0" "$P" "92,170" "$T/root/media/movie.mp4")
 expect "[ $rc = 0 ] && grep -q '\[ui\] R2: SubDelayUp' $T/root/logs/boot.log && grep -q '\[osd\] Subtitle delay: 200 ms' $T/root/logs/boot.log" "Keys: R2 set to Subtitle delay +; R2 adds the interval (200 ms), the OSD says so"
 expect "$REGION $T/dump/flip00170.ppm 150 65 800 140 224 224 224 20 150 >/dev/null" "... the OSD on the picture"
-expect "$REGION $T/dump/flip00092.ppm 790 572 1400 596 204 232 255 4 8000 >/dev/null" "the Keys page drawn, R2's row selected (scrolled to)"
+# (1.5.3: the list 16 dialog units shorter, for the text under it: the row 33 pixels higher)
+expect "$REGION $T/dump/flip00092.ppm 790 542 1400 566 204 232 255 4 8000 >/dev/null" "the Keys page drawn, R2's row selected (scrolled to)"
 expect "grep -q '\[ui\] R2: JumpForwardLarge' $T/root/logs/boot.log && grep -q '^KeyR2=JumpForwardLarge$' $T/root/mpc-hc.ini && grep -q '^SubDelay=200$' $T/root/mpc-hc.ini" "Default: R2 jumps 20 s again (saved); the delay kept"
 nosan "$T"
 # g: the keys from mpc-hc.ini: Triangle = next audio track (MPC-HC's OSD "Audio: ..."), Square = next subtitle (off, on);
