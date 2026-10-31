@@ -529,15 +529,19 @@ struct Player::Impl
 	std::atomic<bool> show_after_seek{false};
 	// 1.5.3 (second and third reviews): what the demuxer has read since the last seek, for SeekShown to tell a seek whose
 	// picture can never come (it counts as done) from one still being worked on (never dropped):
-	// - failing: since when its reads have failed (read errors, the disc taken out) with none succeeding since, for
-	//   that serial; a read in progress (in_read) never counts, however long it blocks;
-	// - the newest video and sound packets read for the serial (seconds): the sound run 10 s past both the target and
-	//   the last video packet means the video track has ended there (an exact seek past its end, a long sound after it)
+	// - failing: since when av_read_frame has failed without the end flag (a demuxer error; the disc taken out) with
+	//   none succeeding since, for that serial; a read in progress (in_read) never counts, however long it blocks. (A
+	//   real I/O error on a share or a disc usually sets avio's end flag and takes the end path instead: the decoders
+	//   drain to vdone_serial.)
+	// - the sound and video packets read for the serial (seconds): the sound run 10 s past both its own first packet
+	//   and the last video packet means the video track has ended there (an exact seek past its end, a long sound
+	//   after it); from the first sound packet, not the target, so streams whose times are offset don't count at once
+	// all under prog_mu (in_read too: set before a read, cleared with its outcome)
 	std::mutex prog_mu;
 	int prog_serial = -1;
 	double fail_since = 0; // 0: the last read succeeded
-	double vpkt_max = -1e18, apkt_max = -1e18;
-	std::atomic<bool> in_read{false};
+	double vpkt_max = -1e18, apkt_first = 1e18, apkt_max = -1e18;
+	bool in_read = false;
 #ifndef __PROSPERO__
 	int fault_step = 2; // MPCPS5_HOST_SEEK_READ_FAULT (the demuxer's own)
 #endif
@@ -548,10 +552,17 @@ struct Player::Impl
 		prog_serial = serial.load();
 		fail_since = 0;
 		vpkt_max = apkt_max = -1e18;
+		apkt_first = 1e18;
+	}
+	void ProgressReading(bool r) // a read starts / ends without a packet or a failure (the end)
+	{
+		std::lock_guard<std::mutex> l(prog_mu);
+		in_read = r;
 	}
 	void ProgressFail()
 	{
 		std::lock_guard<std::mutex> l(prog_mu);
+		in_read = false;
 		if (fail_since == 0)
 			fail_since = NowS();
 	}
@@ -559,6 +570,7 @@ struct Player::Impl
 	{
 		const int64_t t = p->pts != AV_NOPTS_VALUE ? p->pts : p->dts;
 		std::lock_guard<std::mutex> l(prog_mu);
+		in_read = false;
 		fail_since = 0;
 		if (t == AV_NOPTS_VALUE || idx < 0 || idx >= int(ic->nb_streams))
 			return;
@@ -567,7 +579,10 @@ struct Player::Impl
 		if (idx == vstream)
 			vpkt_max = std::max(vpkt_max, sec);
 		else if (idx == astream)
+		{
+			apkt_first = std::min(apkt_first, sec);
 			apkt_max = std::max(apkt_max, sec);
+		}
 	}
 
 	// clock
@@ -1107,7 +1122,7 @@ struct Player::Impl
 					ended = true;
 				continue;
 			}
-			in_read = true;
+			ProgressReading(true);
 #ifndef __PROSPERO__
 			// host tests: MPCPS5_HOST_SEEK_READ_FAULT=ms -- after each seek, the first read fails at once and the next
 			// one takes that long (a share retrying after an error)
@@ -1132,7 +1147,6 @@ struct Player::Impl
 #else
 			const int r = av_read_frame(ic, pkt);
 #endif
-			in_read = false;
 			if (r < 0 && disc_gen && disc::Generation(url) != disc_gen)
 			{
 				// the disc was taken out: not the end of the film (the UI stops it and says so)
@@ -1147,6 +1161,7 @@ struct Player::Impl
 			{
 				if (r == AVERROR_EOF || (ic->pb && avio_feof(ic->pb)))
 				{
+					ProgressReading(false);
 					if (!eof)
 					{
 						if (vstream >= 0)
@@ -1160,7 +1175,7 @@ struct Player::Impl
 					break;
 				else
 				{
-					ProgressFail(); // a read error (it is tried again)
+					ProgressFail(); // a demuxer error without the end flag (it is tried again)
 					av_usleep(10000);
 				}
 				continue;
@@ -2815,8 +2830,8 @@ bool Player::SeekShown() const
 		return true;
 	// (second / third reviews) or none can come, with no video left to decode (none queued, none being decoded, no
 	// picture waiting): its reads have failed for a second with no read in progress (a read that blocks, however long,
-	// never counts), or the sound read has run 10 s past both the target and the last video packet (the video track
-	// ended there), paused or playing
+	// never counts), or the sound read has run 10 s past both its first packet and the last video packet (the video
+	// track ended there), paused or playing
 	if (!s.frames.empty() || s.vq.Count() != 0 || s.vbusy)
 		return false;
 	std::lock_guard<std::mutex> pl(s.prog_mu);
@@ -2824,7 +2839,7 @@ bool Player::SeekShown() const
 		return false;
 	if (s.fail_since > 0 && !s.in_read && NowS() - s.fail_since >= 1.0)
 		return true;
-	return s.apkt_max >= std::max(s.vpkt_max, s.serial_start.load()) + 10;
+	return s.apkt_max >= std::max(s.vpkt_max, s.apkt_first) + 10;
 }
 
 bool Player::SeekTaken() const

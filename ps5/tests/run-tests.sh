@@ -2142,10 +2142,11 @@ nosan "$T"
 # --- the second review ---
 # s: a seek whose picture can never come -- the press's exact seek past the end of a video track (5 s) with 400 s of
 # sound after it (no video packet will come, and paused the queues fill, 64 MiB, before the end). Held, the next seeks
-# go once the sound read has run 10 s past the target and the last video packet, paused (d8f2f0b waited for that
+# go once the sound read has run 10 s past its first packet and the last video packet, paused (d8f2f0b waited for that
 # picture all hold long) and playing (6ec13df's "a second without reading" never came while playing: the sound drains)
 SHORT=$WORK/t32s-short.mkv
-trap 'rm -f "$SHORT"' EXIT INT TERM # (77 MB: not left behind by a run cut short)
+trap 'rm -f "$SHORT"' EXIT # (77 MB: not left behind by a run cut short; interrupted, the run stops)
+trap 'rm -f "$SHORT"; exit 130' INT TERM
 ffmpeg -v error -y -f lavfi -i testsrc=s=320x180:r=25:d=5 -f lavfi -i sine=frequency=300:sample_rate=48000:duration=400 \
 	-ac 2 -c:v libx264 -preset ultrafast -g 25 -pix_fmt yuv420p -c:a pcm_s16le "$SHORT"
 T=$(newroot t32s)
