@@ -268,8 +268,8 @@ private:
 	double options_down_ = 0; // Options pressed, given another action than the menu bar: when (held: the menu bar)
 	bool opened_ok_ = false;
 	// 1.5.3 (#3): a jump held (its repeats) and the seek bar dragged go to keyframes, one seek at a time: the next one
-	// only once the last one's picture is shown (Player::SeekShown; never dropping one being done), the latest target waiting
-	// meanwhile. Up to 1.5.2 each repeat (every 0.07 s) asked an exact seek that dropped the one still decoding, so a
+	// only once the last one's picture is shown (Player::SeekShown; one being done is never dropped), the latest
+	// target waiting meanwhile. Up to 1.5.2 each repeat (every 0.07 s) asked an exact seek that dropped the one still decoding, so a
 	// 4K film from a hard disk showed no picture until the button was let go. Let go, one exact seek to where the jumps
 	// added up to.
 	bool jump_hold_ = false; // a jump button held past its first repeat
@@ -3517,8 +3517,8 @@ int MainFrame::Run(const std::string& first)
 		// 1.5.3 (#3): Square given another action (Options > Player > Keys) does it with the pointer showing too, in the
 		// window; in a menu or a dialog it stays the right-click (then the touchpad's two-finger click and the menu bar
 		// are the window's right-click)
-		// (review: and while the touchpad isn't the pointer, Square stays the right-click with the pointer showing, as up to
-		// 1.5.2 -- it is the only one left then, the playlist's own menu included)
+		// (review: and while the touchpad isn't the pointer, Square stays the right-click with the pointer showing, as up
+		// to 1.5.2 -- it is the only one left then, the playlist's own menu included)
 		input_.SetSquareClick(s_.pad[int(PadButton::Square)] == DefaultPadAction(PadButton::Square) ||
 							  WindowManager::Get().HasModal() || !s_.touchpad_pointer);
 		input_.Poll(events);
