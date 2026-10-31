@@ -35,9 +35,11 @@ works: the app updates itself from its GitHub releases, as Porpoise does (see [U
 playing films from an external hard disk:
 - **Square given another action** in Options > Player > Keys (Next audio track, say) **does it with the pointer showing
   too**. Up to 1.5.2 Square was the right-click whenever the pointer showed (3 s after it last moved), whatever Keys
-  gave it. With Square at its default nothing changes. The window's right-click is still there: the touchpad pressed
-  with two fingers, and the context menu's commands are in the menu bar (Options). In menus, dialogs and the on-screen
-  keyboard Square keeps its fixed meaning; R3 held with Square still shows the statistics.
+  gave it. With Square at its default nothing changes. The window's right-click is then the touchpad pressed with two
+  fingers (and the context menu's commands are in the menu bar, Options); with "The touchpad as the pointer" off,
+  Square stays the right-click while the pointer shows, as before, so there always is one (the playlist's own menu
+  needs it). In menus, dialogs and the on-screen keyboard Square keeps its fixed meaning; R3 held with Square still
+  shows the statistics.
 - **Options > Fullscreen > Hide controls in fullscreen** has MPC-HC's choice under it: **Show when the pointer moves**
   (as before, the default) or **Show when the pointer is over them** (MPC-HC's "Show when hovering control"): the seek
   bar, the toolbar and the status bar show only while the pointer is at the bottom of the screen where they appear,
@@ -51,9 +53,12 @@ playing films from an external hard disk:
   stick, L2 / R2 with Left / Right, any button given a jump), the picture goes by keyframes, one seek at a time (the
   next once the last one's picture is shown, the latest target waiting meanwhile), so it changes several times a
   second (on the host build: 4-6 pictures a second on a 1080p film with a keyframe every 10 s; how often on a PS5
-  with a 4K film from a hard disk, only a console can tell); the time in the OSD and on the seek bar counts the jumps as before, and when it is let go one exact seek
-  puts playback exactly where they added up to. A single press is exact, as before. Dragging the seek bar had the same
-  problem (a keyframe seek at every step of the pointer, each dropping the last): it goes one seek at a time too.
+  with a 4K film from a hard disk, only a console can tell). A seek being done is never dropped: on a very slow source
+  (a share over Wi-Fi, a disc) the picture changes less often, but it changes. The time in the OSD and on the seek bar
+  counts the jumps as before, and when it is let go one exact seek puts playback exactly where they added up to; a
+  jump held across the opening of the next file starts from where that file is. A single press is exact, as before.
+  Dragging the seek bar had the same problem (a keyframe seek at every step of the pointer, each dropping the last):
+  it goes one seek at a time too, and a window opening over it while it is held ends the drag there, exactly.
 
 **1.5.2:** fixes from a full code review, nothing new to learn:
 - **C++ exceptions inside the app**: up to 1.5.1 the app's C++ runtime was half its own and half the console's (the
@@ -319,7 +324,7 @@ MPC-HC 1.7.13 maximized on Windows 10, at 150 % scale (Options > Miscellaneous c
 The DualSense is MPC-HC's mouse and keyboard. Move the **left stick** -- or a finger on the **touchpad** (1.5) --
 and the pointer appears: then **Cross** (or pressing the touchpad) clicks and **Square** (or pressing the touchpad
 with two fingers) right-clicks (the context menu), as with a mouse -- unless Options > Player > Keys gives Square
-another action, which it then does with the pointer too (1.5.3); it hides after 3 seconds still (then pressing
+another action, which it then does with the pointer too while the touchpad is the pointer (1.5.3); it hides after 3 seconds still (then pressing
 the touchpad only shows it again, so a click never lands where it was hidden). Holding Cross
 (or the touchpad pressed) on a window's title bar drags the window (1.5). Without the pointer the buttons are keys:
 
@@ -328,7 +333,7 @@ the touchpad only shows it again, so a click never lands where it was hidden). H
 | Cross | Play / Pause (click, with the pointer) | Activate / OK (on an edit box: the keyboard) |
 | Circle | Leave full screen | Cancel / close |
 | Triangle | Full screen on/off | (file browser: up one folder) |
-| Square | The context menu (right-click, with the pointer; given another action: that, always) | -- |
+| Square | The context menu (right-click, with the pointer; given another action: that, also with the pointer while the touchpad is the pointer) | -- |
 | Options | The menu bar (File...), as Alt (given another action: held half a second) | OK |
 | D-pad Left / Right | Jump back / forward 5 s | Move between controls, change a value |
 | D-pad Up / Down | Volume up / down | Move between controls, lists |
@@ -358,8 +363,10 @@ and still opens the menu bar when **held half a second**, so the menus (and Opti
 always reachable; the pointer can click the menu bar too, and Square's context menu (MPC-HC's) has File, View, Navigate and Options...
 **Square** given another action does it with the pointer showing too (1.5.3; up to 1.5.2 it was the right-click whenever
 the pointer showed): the window's right-click is then the touchpad pressed with two fingers, and the context menu's
-commands are in the menu bar. What stays fixed: the pointer's Cross and touchpad clicks (Square's too, while it keeps
-its default action), and the buttons in menus, dialogs and the keyboard. The combinations work while their buttons keep their
+commands are in the menu bar. With the touchpad as the pointer turned off, Square stays the right-click while the
+pointer shows (the only one left: the playlist's Remove / Clear menu needs it). What stays fixed: the pointer's Cross
+and touchpad clicks (Square's too, while it keeps its default action), and the buttons in menus, dialogs and the
+keyboard. The combinations work while their buttons keep their
 default actions: L2 or R2 held with Left / Right jumps 20 s / 1 s, R3 held with Square shows the statistics; an L2,
 R2 or R3 given another action does that action instead. Held down, Cross, the D-pad, L1/R1, L2/R2 and the right
 stick (its four directions) repeat their action when it is a jump, the volume, a chapter, a delay or a frame step (L2/R2 with their default 20 s jumps

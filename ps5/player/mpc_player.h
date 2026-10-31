@@ -131,6 +131,8 @@ public:
 	// video ended there, nothing open). A held jump or a dragged seek bar asks the next seek only then, so pictures
 	// keep coming (each new seek dropped the one still decoding: a 4K film from a hard disk showed nothing while held)
 	bool SeekShown() const;
+	// review: the demuxer has taken the last seek asked (false: still waiting there -- a new one only replaces its target)
+	bool SeekTaken() const;
 	void FrameStep();
 	double Position() const;
 	double Duration() const;

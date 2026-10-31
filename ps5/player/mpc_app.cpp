@@ -268,7 +268,7 @@ private:
 	double options_down_ = 0; // Options pressed, given another action than the menu bar: when (held: the menu bar)
 	bool opened_ok_ = false;
 	// 1.5.3 (#3): a jump held (its repeats) and the seek bar dragged go to keyframes, one seek at a time: the next one
-	// only once the last one's picture is shown (Player::SeekShown; two seconds at most), the latest target waiting
+	// only once the last one's picture is shown (Player::SeekShown; never dropping one being done), the latest target waiting
 	// meanwhile. Up to 1.5.2 each repeat (every 0.07 s) asked an exact seek that dropped the one still decoding, so a
 	// 4K film from a hard disk showed no picture until the button was let go. Let go, one exact seek to where the jumps
 	// added up to.
@@ -279,11 +279,20 @@ private:
 	int jump_steps_ = 0, scrub_seeks_ = 0;
 	uint64_t jump_pictures_ = 0; // Player's seek_pictures when the hold started
 	bool scrub_pending_ = false; // a keyframe seek waiting for the last one's picture
-	double scrub_to_ = 0, scrub_sent_t_ = -100;
+	double scrub_to_ = 0;
 	void Scrub(double t);
 	void TickScrub();
 	void JumpBy(double d, PadButton from, bool repeat);
 	void EndJumpHold();
+	// a new file, closed, stopped (review): no held jump goes on from the last file's target, nothing waits to seek
+	void ForgetJumps()
+	{
+		jump_hold_ = false;
+		jump_from_ = PadButton::Count;
+		scrub_pending_ = false;
+	}
+	// the seek bar's drag ended by a menu or a dialog over it (its release goes there): exact where it was
+	void EndSeekDrag(const char* why);
 	bool PadHeld(PadButton b) const;
 	// 1.5.3 (#3): Options > Fullscreen "Show when the pointer is over them": the pointer over the bars' band (and not
 	// over a dialog or a menu), and when it last was
@@ -1714,7 +1723,10 @@ void MainFrame::Seek(double t)
 void MainFrame::JumpBy(double d, PadButton from, bool repeat)
 {
 	if (!Loaded() || !player_.Seekable())
+	{
+		jump_from_ = PadButton::Count; // (a press while a file opens: its repeats start from a press there)
 		return;
+	}
 	const double dur = player_.Duration();
 	auto clamp = [dur](double t) { return std::max(0.0, dur > 0 ? std::min(t, dur) : t); };
 	if (repeat && from != PadButton::Count && from == jump_from_)
@@ -1726,8 +1738,8 @@ void MainFrame::JumpBy(double d, PadButton from, bool repeat)
 			jump_steps_ = 0;
 			scrub_seeks_ = 0;
 			jump_pictures_ = player_.Stats().seek_pictures;
-			// (the press's exact seek, if its picture hasn't come yet, is replaced by this first keyframe seek: the
-			// keyframe's picture comes sooner, and the exact one is asked again when the button is let go)
+			// (the press's exact seek, if its picture hasn't come yet, is waited for, as any seek being done: the first
+			// keyframe seek goes once it is shown -- review: up to 2c61437 it could be dropped)
 			OrbisLog("[ui] %s held: jumping by keyframes from %.2f", PadButtonName(from), jump_to_);
 		}
 		jump_to_ = clamp(jump_to_ + d);
@@ -1755,9 +1767,11 @@ void MainFrame::EndJumpHold()
 	Seek(jump_to_);
 }
 
-// one keyframe seek at a time: the next only once the last one's picture is shown, or after two seconds (a seek that
-// never shows one -- a read that fails or stalls -- doesn't stop the jumps; a keyframe takes far less on the console)
-constexpr double kScrubWait = 2.0;
+// one keyframe seek at a time: the next only once the last one's picture is shown (a seek past the end, with nothing to
+// show, counts as shown: Player::SeekShown). Review: a seek the demuxer is working on is never dropped -- up to 2c61437
+// a 2 s cap sent the next one anyway, so a source slower than that (SMB over Wi-Fi, a disc) showed nothing while held;
+// one asked but not taken yet only has its target updated (nothing is lost). Meanwhile the target keeps counting and the
+// release seeks there exactly.
 
 void MainFrame::Scrub(double t)
 {
@@ -1775,12 +1789,10 @@ void MainFrame::TickScrub()
 		scrub_pending_ = false;
 		return;
 	}
-	const double now = NowSeconds();
-	if (!player_.SeekShown() && now - scrub_sent_t_ < kScrubWait)
+	if (!player_.SeekShown() && player_.SeekTaken())
 		return;
 	player_.Seek(scrub_to_, false);
 	scrub_pending_ = false;
-	scrub_sent_t_ = now;
 	scrub_seeks_++;
 }
 
@@ -2209,6 +2221,7 @@ void MainFrame::Command(int id)
 		case ID_PLAY_STOP:
 			if (loaded)
 			{
+				ForgetJumps();
 				player_.Stop();
 				Osd(T("Stop"));
 			}
@@ -2388,6 +2401,7 @@ void MainFrame::Open(const std::string& url, bool use_saved_pos)
 	// (not for a disc's titles: dvd://cd0 names the drive, not the disc in it)
 	const double pos = use_saved_pos && s_.remember_file_pos && !disc::IsTitleUrl(url) ? s_.FilePos(url) : 0;
 	player_.Open(url, pos);
+	ForgetJumps();
 	opened_ok_ = false;
 	sub_cache_.key.clear();
 	rate_ = 1.0;
@@ -2419,6 +2433,7 @@ void MainFrame::CloseMedia()
 {
 	SavePosition();
 	player_.Close();
+	ForgetJumps();
 	current_url_.clear();
 	video_layer_rect_ = CRect();
 	sub_cache_.key.clear();
@@ -2627,8 +2642,15 @@ void MainFrame::Tick()
 	const bool modal = WindowManager::Get().HasModal();
 	if (jump_hold_ && (!Loaded() || modal || !PadHeld(jump_from_)))
 		EndJumpHold();
-	if (modal)
+	// (review: also while nothing is loaded -- a file opening --, so a jump held across the next file's opening starts
+	// from where that file is, not from the last file's target)
+	if (modal || !Loaded())
 		jump_from_ = PadButton::Count;
+	// the seek bar held when a menu or a dialog opened: its moves and its release go there now
+	if (seek_drag_ && (modal || !Loaded()))
+		EndSeekDrag(modal ? "a window opened over it" : "the file closed");
+	if (vol_drag_ && modal)
+		vol_drag_ = false;
 	TickScrub();
 	TickBarsHover();
 	const PlayState st = player_.State();
@@ -2743,13 +2765,13 @@ void MainFrame::OnMouseMove(int x, int y)
 			hover_t_ = NowSeconds();
 		hover_what_ = what;
 	}
-	if (seek_drag_)
+	if (seek_drag_ && x >= 0) // (x < 0: a move over a menu or a dialog, nothing in the window -- review)
 	{
 		seek_drag_pos_ = SeekPosAt(r_seek_, x);
 		// MoveThumb: the picture follows while dragging (keyframes, fast; 1.5.3: one at a time, as a held jump)
 		Scrub(seek_drag_pos_);
 	}
-	if (vol_drag_)
+	if (vol_drag_ && x >= 0)
 	{
 		const CRect ch = VolumeChannel(tb_volume_);
 		SetVolume(int(std::lround((x - ch.left) * 100.0 / std::max(1, ch.Width()))));
@@ -2850,14 +2872,7 @@ void MainFrame::OnLButtonUp(int x, int y)
 		}
 	}
 	if (seek_drag_)
-	{
-		seek_drag_ = false;
-		scrub_pending_ = false;
-		OrbisLog("[ui] seek bar let go after %.2f s: %d keyframe seek(s), %llu picture(s) shown; exact seek to %.2f",
-			NowSeconds() - jump_hold_t_, scrub_seeks_, (unsigned long long)(player_.Stats().seek_pictures - jump_pictures_),
-			seek_drag_pos_);
-		player_.Seek(seek_drag_pos_, true);
-	}
+		EndSeekDrag("let go");
 	vol_drag_ = false;
 	if (tb_pressed_ >= 0)
 	{
@@ -2871,6 +2886,17 @@ void MainFrame::OnLButtonUp(int x, int y)
 				Command(kCmds[b]);
 		}
 	}
+}
+
+void MainFrame::EndSeekDrag(const char* why)
+{
+	seek_drag_ = false;
+	scrub_pending_ = false;
+	OrbisLog("[ui] seek bar %s after %.2f s: %d keyframe seek(s), %llu picture(s) shown; exact seek to %.2f", why,
+		NowSeconds() - jump_hold_t_, scrub_seeks_, (unsigned long long)(player_.Stats().seek_pictures - jump_pictures_),
+		seek_drag_pos_);
+	if (Loaded())
+		player_.Seek(seek_drag_pos_, true);
 }
 
 void MainFrame::OnRButtonDown(int x, int y)
@@ -3491,8 +3517,10 @@ int MainFrame::Run(const std::string& first)
 		// 1.5.3 (#3): Square given another action (Options > Player > Keys) does it with the pointer showing too, in the
 		// window; in a menu or a dialog it stays the right-click (then the touchpad's two-finger click and the menu bar
 		// are the window's right-click)
+		// (review: and while the touchpad isn't the pointer, Square stays the right-click with the pointer showing, as up to
+		// 1.5.2 -- it is the only one left then, the playlist's own menu included)
 		input_.SetSquareClick(s_.pad[int(PadButton::Square)] == DefaultPadAction(PadButton::Square) ||
-							  WindowManager::Get().HasModal());
+							  WindowManager::Get().HasModal() || !s_.touchpad_pointer);
 		input_.Poll(events);
 		for (const InputEvent& ev : events)
 		{

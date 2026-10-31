@@ -842,28 +842,33 @@ const Entry kTable[] = {
 	{"Action:", "Acción:", "Ação:", "Action :", "Aktion:"},
 	{"Default", "Predeterminado", "Padrão", "Par défaut", "Standard"},
 	{"Options given another action still opens the menu bar when held half a second. Square given another "
-	 "action does it with the pointer showing too (right-click: two fingers on the touchpad, or the menu bar). "
+	 "action does it with the pointer showing too while the touchpad is the pointer (its two-finger press is then "
+	 "the right-click). "
 	 "The pointer's Cross and touchpad clicks and the buttons in menus and dialogs stay as they are. While L2, R2 "
 	 "and R3 keep their default actions, L2 or R2 held with D-pad Left / Right jumps 20 s / 1 s, and R3 held "
 	 "with Square shows the statistics.",
 		"Options con otra acción sigue abriendo la barra de menús si se mantiene medio segundo. Cuadrado con otra "
-		"acción la hace también con el puntero visible (clic derecho: dos dedos en el panel táctil, o la barra de "
-		"menús). Los clics del puntero con Cruz y el panel táctil y los botones en menús y diálogos no cambian. "
+		"acción la hace también con el puntero visible mientras el panel táctil sea el puntero (pulsarlo con dos dedos "
+		"es entonces el clic derecho). Los clics del puntero con Cruz y el panel táctil y los botones en menús y "
+		"diálogos no cambian. "
 		"Mientras L2, R2 y R3 tengan su acción predeterminada, L2 o R2 pulsado con Cruceta izquierda / derecha salta "
 		"20 s / 1 s, y R3 pulsado con Cuadrado muestra las estadísticas.",
 		"Options com outra ação ainda abre a barra de menus se for segurado por meio segundo. Quadrado com outra "
-		"ação a faz também com o ponteiro visível (clique direito: dois dedos no touchpad, ou a barra de menus). Os "
+		"ação a faz também com o ponteiro visível enquanto o touchpad for o ponteiro (pressioná-lo com dois dedos é "
+		"então o clique direito). Os "
 		"cliques do ponteiro com X e o touchpad e os botões em menus e diálogos não mudam. Enquanto L2, R2 e R3 "
 		"tiverem a ação padrão, L2 ou R2 segurado com Direcional esquerda / direita pula 20 s / 1 s, e R3 segurado "
 		"com Quadrado mostra as estatísticas.",
 		"Options avec une autre action ouvre toujours la barre de menus s'il est maintenu une demi-seconde. Carré "
-		"avec une autre action la fait aussi quand le pointeur est affiché (clic droit : deux doigts sur le pavé "
-		"tactile, ou la barre de menus). Les clics du pointeur avec Croix et le pavé tactile et les boutons des menus "
+		"avec une autre action la fait aussi quand le pointeur est affiché, tant que le pavé tactile sert de pointeur "
+		"(un appui à deux doigts est alors le clic droit). Les clics du pointeur avec Croix et le pavé tactile et les "
+		"boutons des menus "
 		"et dialogues ne changent pas. Tant que L2, R2 et R3 gardent leur action par défaut, L2 ou R2 maintenu avec "
 		"Flèche gauche / droite saute de 20 s / 1 s, et R3 maintenu avec Carré affiche les statistiques.",
 		"Options mit einer anderen Aktion öffnet die Menüleiste weiterhin, wenn es eine halbe Sekunde gehalten wird. "
-		"Quadrat mit einer anderen Aktion führt sie auch bei sichtbarem Zeiger aus (Rechtsklick: zwei Finger auf dem "
-		"Touchpad oder die Menüleiste). Die Klicks des Zeigers mit Kreuz und Touchpad und die Tasten in Menüs und "
+		"Quadrat mit einer anderen Aktion führt sie auch bei sichtbarem Zeiger aus, solange das Touchpad der "
+		"Zeiger ist (Drücken mit zwei Fingern ist dann der Rechtsklick). Die Klicks des Zeigers mit Kreuz und Touchpad und "
+		"die Tasten in Menüs und "
 		"Dialogen bleiben gleich. Solange L2, R2 und R3 ihre Standardaktion haben, springt L2 oder R2 gehalten mit "
 		"Steuerkreuz links / rechts 20 s / 1 s, und R3 gehalten mit Quadrat zeigt die Statistiken."},
 	{"The touchpad as the pointer (press: click; two fingers: right-click)",

@@ -1013,6 +1013,12 @@ struct Player::Impl
 			}
 			if (do_seek)
 			{
+#ifndef __PROSPERO__
+				// host tests: MPCPS5_HOST_SLOW_SEEK=ms makes every seek take that long here (a slow source)
+				static const int slow_ms = getenv("MPCPS5_HOST_SLOW_SEEK") ? atoi(getenv("MPCPS5_HOST_SLOW_SEEK")) : 0;
+				for (int w = 0; w < slow_ms / 10 && !quit; w++)
+					av_usleep(10000);
+#endif
 				target = std::max(0.0, duration > 0 ? std::min(target, duration) : target);
 				const int64_t ts = int64_t(target * AV_TIME_BASE) + (ic->start_time != AV_NOPTS_VALUE ? ic->start_time : 0);
 				const int r = avformat_seek_file(ic, -1, INT64_MIN, ts, ts, 0);
@@ -2723,6 +2729,12 @@ bool Player::SeekShown() const
 	const int ser = s.serial;
 	// a picture from where it went shown, or the video ended there (a seek past the last picture)
 	return (s.cur_serial == ser && !s.show_after_seek) || s.vdone_serial == ser;
+}
+
+bool Player::SeekTaken() const
+{
+	std::lock_guard<std::mutex> l(m->seek_mu);
+	return !m->seek_req;
 }
 
 bool Player::HasPicture() const

@@ -1539,9 +1539,11 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	};
 	CheckBox* touch = d->Check(p, "The touchpad as the pointer (press: click; two fingers: right-click)", 5, 156, 286, 8,
 		s.touchpad_pointer);
-	// 1.5.3 (#3): Square given another action does it with the pointer showing too; the right-click is still there
+	// 1.5.3 (#3): Square given another action does it with the pointer showing too, while the touchpad (two fingers)
+	// keeps a right-click
 	d->Text(p, "Options given another action still opens the menu bar when held half a second. Square given another "
-			   "action does it with the pointer showing too (right-click: two fingers on the touchpad, or the menu bar). "
+			   "action does it with the pointer showing too while the touchpad is the pointer (its two-finger press is then "
+			   "the right-click). "
 			   "The pointer's Cross and touchpad clicks and the buttons in menus and dialogs stay as they are. While L2, R2 "
 			   "and R3 keep their default actions, L2 or R2 held with D-pad Left / Right jumps 20 s / 1 s, and R3 held "
 			   "with Square shows the statistics.",

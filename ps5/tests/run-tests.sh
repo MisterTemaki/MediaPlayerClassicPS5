@@ -2081,6 +2081,63 @@ P1=$(field $T 1 2)
 expect "[ $rc = 0 ] && [ -n \"$SB\" ] && often $(echo $SB | cut -d' ' -f1) $(echo $SB | cut -d' ' -f3) && [ $DIST -ge 2 ] && near $P1 $(echo $SB | cut -d' ' -f4) 0.07" "the seek bar dragged (paused): $(echo $SB | cut -d' ' -f3) pictures in $(echo $SB | cut -d' ' -f1) s, the screen changed $DIST times in 10 frames; let go, exact at $(echo $SB | cut -d' ' -f4) s ($P1 s)"
 rm -f $T/dump/*.ppm
 nosan "$T"
+# --- the review of 2c61437 ---
+# l: a jump pressed as the next file opens and held: it starts from where that file is (0 s), not from the last file's
+# target (up to 2c61437 the press, ignored while the file opened, left the last file's button and target: "jumping by
+# keyframes from 55.00" in the new file, let go at its end)
+T=$(newroot t32l)
+film "$T"
+cp "$MEDIA/gop10.mp4" "$T/root/media/film2.mp4"
+rc=$(run "$T" "0:0;80:$RIGHT;83:0;120:$RIGHT;170:0" "30:cmd pause;40:seek 50;60:state;100:state;120:open $T/root/media/film2.mp4;230:quit" "" "$T/root/media/film.mp4")
+FROM=$(grep 'held: jumping by keyframes from' $T/root/logs/boot.log | tail -1 | sed -E 's/.* from ([0-9.]+)$/\1/')
+expect "[ $rc = 0 ] && near \$(field $T 2 2) 54.97 0.1 && [ -n \"$FROM\" ] && python3 -c 'import sys; sys.exit(0 if $FROM <= 5.5 else 1)'" "a jump held from the next file's opening: from that file's start (${FROM:-none} s), not the last file's 55 s"
+nosan "$T"
+# m: the seek bar held when a window opens over it (About): the drag ends there with an exact seek where it was; the
+# moves over the window don't move it (up to 2c61437 they asked 0 s -- x = -1 -- and the release, going to the window,
+# left the drag on); n: the same with the volume (it went to 0)
+T=$(newroot t32m)
+film "$T"
+rc=$(run "$T" "0:0;100:$CROSS;102:$CROSS,200,128;130:$CROSS;150:$CROSS,200,128;180:$CROSS;200:0" "30:cmd pause;40:seek 5;90:mouse 200,995;135:cmd about;220:key escape;250:state;260:quit" "" "$T/root/media/film.mp4")
+X=$(grep 'seek bar a window opened over it after' $T/root/logs/boot.log | sed -E 's/.* exact seek to ([0-9.]+)$/\1/'); P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && [ -n \"$X\" ] && python3 -c 'import sys; sys.exit(0 if $X > 10 else 1)' && near $P1 $X 0.07" "the seek bar held as About opens: the drag ends at ${X:-?} s, exact ($P1 s), not at 0 s"
+nosan "$T"
+T=$(newroot t32n)
+film "$T"
+rc=$(run "$T" "0:0;100:$CROSS;102:$CROSS,60,128;110:$CROSS;150:$CROSS,60,128;180:$CROSS;200:0" "30:cmd pause;90:mouse 1890,1025;105:cmd about;220:key escape;260:quit" "" "$T/root/media/film.mp4")
+VOL=$(sed -n 's/^Volume=//p' $T/root/mpc-hc.ini)
+expect "[ $rc = 0 ] && [ -n \"$VOL\" ] && [ \"$VOL\" -gt 20 ]" "the volume held as About opens: the moves over it leave the volume alone (Volume=$VOL)"
+nosan "$T"
+# o: Square given another action with the touchpad as the pointer turned off: with the pointer showing it stays the
+# right-click (the only one left; up to 2c61437 there was none), without it does its action
+T=$(newroot t32o)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+ini "$T" "KeySquare=NextAudio
+TouchpadPointer=0"
+rc=$(run "$T" "0:0;40:0,200,128;46:0;50:$SQUARE;53:0;300:$SQUARE;303:0" "70:key escape;320:quit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && [ \$(count $T '\[ui\] right-click at') = 1 ] && [ \$(count $T '\[ui\] Square: NextAudio') = 1 ]" "Square as Next audio track, the touchpad not the pointer: the right-click with the pointer showing, its action without"
+nosan "$T"
+# p: a slow source (every seek takes 2.5 s here: MPCPS5_HOST_SLOW_SEEK): held, the seeks being done are waited for, so
+# pictures still come; up to 2c61437 a 2 s cap sent the next one anyway, dropping each, and none came
+T=$(newroot t32p)
+film "$T"
+rc=$(MPCPS5_HOST_SLOW_SEEK=2500 run "$T" "0:0;100:0,128,128,255,128;520:0,128,128,128,128" "30:cmd pause;40:seek 5;1000:state;1010:quit" "" "$T/root/media/film.mp4")
+X=$(hf $T 1 5); P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && [ -n \"$X\" ] && [ \"$(hf $T 1 4)\" -ge 2 ] && near $P1 $X 0.07" "every seek 2.5 s: held $(hf $T 1 1) s, $(hf $T 1 4) pictures shown, $(hf $T 1 3) keyframe seeks; let go, exact at ${X:-?} s ($P1 s)"
+nosan "$T"
+# r: a held jump ends when a window opens over it (About): its exact seek then, not when the button is let go after
+T=$(newroot t32r)
+film "$T"
+rc=$(run "$T" "0:0;100:$RIGHT;250:0" "30:cmd pause;40:seek 5;150:cmd about;200:key escape;300:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && [ -n \"\$(line $T 'let go after')\" ] && [ \$(line $T 'let go after') -gt \$(line $T 'cmd about') ] && [ \$(line $T 'let go after') -lt \$(line $T 'key escape') ]" "a held jump ends (exact seek) as About opens over it"
+nosan "$T"
+# q: Square given another action, in a menu with the pointer showing: still the right-click there -- on View >
+# Statistics it runs it, as Windows' menus do (were Square its key in a menu too, it would close the menu instead)
+T=$(newroot t32q)
+film "$T"
+ini "$T" "KeySquare=NextAudio"
+rc=$(run "$T" "0:0;70:$SQUARE;73:0" "30:cmd pause;40:key menu;45:key right;55:mouse 150,217;100:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && grep -q '^ShowStatistics=1$' $T/root/mpc-hc.ini && ! log $T 'Square: NextAudio'" "Square (another action) in a menu, the pointer showing: the menu's right-click (View > Statistics run)"
+nosan "$T"
 fi
 
 echo
