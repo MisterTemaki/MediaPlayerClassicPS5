@@ -126,13 +126,17 @@ struct PacketQueue
 		cv.notify_all();
 	}
 	// 1 got one, 0 timed out, -1 aborted
-	int Get(QPacket& out, int timeout_ms)
+	// busy (1.5.3): set before the packet leaves the queue, under its lock, so a packet is always either queued or
+	// marked as being decoded
+	int Get(QPacket& out, int timeout_ms, std::atomic<bool>* busy = nullptr)
 	{
 		std::unique_lock<std::mutex> l(mu);
 		if (!cv.wait_for(l, std::chrono::milliseconds(timeout_ms), [&] { return abort || !q.empty(); }))
 			return 0;
 		if (abort)
 			return -1;
+		if (busy)
+			*busy = true;
 		out = q.front();
 		q.pop_front();
 		if (out.pkt)
@@ -523,22 +527,47 @@ struct Player::Impl
 	std::atomic<double> skip_until{-1e18}; // frames before this (in the current serial) are not shown
 	std::atomic<double> serial_start{0}; // where the current serial starts: the last seek's target, 0 at the start
 	std::atomic<bool> show_after_seek{false};
-	// 1.5.3 (second review): since when the demuxer has read nothing (queues full, the end, read errors) and for which
-	// serial -- a seek whose picture can never come (an exact seek past a video track's end with a long sound after it:
-	// the queues fill before the end) counts as done once it has stayed so a second with no video left to decode
-	std::mutex idle_mu;
-	double demux_idle_since = 0; // 0: reading
-	int demux_idle_serial = -1;
-	void DemuxIdle(bool idle)
+	// 1.5.3 (second and third reviews): what the demuxer has read since the last seek, for SeekShown to tell a seek whose
+	// picture can never come (it counts as done) from one still being worked on (never dropped):
+	// - failing: since when its reads have failed (read errors, the disc taken out) with none succeeding since, for
+	//   that serial; a read in progress (in_read) never counts, however long it blocks;
+	// - the newest video and sound packets read for the serial (seconds): the sound run 10 s past both the target and
+	//   the last video packet means the video track has ended there (an exact seek past its end, a long sound after it)
+	std::mutex prog_mu;
+	int prog_serial = -1;
+	double fail_since = 0; // 0: the last read succeeded
+	double vpkt_max = -1e18, apkt_max = -1e18;
+	std::atomic<bool> in_read{false};
+#ifndef __PROSPERO__
+	int fault_step = 2; // MPCPS5_HOST_SEEK_READ_FAULT (the demuxer's own)
+#endif
+	std::atomic<bool> vbusy{false}; // the video thread is decoding a packet it took (PacketQueue::Get sets it)
+	void ProgressReset()
 	{
-		std::lock_guard<std::mutex> l(idle_mu);
-		if (!idle)
-			demux_idle_since = 0;
-		else if (demux_idle_since == 0 || demux_idle_serial != serial.load())
-		{
-			demux_idle_serial = serial.load();
-			demux_idle_since = NowS();
-		}
+		std::lock_guard<std::mutex> l(prog_mu);
+		prog_serial = serial.load();
+		fail_since = 0;
+		vpkt_max = apkt_max = -1e18;
+	}
+	void ProgressFail()
+	{
+		std::lock_guard<std::mutex> l(prog_mu);
+		if (fail_since == 0)
+			fail_since = NowS();
+	}
+	void ProgressRead(int idx, const AVPacket* p)
+	{
+		const int64_t t = p->pts != AV_NOPTS_VALUE ? p->pts : p->dts;
+		std::lock_guard<std::mutex> l(prog_mu);
+		fail_since = 0;
+		if (t == AV_NOPTS_VALUE || idx < 0 || idx >= int(ic->nb_streams))
+			return;
+		const double sec = t * av_q2d(ic->streams[idx]->time_base) -
+						   (ic->start_time != AV_NOPTS_VALUE ? ic->start_time / double(AV_TIME_BASE) : 0);
+		if (idx == vstream)
+			vpkt_max = std::max(vpkt_max, sec);
+		else if (idx == astream)
+			apkt_max = std::max(apkt_max, sec);
 	}
 
 	// clock
@@ -1048,7 +1077,10 @@ struct Player::Impl
 				skip_until = exact ? target - 0.001 : -1e18;
 				ps5audio::Clear();
 				clock.Set(target);
-				DemuxIdle(false);
+				ProgressReset();
+#ifndef __PROSPERO__
+				fault_step = 0;
+#endif
 				seek_done = taken_gen;
 				eof = false;
 				ended = false;
@@ -1066,7 +1098,8 @@ struct Player::Impl
 							  ((vstream < 0 || vq.Count() > 300) && (astream < 0 || aq.Count() > 500));
 			if (full || eof)
 			{
-				DemuxIdle(true);
+				// (third review: neither counts as failing -- the end drains the decoders to vdone_serial, and full
+				// queues with no video left show up as the sound run past the target)
 				av_usleep(10000);
 				if (eof && vdone_serial == serial && (astream < 0 || adone_serial == serial) && !ended)
 					ended = true;
@@ -1074,14 +1107,39 @@ struct Player::Impl
 					ended = true;
 				continue;
 			}
+			in_read = true;
+#ifndef __PROSPERO__
+			// host tests: MPCPS5_HOST_SEEK_READ_FAULT=ms -- after each seek, the first read fails at once and the next
+			// one takes that long (a share retrying after an error)
+			static const int fault_ms =
+				getenv("MPCPS5_HOST_SEEK_READ_FAULT") ? atoi(getenv("MPCPS5_HOST_SEEK_READ_FAULT")) : 0;
+			int r;
+			if (fault_ms > 0 && fault_step == 0)
+			{
+				fault_step = 1;
+				r = AVERROR(EIO);
+			}
+			else
+			{
+				if (fault_ms > 0 && fault_step == 1)
+				{
+					fault_step = 2;
+					for (int w = 0; w < fault_ms / 10 && !quit; w++)
+						av_usleep(10000);
+				}
+				r = av_read_frame(ic, pkt);
+			}
+#else
 			const int r = av_read_frame(ic, pkt);
+#endif
+			in_read = false;
 			if (r < 0 && disc_gen && disc::Generation(url) != disc_gen)
 			{
 				// the disc was taken out: not the end of the film (the UI stops it and says so)
 				if (!disc_gone)
 					OrbisLog("[player] the disc was taken out while playing %s", url.c_str());
 				disc_gone = true;
-				DemuxIdle(true);
+				ProgressFail();
 				av_usleep(20000);
 				continue;
 			}
@@ -1102,13 +1160,13 @@ struct Player::Impl
 					break;
 				else
 				{
-					DemuxIdle(true); // a read error (it is tried again)
+					ProgressFail(); // a read error (it is tried again)
 					av_usleep(10000);
 				}
 				continue;
 			}
-			DemuxIdle(false);
 			const int idx = pkt->stream_index;
+			ProgressRead(idx, pkt);
 			if (idx == vstream)
 				vq.Put(av_packet_clone(pkt), serial);
 			else if (idx == astream)
@@ -1493,7 +1551,8 @@ struct Player::Impl
 		while (!quit)
 		{
 			QPacket qp;
-			const int r = vq.Get(qp, 100);
+			vbusy = false; // (the last packet's pictures queued, or dropped)
+			const int r = vq.Get(qp, 100, &vbusy);
 			if (r < 0)
 				break;
 			if (r == 0)
@@ -2754,16 +2813,18 @@ bool Player::SeekShown() const
 	// a picture from where it went shown, or the video ended there (a seek past the last picture)
 	if ((s.cur_serial == ser && !s.show_after_seek) || s.vdone_serial == ser)
 		return true;
-	// (second review) or none can come: the demuxer has read nothing more for this seek for a second (its queues full,
-	// a read error) and no video is left to decode -- never while it is still reading, however slowly
-	double since;
-	int iser;
-	{
-		std::lock_guard<std::mutex> il(s.idle_mu);
-		since = s.demux_idle_since;
-		iser = s.demux_idle_serial;
-	}
-	return since > 0 && iser == ser && NowS() - since >= 1.0 && s.frames.empty() && s.vq.Count() == 0;
+	// (second / third reviews) or none can come, with no video left to decode (none queued, none being decoded, no
+	// picture waiting): its reads have failed for a second with no read in progress (a read that blocks, however long,
+	// never counts), or the sound read has run 10 s past both the target and the last video packet (the video track
+	// ended there), paused or playing
+	if (!s.frames.empty() || s.vq.Count() != 0 || s.vbusy)
+		return false;
+	std::lock_guard<std::mutex> pl(s.prog_mu);
+	if (s.prog_serial != ser)
+		return false;
+	if (s.fail_since > 0 && !s.in_read && NowS() - s.fail_since >= 1.0)
+		return true;
+	return s.apkt_max >= std::max(s.vpkt_max, s.serial_start.load()) + 10;
 }
 
 bool Player::SeekTaken() const
