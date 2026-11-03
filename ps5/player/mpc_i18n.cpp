@@ -9,6 +9,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <mutex>
 #include <set>
 #include <unordered_map>
@@ -432,11 +433,16 @@ const Entry kTable[] = {
 		"Media Player Classic PS5 konnte nicht aktualisiert werden:\n%s"},
 	{"\n\nNothing was changed.", "\n\nNo se cambió nada.", "\n\nNada foi alterado.", "\n\nRien n'a été modifié.",
 		"\n\nEs wurde nichts geändert."},
-	{"Media Player Classic PS5 %s is installed.\n\nRestart the app now to use it?",
-		"Media Player Classic PS5 %s está instalado.\n\n¿Reiniciar la app ahora para usarlo?",
-		"O Media Player Classic PS5 %s foi instalado.\n\nReiniciar o app agora para usá-lo?",
-		"Media Player Classic PS5 %s est installé.\n\nRedémarrer l'app maintenant pour l'utiliser ?",
-		"Media Player Classic PS5 %s ist installiert.\n\nApp jetzt neu starten, um ihn zu verwenden?"},
+	{"Media Player Classic PS5 %s is installed.\n\nRestart the app now to use it? (The home screen's App Information may "
+	 "keep showing an older version.)",
+		"Media Player Classic PS5 %s está instalado.\n\n¿Reiniciar la app ahora para usarlo? (La información de la "
+		"aplicación en la pantalla de inicio puede seguir mostrando una versión anterior.)",
+		"O Media Player Classic PS5 %s foi instalado.\n\nReiniciar o app agora para usá-lo? (As informações do "
+		"aplicativo na tela inicial podem continuar mostrando uma versão anterior.)",
+		"Media Player Classic PS5 %s est installé.\n\nRedémarrer l'app maintenant pour l'utiliser ? (Les informations "
+		"de l'application sur l'écran d'accueil peuvent continuer d'afficher une version antérieure.)",
+		"Media Player Classic PS5 %s ist installiert.\n\nApp jetzt neu starten, um ihn zu verwenden? (Die "
+		"Anwendungsinformationen auf dem Startbildschirm zeigen möglicherweise weiterhin eine ältere Version.)"},
 	{"Media Player Classic PS5 %s is available: Help, Check for updates.",
 		"Media Player Classic PS5 %s está disponible: Ayuda, Buscar actualizaciones.",
 		"O Media Player Classic PS5 %s está disponível: Ajuda, Verificar atualizações.",
@@ -1142,29 +1148,31 @@ const Entry kTable[] = {
 	{"Media Player Classic PS5 %s was installed in %s, but this is still %s: the console started the old files.\n\n"
 	 "Close the app completely (on the home screen: Options on its card, Close Application) and open it again. If it "
 	 "still says %s, ShadowMount+ still shows the old files: run ShadowMount+ again from your Payload Manager (it "
-	 "registers the app again), or restart the PS5.\n\nThe version in the home screen's app information only changes "
-	 "when ShadowMount+ registers the app again.",
+	 "mounts the app's folder again), or restart the PS5.\n\nThe home screen's App Information may keep showing an "
+	 "older version (README, Updates).",
 		"Media Player Classic PS5 %s se instaló en %s, pero esta sigue siendo la %s: la consola abrió los archivos "
 		"antiguos.\n\nCierra la app del todo (en la pantalla de inicio: Options en su tarjeta, Cerrar aplicación) y "
 		"vuelve a abrirla. Si sigue diciendo %s, ShadowMount+ todavía muestra los archivos antiguos: vuelve a ejecutar "
-		"ShadowMount+ desde tu Payload Manager (registra la app de nuevo) o reinicia la PS5.\n\nLa versión en la "
-		"información de la app de la pantalla de inicio solo cambia cuando ShadowMount+ vuelve a registrar la app.",
+		"ShadowMount+ desde tu Payload Manager (vuelve a montar la carpeta de la app) o reinicia la PS5.\n\nLa "
+		"información de la aplicación en la pantalla de inicio puede seguir mostrando una versión anterior (README, "
+		"Updates).",
 		"O Media Player Classic PS5 %s foi instalado em %s, mas este ainda é o %s: o console abriu os arquivos "
 		"antigos.\n\nFeche o app por completo (na tela inicial: Options no card dele, Fechar aplicativo) e abra-o de "
 		"novo. Se ainda disser %s, o ShadowMount+ ainda mostra os arquivos antigos: execute o ShadowMount+ de novo pelo "
-		"seu Payload Manager (ele registra o app outra vez) ou reinicie o PS5.\n\nA versão nas informações do app na "
-		"tela inicial só muda quando o ShadowMount+ registra o app de novo.",
+		"seu Payload Manager (ele monta a pasta do app outra vez) ou reinicie o PS5.\n\nAs informações do aplicativo "
+		"na tela inicial podem continuar mostrando uma versão anterior (README, Updates).",
 		"Media Player Classic PS5 %s a été installé dans %s, mais ceci est encore la %s : la console a lancé les "
 		"anciens fichiers.\n\nFermez complètement l'app (sur l'écran d'accueil : Options sur sa carte, Fermer "
 		"l'application) et rouvrez-la. Si elle indique encore %s, ShadowMount+ montre encore les anciens fichiers : "
-		"relancez ShadowMount+ depuis votre Payload Manager (il enregistre l'app à nouveau) ou redémarrez la PS5.\n\n"
-		"La version dans les informations de l'app de l'écran d'accueil ne change que lorsque ShadowMount+ "
-		"enregistre l'app à nouveau.",
+		"relancez ShadowMount+ depuis votre Payload Manager (il remonte le dossier de l'app) ou redémarrez la PS5.\n\n"
+		"Les informations de l'application sur l'écran d'accueil peuvent continuer d'afficher une version antérieure "
+		"(README, Updates).",
 		"Media Player Classic PS5 %s wurde in %s installiert, aber dies ist noch %s: Die Konsole hat die alten Dateien "
 		"gestartet.\n\nDie App ganz schließen (auf dem Startbildschirm: Options auf ihrer Karte, Anwendung schließen) "
 		"und wieder öffnen. Steht dort noch %s, zeigt ShadowMount+ noch die alten Dateien: ShadowMount+ erneut aus "
-		"deinem Payload Manager starten (es registriert die App neu) oder die PS5 neu starten.\n\nDie Version in den "
-		"App-Informationen des Startbildschirms ändert sich erst, wenn ShadowMount+ die App neu registriert."},
+		"deinem Payload Manager starten (es bindet den Ordner der App neu ein) oder die PS5 neu starten.\n\nDie "
+		"Anwendungsinformationen auf dem Startbildschirm zeigen möglicherweise weiterhin eine ältere Version (README, "
+		"Updates)."},
 	{"Media Player Classic PS5 %s is available (you have %s).\n\nThe app can't tell for sure which folder this copy "
 	 "runs from (%s), so it doesn't write an update anywhere. Update it the way you put it there, with the new "
 	 "version's folder (from the release's zip).",
@@ -1213,6 +1221,11 @@ const Entry kTable[] = {
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};
+// 1.5.4: the languages' codes, for the helper's notice when it can't open the app again (ProsperoHelper.cpp has the
+// same list in this order)
+const char* const kCodes[] = {"en", "es", "pt-BR", "fr", "de"};
+static_assert(std::size(kCodes) == size_t(Language::Count), "a code for every language");
+static_assert(std::size(kLanguageNames) == size_t(Language::Count), "a name for every language");
 
 const std::unordered_map<std::string, const Entry*>& Index()
 {
@@ -1229,6 +1242,11 @@ const std::unordered_map<std::string, const Entry*>& Index()
 const char* LanguageName(int lang)
 {
 	return lang >= 0 && lang < int(Language::Count) ? kLanguageNames[lang] : kLanguageNames[0];
+}
+
+const char* LanguageCode(int lang)
+{
+	return lang >= 0 && lang < int(Language::Count) ? kCodes[lang] : kCodes[0];
 }
 
 const char* T(const char* english)

@@ -24,6 +24,8 @@ enum class Language : int
 
 // The language's own name ("Español"...), for the Options' Language box.
 const char* LanguageName(int lang);
+// 1.5.4: the language's code ("en", "es", "pt-BR", "fr", "de"), English's for an unknown one.
+const char* LanguageCode(int lang);
 // The text in the current language (AppSettings().language).
 const char* T(const char* english);
 inline std::string T(const std::string& english)

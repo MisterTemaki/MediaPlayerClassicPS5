@@ -41,6 +41,21 @@ int sceKernelUsleep(unsigned int usec);
 int sceSystemServiceHideSplashScreen(void);
 // "exit" ends the app the way the system wants (PS5SX2's OrbisExitApp: exit()/_exit() end in SIGSYS)
 int sceSystemServiceLoadExec(const char* path, const char* argv[]);
+// 1.5.4: opens a title (the helper, to open the app again after an update: ProsperoHelper.cpp). The helper payload
+// doesn't link libSceSystemService (a library missing at load would stop the whole payload): it finds the call at run
+// time. The context's layout is natural alignment (not packed): 32 bytes.
+typedef struct SceSystemServiceLaunchCtx
+{
+	uint32_t structsize; // 32
+	uint32_t user_id;
+	uint32_t app_opt;
+	uint64_t crash_report;
+	uint32_t check_flag;
+} SceSystemServiceLaunchCtx;
+#ifdef __cplusplus
+static_assert(sizeof(SceSystemServiceLaunchCtx) == 32, "the launch context is 32 bytes");
+#endif
+int sceSystemServiceLaunchApp(const char* title_id, const char* argv[], SceSystemServiceLaunchCtx* ctx);
 
 // ---- libSceVideoOut ----------------------------------------------------------------------------------------
 typedef struct SceVideoOutBuffers

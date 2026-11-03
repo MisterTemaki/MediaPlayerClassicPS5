@@ -24,17 +24,24 @@ namespace ps5
 // threads); each caller catches it and gives up what needed the thread, with a log line, instead of ending in
 // std::terminate. The host tests: MPCPS5_HOST_REFUSE_THREADS=<name>[,<name>...] (or "all") stands for a system that
 // refuses those.
+#ifndef __PROSPERO__
+// the host tests' stand-in for a console that refuses the thread `name` (MPCPS5_HOST_REFUSE_THREADS)
+inline bool HostRefusesThread(const char* name)
+{
+	const char* e = getenv("MPCPS5_HOST_REFUSE_THREADS");
+	if (!e || !name)
+		return false;
+	const std::string list = std::string(",") + e + ",";
+	return list == ",all," || list.find(std::string(",") + name + ",") != std::string::npos;
+}
+#endif
+
 template <typename Fn>
 std::thread StartThread(const char* name, Fn&& fn)
 {
 #ifndef __PROSPERO__
-	if (const char* e = getenv("MPCPS5_HOST_REFUSE_THREADS"))
-	{
-		const std::string list = std::string(",") + e + ",";
-		if (list == ",all," || list.find(std::string(",") + name + ",") != std::string::npos)
-			throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again),
-				name);
-	}
+	if (HostRefusesThread(name))
+		throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again), name);
 #endif
 	return std::thread(std::forward<Fn>(fn));
 }
@@ -46,9 +53,17 @@ public:
 	BigThread(const BigThread&) = delete;
 	BigThread& operator=(const BigThread&) = delete;
 
-	// Starts fn on a thread with a `stack_bytes` stack. Falls back to the default stack if that is refused.
-	BigThread(std::function<void()> fn, size_t stack_bytes)
+	// Starts fn on a thread with a `stack_bytes` stack. Falls back to the default stack if that is refused. Not
+	// joinable() when no thread could be had. 1.5.4: `name` (optional) is the host tests' handle for a refused thread
+	// (MPCPS5_HOST_REFUSE_THREADS, as StartThread's).
+	BigThread(std::function<void()> fn, size_t stack_bytes, const char* name = nullptr)
 	{
+#ifndef __PROSPERO__
+		if (HostRefusesThread(name))
+			return;
+#else
+		(void)name;
+#endif
 		auto* holder = new std::function<void()>(std::move(fn));
 		pthread_attr_t attr;
 		pthread_attr_init(&attr);
@@ -87,6 +102,15 @@ public:
 	}
 
 	bool joinable() const { return m_joinable; }
+	// 1.5.4: lets the thread run on its own (its end frees it); not joinable afterwards
+	void detach()
+	{
+		if (m_joinable)
+		{
+			pthread_detach(m_thread);
+			m_joinable = false;
+		}
+	}
 	void join()
 	{
 		if (m_joinable)

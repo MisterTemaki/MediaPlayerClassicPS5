@@ -331,6 +331,56 @@ bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, 
 	return true;
 }
 
+bool RequestRelaunch(const std::string& title, const std::string& language, std::string& why)
+{
+	why.clear();
+	const int port = PortFromEnv("MPCPS5_HELPER_PORT", kHelperPort);
+	const int fd = ConnectLocal(port);
+	if (fd < 0)
+	{
+		why = "no helper";
+		OrbisLog("[update] restart: no helper on port %d (errno %d)", port, errno);
+		return false;
+	}
+	Request req;
+	memset(&req, 0, sizeof(req));
+	req.magic = kMagic;
+	req.cmd = kCmdRelaunch;
+	req.pid = int32_t(getpid());
+	req.ret = kRetUntouched;
+	snprintf(req.msg1, sizeof(req.msg1), "%s", title.c_str());
+	snprintf(req.msg2, sizeof(req.msg2), "%s", language.c_str());
+	size_t got = 0;
+	ssize_t n = 0;
+	int e = 0;
+	if (WriteAll(fd, &req, sizeof(req)))
+		while (got < sizeof(req))
+		{
+			n = recv(fd, reinterpret_cast<char*>(&req) + got, sizeof(req) - got, 0);
+			e = errno;
+			if (n <= 0)
+				break;
+			got += size_t(n);
+		}
+	close(fd);
+	const Reply r = ReplyOf(got, sizeof(req), n, e, req.magic == kMagic);
+	req.msg1[sizeof(req.msg1) - 1] = 0;
+	if (r == Reply::Answered && req.cmd == kCmdRelaunch && req.ret == 0)
+	{
+		OrbisLog("[update] restart: the helper opens the app again once it has ended");
+		return true;
+	}
+	if (r == Reply::Closed && got == 0)
+		why = "the helper is older than 1.5.4 (it closed the connection with nothing back)";
+	else if (r != Reply::Answered || req.cmd != kCmdRelaunch)
+		why = std::string("the helper didn't answer: ") + ReplyName(r);
+	else
+		why = req.msg1[0] ? req.msg1 : "refused";
+	OrbisLog("[update] restart: the helper won't open the app again: %s (%zu bytes back, ret %d)", why.c_str(), got,
+		req.ret);
+	return false;
+}
+
 bool RequestForSelf(std::string& how)
 {
 	const int own = PortFromEnv("MPCPS5_HELPER_PORT", kHelperPort);

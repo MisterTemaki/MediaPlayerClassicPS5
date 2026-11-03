@@ -6,8 +6,8 @@
 set -u
 cd "$(dirname "$0")/.."
 BIN=${MPC_HOST_BIN:-$PWD/build/host/mpc-ps5-host} # (another build: e.g. the last release's, for a fail-before)
-INSTALLER=$PWD/build/host/mpc-ps5-installer
-HELPER=$PWD/build/host/mpc-ps5-helper
+INSTALLER=${MPC_HOST_INSTALLER:-$PWD/build/host/mpc-ps5-installer}
+HELPER=${MPC_HOST_HELPER:-$PWD/build/host/mpc-ps5-helper} # (1.5.4: other builds of these too, for a fail-before)
 # ports nobody listens on, so the app's ordinary runs find no helper and no ELF loader
 export MPCPS5_HELPER_PORT=$((20000 + RANDOM % 10000)) MPCPS5_ELFLDR_PORT=$((30000 + RANDOM % 10000)) MPCPS5_JB_NO_OTHERS=1
 # debug logs are off by default (1.1.1); the tests read boot.log, so their default is on (group 18 checks the real one)
@@ -425,23 +425,8 @@ expect "[ ! -f $T/st.8ch ] && python3 -c \"import sys; r = list(map(int, '\$(rms
 nosan "$T"
 fi
 
-if want 16; then
-echo "== 16. Help > Check for updates: the app checks GitHub's newest release, downloads it, checks every file, installs it"
-T=$(newroot t16)
-stop16() { pkill -f 'build/host/mpc-ps5-(installer|helper)' 2>/dev/null; pkill -f 'http.server 1[89][0-9][0-9][0-9]' 2>/dev/null; sleep 0.3; }
-stop16
-SRV=$T/srv; mkdir -p "$SRV" "$T/appmeta/PPSA99015"; echo old >"$T/appmeta/PPSA99015/icon0.png"
-SPORT=$((18000 + RANDOM % 1900))
-(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
-# the app folder, as the payload installs it (then its helper is stopped)
-MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst.txt" 2>&1 &
-for i in $(seq 1 80); do grep -q 'listening on 127.0.0.1' $T/root/logs/installer.log 2>/dev/null && break; sleep 0.1; done
-stop16
-(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
-# the release key of the tests (the app gets its public half through MPCPS5_HOST_RELEASE_KEY), and another one
-openssl genpkey -algorithm ed25519 -out $T/release.pem 2>/dev/null
-openssl genpkey -algorithm ed25519 -out $T/other.pem 2>/dev/null
-PUBHEX=$(openssl pkey -in $T/release.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')
+# a release on the test server (groups 16 and 33): $T/homebrew/PPSA99015 as its folder, signed with $T/release.pem;
+# $SRV/latest.json says what GitHub would
 release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 	rm -rf "$T/rel" && mkdir -p "$T/rel" && cp -r "$T/homebrew/PPSA99015" "$T/rel/PPSA99015" && rm -f "$T/rel/PPSA99015/manifest.sha256" "$T/rel/PPSA99015/sce_sys/old.bin"
 	echo "eboot $1" >"$T/rel/PPSA99015/eboot.bin"; echo "new art" >"$T/rel/PPSA99015/sce_sys/icon0.png"; echo extra >"$T/rel/PPSA99015/sce_sys/extra.bin"
@@ -461,6 +446,24 @@ release() { # tag contentVersion [bad|nodigest|unsigned|badsig]
 	printf '{"tag_name":"%s","name":"Media Player Classic PS5 %s","assets":[{"name":"MediaPlayerClassicPS5-%s.elf","size":1,"browser_download_url":"http://127.0.0.1:%s/x.elf"},{"name":"MediaPlayerClassicPS5-%s-PPSA99015.zip","size":%s,%s"browser_download_url":"http://127.0.0.1:%s/MediaPlayerClassicPS5-%s-PPSA99015.zip"}%s]}' \
 		"$1" "$1" "$1" $SPORT "$1" $size "$digest" $SPORT "$1" "$sigasset" >"$SRV/latest.json"
 }
+
+if want 16; then
+echo "== 16. Help > Check for updates: the app checks GitHub's newest release, downloads it, checks every file, installs it"
+T=$(newroot t16)
+stop16() { pkill -f 'build/host/mpc-ps5-(installer|helper)' 2>/dev/null; pkill -f 'http.server 1[89][0-9][0-9][0-9]' 2>/dev/null; sleep 0.3; }
+stop16
+SRV=$T/srv; mkdir -p "$SRV" "$T/appmeta/PPSA99015"; echo old >"$T/appmeta/PPSA99015/icon0.png"
+SPORT=$((18000 + RANDOM % 1900))
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+# the app folder, as the payload installs it (then its helper is stopped)
+MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >"$T/inst.txt" 2>&1 &
+for i in $(seq 1 80); do grep -q 'listening on 127.0.0.1' $T/root/logs/installer.log 2>/dev/null && break; sleep 0.1; done
+stop16
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+# the release key of the tests (the app gets its public half through MPCPS5_HOST_RELEASE_KEY), and another one
+openssl genpkey -algorithm ed25519 -out $T/release.pem 2>/dev/null
+openssl genpkey -algorithm ed25519 -out $T/other.pem 2>/dev/null
+PUBHEX=$(openssl pkey -in $T/release.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')
 # 1.5.1: the app doesn't read the mount table (no statfs in a title: #3): it asks the helper, started here with the
 # (faked) mount table; stoph16 stops it
 h16() {
@@ -580,7 +583,8 @@ stop16
 (cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
 sleep 0.5
 expect "grep -q 'an update wasn.t finished; repairing the app' $T/inst-repair.txt && [ ! -e $H/update.journal ] && [ ! -e $H/eboot.bin.old.9-9 ] && sums | cmp -s - $T/before.sums" "the payload repairs it: its files, the journal and the leftovers gone"
-# c: the right file: the daily check (a day later) offers it, Yes installs it, Yes restarts into it
+# c: the right file: the daily check (a day later) offers it, Yes installs it; Yes to the restart, with no helper to open
+# the app again (1.5.4): the user is told to (up to 1.5.3: sceSystemServiceLoadExec(eboot.bin), which only ended the app)
 release v9.9 99.000.000
 echo 0 >"$T/root/update-check.txt"
 rm -f $T/root/logs/boot.log
@@ -589,7 +593,8 @@ expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/lo
 expect "grep -q '\[update\] 9.9 installed (in .*): offering the restart' $T/root/logs/boot.log && grep -q \"the release's Ed25519 signature checks out\" $T/root/logs/boot.log" "Yes: downloaded, signature and every file checked, installed"
 expect "grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $T/homebrew/PPSA99015/sce_sys/param.json" "the new eboot.bin and param.json in place"
 expect "[ -f $T/homebrew/PPSA99015/sce_sys/extra.bin ] && [ ! -e $T/homebrew/PPSA99015/sce_sys/old.bin ] && grep -q 'new art' $T/appmeta/PPSA99015/icon0.png && [ -z \"\$(find $T/homebrew -name '*.new' -o -name '*.old.*' -o -name 'update.journal*')\" ]" "a new file added, a gone one removed, the home screen's art refreshed (no .new, .old or journal left)"
-expect "grep -q 'sceSystemServiceLoadExec($T/homebrew/PPSA99015/eboot.bin)' $T/out.txt" "Yes again: the app restarts into the new eboot.bin"
+expect "grep -q 'restart: not by the helper (no helper)' $T/root/logs/boot.log && grep -q '\[ui\] message: Close Media Player Classic PS5 and open it again to use the new version.' $T/root/logs/boot.log && ! grep -q 'sceSystemServiceLoadExec(.*eboot.bin)' $T/out.txt" "Yes again, no helper running: the app says to close it and open it again (no LoadExec of eboot.bin)"
+expect "grep -q \"(The home screen's App Information may keep showing an older version.)\" $T/root/logs/boot.log" "the restart question says App Information may keep showing an older version"
 expect "grep -q 'is available: Help, Check for updates' $T/out.txt" "a notification says a new version is out"
 nosan "$T"
 # d: the 1.1 payload sent again (an autoload): the newer version is left alone
@@ -613,7 +618,8 @@ expect "[ $rc = 0 ] && grep -q 'this is $VER: the new version runs' $T/root/logs
 # under a short one
 M=$T; [ ${#T} -le 56 ] || M=$(mktemp -d /tmp/mpc16.XXXXXX)
 # f: ShadowMount+ runs the app from another folder (a USB drive's homebrew), nullfs-mounted on /system_ex/app: the
-# update goes there, through the mount; /data/homebrew isn't touched; the restart opens the eboot the console runs
+# update goes there, through the mount; /data/homebrew isn't touched; the restart: the helper (1.5.4) takes it, the app
+# ends
 SX=$M/sysex; U=$M/usb0/homebrew/PPSA99015
 rm -rf $SX $M/usb0 && mkdir -p $SX/app $M/usb0/homebrew && cp -r $T/homebrew/PPSA99015 $U
 echo "eboot usb 1.5" >$U/eboot.bin; rm -f $U/manifest.sha256 $U/update.journal
@@ -628,7 +634,7 @@ stoph16
 expect "grep -q \"\[update\] (from the helper) $SX/app/PPSA99015 is a nullfs mount of $U (on $M/usb0, exfatfs, from /dev/da0s1): files go through $SX/app/PPSA99015\" $T/root/logs/boot.log" "the app runs from a USB drive's folder (a nullfs mount): found, written through the mount"
 expect "grep -q 'eboot v9.9' $U/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $U/sce_sys/param.json && [ -z \"\$(find $U -name '*.new' -o -name '*.old.*' -o -name 'update.journal*')\" ]" "... the update is in that folder (eboot.bin, param.json)"
 expect "( cd $T/homebrew/PPSA99015 && find . -type f | sort | xargs sha256sum ) | cmp -s - $T/home.sums" "... /data/homebrew's copy untouched (no second copy written)"
-expect "grep -q 'sceSystemServiceLoadExec($SX/app/PPSA99015/eboot.bin)' $T/out.txt && grep -q '^9.9$' $T/root/update-pending.txt" "... the restart opens the eboot the console runs (the mount); the next start checks the version"
+expect "[ $rc = 0 ] && grep -q 'restart: the helper opens the app again once it has ended' $T/root/logs/boot.log && grep -q 'relaunch: pid [0-9]* asks to be opened again once it has ended (language en)' $T/hroot16/logs/helper.log && grep -q 'sceSystemServiceLoadExec(exit)' $T/out.txt && ! grep -q 'sceSystemServiceLoadExec(.*eboot.bin)' $T/out.txt && grep -q '^9.9$' $T/root/update-pending.txt" "... the restart: the helper will open the app again, the app ends the normal way; the next start checks the version"
 # g: from an image ShadowMount+ mounted (.ffpkg, read-only): Check for updates says so before downloading; nothing written
 I=$M/shadowmnt/img1/PPSA99015
 rm -rf $M/shadowmnt $SX/app/PPSA99015 && mkdir -p $M/shadowmnt/img1 && cp -r $U $I && ln -s $I $SX/app/PPSA99015
@@ -2207,6 +2213,251 @@ rc=$(MPCPS5_HOST_SEEK_READ_FAULT=2500 run "$T" "0:0;100:0,128,128,255,128;520:0,
 X=$(hf $T 1 5); P1=$(field $T 1 2)
 expect "[ $rc = 0 ] && [ -n \"$X\" ] && [ \"$(hf $T 1 4)\" -ge 2 ] && near $P1 $X 0.07" "a failed read then a 2.5 s one after each seek: held $(hf $T 1 1) s, $(hf $T 1 4) pictures shown, $(hf $T 1 3) keyframe seeks; let go, exact at ${X:-?} s ($P1 s)"
 nosan "$T"
+fi
+
+if want 33; then
+echo "== 33. 1.5.4 (#3): Restart App after an update: the helper opens the app again once it has ended"
+stop_helpers
+ASK="python3 $PWD/tests/ask_helper.py $MPCPS5_HELPER_PORT"
+# h33 dir [VAR=value...]: the helper alone, with short waits (WAIT33: 3 s for the app to end, SETTLE33: 1 s after);
+# its log: dir/hroot/logs/helper.log, what it called on the "system": dir/helper.txt
+h33() {
+	local d=$1
+	shift
+	rm -f "$d/hroot/logs/helper.log" # (the last helper's "listening" isn't this one's)
+	env MPCPS5_HOST_RELAUNCH_WAIT_MS=${WAIT33-3000} MPCPS5_HOST_RELAUNCH_SETTLE_MS=${SETTLE33-1000} "$@" MPCPS5_PS5_ROOT=$d/hroot \
+		ASAN_OPTIONS=detect_leaks=0 timeout 120 "$HELPER" >"$d/helper.txt" 2>&1 &
+	H33=$!
+	waitfor "$d/hroot/logs/helper.log" "listening" || sleep 1
+}
+stoph33() { kill $H33 2>/dev/null; wait $H33 2>/dev/null; }
+hlog() { grep -q -- "$2" "$1/hroot/logs/helper.log"; }
+# until the helper's log says it (up to 10 s)
+hwait() { for i in $(seq 1 100); do hlog "$1" "$2" && return 0; sleep 0.1; done; return 1; }
+launches() { grep -c '\[host\] sceSystemServiceLaunchApp(PPSA99015' "$1"; }
+notice() { grep -q "\[host\] notification: $2" "$1"; }
+EN_NOTICE="Media Player Classic PS5 couldn't open again by itself: open it from the home screen to use the new version."
+DE_NOTICE="Media Player Classic PS5 konnte sich nicht selbst wieder öffnen: Öffne es über den Startbildschirm, um die neue Version zu verwenden."
+# the seconds between the first lines matching $2 and $3 (either file's: their stamps are the same clock)
+gap() { python3 - "$1" "$2" "$3" "$4" <<'PY'
+import re, sys
+def at(f, pat):
+    for l in open(f, encoding="utf-8", errors="replace"):
+        m = re.match(r"\[ *([0-9.]+)\] (.*)", l)
+        if m and re.search(pat, m.group(2)):
+            return float(m.group(1))
+    return None
+a, b = at(sys.argv[1], sys.argv[2]), at(sys.argv[3], sys.argv[4])
+print("none" if a is None or b is None else "%.3f" % (b - a))
+PY
+}
+ge() { python3 -c "import sys; sys.exit(0 if '$1' != 'none' and float('$1') >= float('$2') else 1)"; }
+# the update for a..b: the payload installs the app and stays as its helper (as from the autoload); a release 9.9 on a
+# test server, the daily check due
+T=$(newroot t33a)
+SRV=$T/srv; mkdir -p "$SRV" "$T/appmeta/PPSA99015"; echo old >"$T/appmeta/PPSA99015/icon0.png"
+SPORT=$((18000 + RANDOM % 1900))
+(cd "$SRV" && exec python3 -m http.server $SPORT --bind 127.0.0.1 >/dev/null 2>&1) &
+SRV33=$!
+openssl genpkey -algorithm ed25519 -out $T/release.pem 2>/dev/null
+openssl genpkey -algorithm ed25519 -out $T/other.pem 2>/dev/null
+PUBHEX=$(openssl pkey -in $T/release.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')
+inst33() { # [VAR=value...]: the payload, staying as the helper
+	rm -f $T/root/logs/installer.log
+	env MPCPS5_HOST_RELAUNCH_WAIT_MS=3000 MPCPS5_HOST_RELAUNCH_SETTLE_MS=1000 "$@" MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew \
+		MPCPS5_PS5_APPMETA=$T/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 120 "$INSTALLER" >"$T/inst.txt" 2>&1 &
+	I33=$!
+	for i in $(seq 1 100); do grep -q 'listening on 127.0.0.1' $T/root/logs/installer.log 2>/dev/null && break; sleep 0.1; done
+}
+u33run() { MPCPS5_HOST_RELEASE_KEY=$PUBHEX MPCPS5_UPDATE_API=http://127.0.0.1:$SPORT/latest.json MPCPS5_PS5_APPMETA=$T/appmeta run "$@"; }
+upd33() { # [settings]: the daily check offers 9.9, Yes installs it, Yes restarts
+	release v9.9 99.000.000
+	echo 0 >"$T/root/update-check.txt"
+	rm -f $T/root/logs/boot.log $T/root/mpc-hc.ini $T/root/update-pending.txt
+	[ -n "${1:-}" ] && ini "$T" "$1"
+	u33run "$T" "0:0" "200:key enter;450:key enter;520:key enter;560:quit" ""
+}
+# a: the whole update; Restart: the helper takes it, the app ends the normal way, and once it has ended (and the
+# settle) the title is opened, once
+inst33
+rc=$(upd33)
+for i in $(seq 1 50); do grep -q '\[host\] sceSystemServiceLaunchApp(PPSA99015' $T/inst.txt && break; sleep 0.1; done
+sleep 1.5
+IL=$T/root/logs/installer.log
+expect "[ $rc = 0 ] && grep -q '\[update\] 9.9 installed (in .*): offering the restart' $T/root/logs/boot.log && grep -q 'restart: the helper opens the app again once it has ended' $T/root/logs/boot.log && grep -q '\[boot\] exit 0' $T/root/logs/boot.log" "the update installed; Yes to the restart: the helper said yes, the app ended the normal way"
+expect "grep -q 'sceSystemServiceLoadExec(exit)' $T/out.txt && ! grep -q 'sceSystemServiceLoadExec(.*eboot' $T/out.txt && ! grep -q 'Close Media Player Classic PS5 and open it again' $T/root/logs/boot.log" "... no LoadExec of the eboot, no \"close it and open it again\""
+G=$(gap $T/root/logs/boot.log '\[boot\] exit 0' $IL 'relaunch: sceSystemServiceLaunchApp\(PPSA99015')
+expect "grep -q 'relaunch: pid [0-9]* asks to be opened again once it has ended (language en)' $IL && grep -q 'relaunch: pid [0-9]* ended' $IL && [ \$(launches $T/inst.txt) = 1 ] && ge $G 1.0 && grep -q 'relaunch: PPSA99015 opened again' $IL" "the helper (the payload, as from the autoload) opened the title once, $G s after the app ended (the 1 s settle after it)"
+expect "grep -q 'sceSystemServiceLaunchApp(PPSA99015, argv\[0\] null, ctx size 32 user 0x10000001 opt 0 crash 0 check 0)' $T/inst.txt && grep -q 'relaunch: libSceUserService.sprx is loaded' $IL && grep -q 'sceUserServiceGetForegroundUser -> 0, user 0x10000001' $IL" "... for the user in front, with the 32-byte launch context, no argument"
+expect "[ -z \"\$(find $T -name app.db -o -name appinfo.db)\" ] && ! grep -q 'runtime error\|AddressSanitizer' $T/inst.txt" "nothing wrote an app.db / appinfo.db; the payload: no sanitizer reports"
+nosan "$T"
+kill $I33 2>/dev/null; wait $I33 2>/dev/null
+# n: the app in German (Language=4) sends "de"; the system refusing, the helper's notice is German
+inst33 MPCPS5_HOST_LAUNCH_RC=80940010
+rc=$(upd33 "Language=4")
+for i in $(seq 1 100); do grep -q 'relaunch failed' $IL && break; sleep 0.1; done
+sleep 0.3
+expect "[ $rc = 0 ] && grep -q 'relaunch: pid [0-9]* asks to be opened again once it has ended (language de)' $IL && grep -q 'relaunch failed: the system didn.t open it (80940010); notice in de' $IL && notice $T/inst.txt \"$DE_NOTICE\"" "the app in German sends \"de\": the system refused the launch, the notice is German"
+expect "grep -q 'App jetzt neu starten, um ihn zu verwenden? (Die Anwendungsinformationen auf dem Startbildschirm zeigen möglicherweise weiterhin eine ältere Version.)' $T/root/logs/boot.log" "... the restart question in German, App Information included"
+nosan "$T"
+kill $I33 2>/dev/null; wait $I33 2>/dev/null
+# o: a 1.5.3 helper (it closes the connection on a request it doesn't know): 1.5.3's message, the app stays
+python3 tests/fake_helper.py $MPCPS5_HELPER_PORT old >$T/fake.txt 2>&1 &
+FH=$!
+listening $MPCPS5_HELPER_PORT
+rc=$(upd33)
+kill $FH 2>/dev/null; wait $FH 2>/dev/null
+expect "[ $rc = 0 ] && grep -q 'restart: not by the helper (the helper is older than 1.5.4' $T/root/logs/boot.log && grep -q '\[ui\] message: Close Media Player Classic PS5 and open it again to use the new version.' $T/root/logs/boot.log && grep -q '\[test\] frame 560: quit' $T/root/logs/boot.log" "an older helper: \"close it and open it again\" (1.5.3's message), the app goes on"
+nosan "$T"
+kill $SRV33 2>/dev/null; wait $SRV33 2>/dev/null
+# b: the asking process never ends (a stand-in: a sleeping process asks for it, raw): after the wait (3 s here), no
+# launch (never two copies), the notice; c: a second request while one waits is refused; once it is over, asked again
+T=$(newroot t33b)
+h33 "$T"
+sleep 60 &
+P=$!
+A1=$($ASK 8 $P PPSA99015 en); A2=$($ASK 8 $P PPSA99015 en)
+hwait "$T" 'relaunch failed'
+expect "[ \"$A1\" = 'ret 0 ok' ] && hlog $T 'relaunch failed: it was still running after the wait: not opened (never two copies); notice in en' && notice $T/helper.txt \"$EN_NOTICE\" && [ \$(launches $T/helper.txt) = 0 ]" "the asking process still runs after the wait: not opened, the notice (English)"
+expect "[ \"$A2\" = 'ret -1 a relaunch is already waiting' ]" "a second request while one waits: refused (${A2})"
+sleep 0.5 # (the notice is sent, then the waiting one is over)
+A3=$($ASK 8 $P PPSA99015 en)
+kill $P; wait $P 2>/dev/null
+hwait "$T" 'relaunch: PPSA99015 opened again'
+expect "[ \"$A3\" = 'ret 0 ok' ] && [ \$(launches $T/helper.txt) = 1 ]" "over, asked again: taken; the process ends: opened"
+stoph33
+# d: refused: pid 0 / -1, another title, a process that isn't this title's (gone, or another title's)
+h33 "$T"
+sleep 60 &
+P=$!
+R1=$($ASK 8 0 PPSA99015 en); R2=$($ASK 8 -1 PPSA99015 en); R3=$($ASK 8 $P PPSA99013 en)
+sleep 30 & Q=$!; kill $Q; wait $Q 2>/dev/null
+R4=$($ASK 8 $Q PPSA99015 en)
+expect "[ \"$R1\" = 'ret -1 bad pid' ] && [ \"$R2\" = 'ret -1 bad pid' ] && [ \"$R3\" = 'ret -1 not this title' ] && [ \"$R4\" = \"ret -1 the asking process isn't Media Player Classic PS5\" ] && [ \$(grep -c 'asks to be opened again' $T/hroot/logs/helper.log) = 0 ]" "refused: pid 0 and -1 (bad pid), another title id, a pid that isn't running (no thread started)"
+stoph33
+h33 "$T" MPCPS5_HOST_JB_TITLE=PPSA99013
+R5=$($ASK 8 $P PPSA99015 en)
+expect "[ \"$R5\" = 'ret -1 asked by PPSA99013' ] && [ \$(grep -c 'asks to be opened again' $T/hroot/logs/helper.log) = 0 ]" "refused: asked by another title's process"
+stoph33
+kill $P; wait $P 2>/dev/null
+expect "! grep -q 'runtime error\|AddressSanitizer' $T/helper.txt" "the helper: no sanitizer reports"
+# e: a copy opened meanwhile (in the process list during the settle, 2 s here): not opened again, no notice
+T=$(newroot t33e)
+: >$T/pids
+sleep 60 &
+P=$!
+echo $P >$T/pids
+SETTLE33=2000 h33 "$T" MPCPS5_HOST_TITLE_PIDS_FILE=$T/pids
+A1=$($ASK 8 $P PPSA99015 en)
+kill $P; wait $P 2>/dev/null
+hwait "$T" 'relaunch: pid [0-9]* ended'
+sleep 60 &
+Q=$!
+echo $Q >$T/pids
+hwait "$T" 'opened meanwhile'
+sleep 0.5
+expect "[ \"$A1\" = 'ret 0 ok' ] && hlog $T \"PPSA99015 was opened meanwhile (pid $Q): not opened again\" && [ \$(launches $T/helper.txt) = 0 ] && ! grep -q notification: $T/helper.txt" "a copy opened while the helper waits: not opened again, no notice"
+stoph33; kill $Q; wait $Q 2>/dev/null
+# k: a copy appearing right before the launch (as the helper asks for the user): the list read again then sees it
+: >$T/pids
+sleep 60 & Q=$!
+sleep 60 & P=$!
+h33 "$T" MPCPS5_HOST_TITLE_PIDS_FILE=$T/pids MPCPS5_HOST_LAUNCH_COPY_PID=$Q
+A1=$($ASK 8 $P PPSA99015 en)
+kill $P; wait $P 2>/dev/null
+hwait "$T" 'nothing to do'
+expect "[ \"$A1\" = 'ret 0 ok' ] && hlog $T \"PPSA99015 runs already (pid $Q): not opened again\" && [ \$(launches $T/helper.txt) = 0 ] && ! grep -q notification: $T/helper.txt" "a copy opened right before the launch: seen, not opened again"
+stoph33; kill $Q; wait $Q 2>/dev/null
+# j: the process list can't be read (the file named, missing): nothing is decided by it -- no launch; at the wait's end
+# (2 s), failed with the notice
+WAIT33=2000 h33 "$T" MPCPS5_HOST_TITLE_PIDS_FILE=$T/missing
+sleep 60 & P=$!
+A1=$($ASK 8 $P PPSA99015 en)
+kill $P; wait $P 2>/dev/null
+hwait "$T" 'relaunch failed'
+G=$(gap $T/hroot/logs/helper.log 'asks to be opened again' $T/hroot/logs/helper.log 'relaunch failed')
+expect "[ \"$A1\" = 'ret 0 ok' ] && hlog $T \"relaunch failed: the process list couldn't be read: whether it ended is unknown\" && ge $G 1.95 && [ \$(launches $T/helper.txt) = 0 ] && notice $T/helper.txt \"$EN_NOTICE\"" "the process list unreadable: no launch; failed at the wait's end ($G s), the notice"
+stoph33
+expect "! grep -q 'runtime error\|AddressSanitizer' $T/helper.txt" "the helper: no sanitizer reports"
+# f / g / h: the system refusing the launch; nobody signed in; the launch calls not found: failed, the notice
+# (each: the setting | what the log says | launch calls made | what it stands for)
+for how in "MPCPS5_HOST_LAUNCH_RC=80940010|the system didn.t open it (80940010)|1|the system refusing the launch" \
+	"MPCPS5_HOST_NO_USER=1|no foreground user|0|nobody signed in" \
+	"MPCPS5_HOST_LAUNCH_UNRESOLVED=1|the system.s launch calls couldn.t be found|0|the launch calls not found"; do
+	IFS='|' read -r SET WHY CALLS WHAT <<<"$how"
+	T=$(newroot t33f)
+	h33 "$T" "$SET"
+	sleep 60 & P=$!
+	A1=$($ASK 8 $P PPSA99015 en)
+	kill $P; wait $P 2>/dev/null
+	hwait "$T" 'relaunch failed'
+	expect "[ \"$A1\" = 'ret 0 ok' ] && hlog $T \"relaunch failed: $WHY; notice in en\" && notice $T/helper.txt \"$EN_NOTICE\" && [ \$(launches $T/helper.txt) = $CALLS ]" "$WHAT ($SET): failed, not opened, the notice"
+	stoph33
+done
+expect "hlog $T 'relaunch: sceUserServiceInitialize not found (0)' && hlog $T 'relaunch: sceSystemServiceLaunchApp not found (0)' && ! grep -q 'runtime error\|AddressSanitizer' $T/helper.txt" "... the calls looked up and refused one by one; no sanitizer reports"
+# i: no thread for the wait (MPCPS5_HOST_REFUSE_THREADS=relaunch): answered (refused), a second request answered the
+# same, the unlock still served
+T=$(newroot t33i)
+h33 "$T" MPCPS5_HOST_REFUSE_THREADS=relaunch
+sleep 60 & P=$!
+A1=$($ASK 8 $P PPSA99015 en); A2=$($ASK 8 $P PPSA99015 en); U=$($ASK 5 $P)
+expect "[ \"$A1\" = 'ret -1 no thread for it' ] && [ \"$A2\" = 'ret -1 no thread for it' ] && [ \"$U\" = 'ret 0 ok' ] && hlog $T 'letting it out'" "no thread for the wait: refused, a second request too (nothing left waiting), the unlock still served"
+stoph33; kill $P; wait $P 2>/dev/null
+# l: the kernel R/W lock: each section held 0.4 s (MPCPS5_HOST_KERNEL_RW_MS); an unlock asked while the relaunch looks up
+# its calls is served between two lookups, never during one (the sections never overlap, the unlock's after the first
+# lookup's end and before the last's)
+T=$(newroot t33l)
+SETTLE33=200 h33 "$T" MPCPS5_HOST_KERNEL_RW_MS=400
+sleep 60 & P=$!
+sleep 60 & Q=$!
+A1=$($ASK 8 $P PPSA99015 en)
+kill $P; wait $P 2>/dev/null
+hwait "$T" 'kernel R/W: kernel_dynlib_handle libSceUserService.sprx: begins'
+sleep 0.2
+U=$($ASK 5 $Q)
+hwait "$T" 'relaunch: PPSA99015 opened again'
+RW=$(python3 - $T/hroot/logs/helper.log <<'PY'
+import re, sys
+open_, order, ok = None, [], True
+for l in open(sys.argv[1], encoding="utf-8"):
+    m = re.search(r"kernel R/W: (.*): (begins|ends)$", l)
+    if not m:
+        continue
+    what, ev = m.groups()
+    if ev == "begins":
+        ok = ok and open_ is None
+        open_ = what
+    else:
+        ok = ok and open_ == what
+        open_ = None
+        order.append(what)
+lookups = [i for i, w in enumerate(order) if w.startswith("kernel_dynlib")]
+u = order.index("unlock") if "unlock" in order else -1
+print("ok" if ok and open_ is None and lookups and lookups[0] < u < lookups[-1] else "bad", len(order), u)
+PY
+)
+expect "[ \"$A1\" = 'ret 0 ok' ] && [ \"$U\" = 'ret 0 ok' ] && [ \"\${RW%% *}\" = ok ] && [ \$(launches $T/helper.txt) = 1 ]" "an unlock during the lookup: served between two kernel R/W sections, none overlapping ($RW); then opened"
+stoph33; kill $Q; wait $Q 2>/dev/null
+# m: the notice's language: arbitrary text in msg2 -> English (and the text goes nowhere), "de" -> German
+T=$(newroot t33m)
+h33 "$T" MPCPS5_HOST_LAUNCH_UNRESOLVED=1
+sleep 60 & P=$!
+A1=$($ASK 8 $P PPSA99015 'xx %s%n <script> ZZQ')
+kill $P; wait $P 2>/dev/null
+hwait "$T" 'relaunch failed'
+expect "[ \"$A1\" = 'ret 0 ok' ] && hlog $T '(language other)' && hlog $T 'notice in other' && notice $T/helper.txt \"$EN_NOTICE\" && ! grep -q ZZQ $T/helper.txt $T/hroot/logs/helper.log" "any other text as the language: the English notice; the text itself logged nowhere"
+sleep 60 & P=$!
+A1=$($ASK 8 $P PPSA99015 de)
+kill $P; wait $P 2>/dev/null
+for i in $(seq 1 100); do [ "$(grep -c 'relaunch failed' $T/hroot/logs/helper.log)" = 2 ] && break; sleep 0.1; done
+expect "[ \"$A1\" = 'ret 0 ok' ] && notice $T/helper.txt \"$DE_NOTICE\"" "\"de\": the German notice"
+stoph33
+expect "! grep -q 'runtime error\|AddressSanitizer' $T/helper.txt" "the helper: no sanitizer reports"
+# p: App Information's version isn't written: no app.db / appinfo.db, no sceAppInstUtil in what is built
+BINS="$BIN $HELPER $INSTALLER"
+for f in build/ps5/MediaPlayerClassicPS5.elf build/ps5/MediaPlayerClassicPS5-helper.elf build/app/mpc-pie.elf; do [ -f $f ] && BINS="$BINS $f"; done
+expect "! strings $BINS | grep -q -e 'app\.db' -e 'appinfo\.db' -e sceAppInstUtil" "nothing built names app.db, appinfo.db or sceAppInstUtil ($(echo $BINS | wc -w) binaries)"
+stop_helpers
 fi
 
 echo

@@ -16,9 +16,6 @@ namespace mpcupdate
 void Init();
 // The daily check at start: true (and the time noted in <root>/update-check.txt) when the last one is a day old.
 bool DailyCheckDue();
-// What opens the new version: the eboot the console runs (/app0/eboot.bin on the console; else through the mount
-// ShadowMount+ made, else the folder the update went to).
-std::string EbootPath();
 // 1.5: where the app runs from and where an update goes (ProsperoAppPlace.h), found at Init.
 const AppPlace& Place();
 // 1.5.1: when the place at start didn't come from the helper (it was silent, or not there yet), look again now --

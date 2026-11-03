@@ -49,6 +49,12 @@ constexpr int32_t kMaxWantedBytes = 1 << 20;
 constexpr int32_t kCmdAppPlace = 7;
 constexpr int32_t kMaxAppPlaceBytes = 1 << 16;
 constexpr int32_t kRetUntouched = -1337;
+// 1.5.4 (#3): open the app again once it has ended -- Restart App after an update (sceSystemServiceLoadExec(eboot) only
+// ended the app: back to the home screen). pid: the asking process (getpid()), msg1: the title id, msg2: the app's
+// language code ("en", "es", "pt-BR", "fr", "de"), for the notice the helper shows when it can't. The helper answers at
+// once: ret 0 (msg1 "ok"), then waits for the app to end and opens it; or ret -1 with why in msg1. A 1.5.3 or older
+// helper closes the connection without a reply.
+constexpr int32_t kCmdRelaunch = 8;
 
 // The app side: ask for this process. Returns true when a helper answered yes; `how` names it.
 // Every step goes to OrbisLog (kept in memory until boot.log can be opened).
@@ -64,6 +70,11 @@ bool FetchWantedCovers(std::string& text, bool* background = nullptr);
 // one (Check for updates) always asks, and an answer marks the helper as answering again.
 bool FetchAppPlace(const std::string& title_id, const std::string& default_dir, std::string& text, bool at_start);
 
+// 1.5.4, the app side: ask the helper to open `title` again once this process has ended. True when it said yes; false
+// with why: no helper ("no helper"), a helper older than 1.5.4 (it closed the connection with nothing back) or the
+// helper's own reason. No helper is started for it.
+bool RequestRelaunch(const std::string& title, const std::string& language, std::string& why);
+
 // The helper ELF built into the app (helper_data.cpp in the native eboot; nothing elsewhere).
 struct Blob
 {
@@ -78,4 +89,27 @@ bool ServeHelper(void (*on_ready)());
 
 // Lets one process out (payload only; the host build fakes it). False with a reason when it refuses.
 bool JailbreakProcess(int pid, std::string& why);
+
+// 1.5.4, the payload side of kCmdRelaunch: checks the request (pid > 0, this title, asked by this title's process, no
+// other one waiting) and starts the thread that waits for the process to end and opens the title again. False with
+// why when it refuses (nothing started).
+bool StartRelaunch(int pid, const std::string& title, const std::string& language, std::string& why);
+
+// 1.5.4: the payload SDK's kernel R/W (kernel_get_proc, kernel_set_*, kernel_dynlib_*...) goes through one global
+// window and isn't thread-safe (ps5upload guards it with its kernel_rw_lock): the helper's serving loop and its relaunch
+// thread both use it, so every such sequence is made under this one helper-wide lock -- the whole unlock
+// (JailbreakProcess), each kernel_dynlib_handle / kernel_dynlib_dlsym. Not around a module's loading
+// (sceKernelLoadStartModule, sceSysmoduleLoadModuleInternal: its start code runs then; an unlock mustn't wait on it).
+// The host tests: MPCPS5_HOST_KERNEL_RW_MS=n holds each section n ms and logs its begin and end.
+class KernelRw
+{
+public:
+	explicit KernelRw(const char* what);
+	~KernelRw();
+	KernelRw(const KernelRw&) = delete;
+	KernelRw& operator=(const KernelRw&) = delete;
+
+private:
+	const char* what_;
+};
 } // namespace jailbreak

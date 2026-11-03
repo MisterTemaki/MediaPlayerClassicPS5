@@ -25,6 +25,7 @@
 #include "OrbisPaths.h"
 #include "ProsperoAudio.h"
 #include "ProsperoCrash.h"
+#include "ProsperoJailbreak.h"
 #include "ProsperoNotify.h"
 #include "ProsperoSce.h"
 #include "ProsperoUpdate.h"
@@ -2562,19 +2563,21 @@ void MainFrame::OfferUpdate(const update::Status& st)
 		});
 }
 
+// 1.5.4 (#3): up to 1.5.3 the restart was sceSystemServiceLoadExec(eboot.bin), which only ended the app (back to the
+// home screen, PS5 13.60 + ShadowMount+). Now the helper opens the app again once this process has ended (a 1.5.4
+// helper: ProsperoJailbreak.h, kCmdRelaunch), and the app ends the normal way; without one, the user is told to.
 void MainFrame::RestartForUpdate()
 {
-	const std::string path = mpcupdate::EbootPath();
-	OrbisLog("[update] restarting %s", path.c_str());
 	SavePosition();
 	s_.Save();
-	OrbisLogClose();
-	const int rc = sceSystemServiceLoadExec(path.c_str(), nullptr);
-	if (rc == 0)
-		for (int i = 0; i < 100; i++)
-			usleep(100 * 1000);
-	OrbisLogOpen("boot-after-update");
-	OrbisLog("[update] sceSystemServiceLoadExec(%s) -> %x", path.c_str(), unsigned(rc));
+	std::string why;
+	if (jailbreak::RequestRelaunch(MPCPS5_TITLE_ID, LanguageCode(s_.language), why))
+	{
+		OrbisLog("[update] restart: the app ends; the helper opens it again");
+		quit_ = true;
+		return;
+	}
+	OrbisLog("[update] restart: not by the helper (%s): the user is asked to open the app again", why.c_str());
 	MessageBox(T("Close Media Player Classic PS5 and open it again to use the new version."), T("Check for updates"), MB_OK, 1);
 }
 
@@ -2612,7 +2615,10 @@ void MainFrame::TickUpdate()
 				OrbisLog("[update] %s installed (in %s): offering the restart", st.latest.c_str(), mpcupdate::Place().dir.c_str());
 				upd_installing_ = false;
 				mpcupdate::NoteInstalled(st.latest); // the next start checks it runs
-				MessageBox(Fmt(T("Media Player Classic PS5 %s is installed.\n\nRestart the app now to use it?"), st.latest.c_str()),
+				// 1.5.4: the home screen's App Information isn't the app's to change (README, Updates)
+				MessageBox(Fmt(T("Media Player Classic PS5 %s is installed.\n\nRestart the app now to use it? (The home "
+								 "screen's App Information may keep showing an older version.)"),
+							   st.latest.c_str()),
 					T("Check for updates"), MB_YESNO, 4, [this](int r) {
 						if (r == IDYES)
 							RestartForUpdate();
@@ -3393,9 +3399,9 @@ int MainFrame::Run(const std::string& first)
 			MessageBox(Fmt(T("Media Player Classic PS5 %s was installed in %s, but this is still %s: the console started "
 							 "the old files.\n\nClose the app completely (on the home screen: Options on its card, Close "
 							 "Application) and open it again. If it still says %s, ShadowMount+ still shows the old files: "
-							 "run ShadowMount+ again from your Payload Manager (it registers the app again), or restart "
-							 "the PS5.\n\nThe version in the home screen's app information only changes when ShadowMount+ "
-							 "registers the app again."),
+							 "run ShadowMount+ again from your Payload Manager (it mounts the app's folder again), or "
+							 "restart the PS5.\n\nThe home screen's App Information may keep showing an older version "
+							 "(README, Updates)."),
 						   au.want.c_str(), au.dir.c_str(), MPCPS5_PS5_VERSION, MPCPS5_PS5_VERSION),
 				T("Check for updates"), MB_OK, 2);
 	}

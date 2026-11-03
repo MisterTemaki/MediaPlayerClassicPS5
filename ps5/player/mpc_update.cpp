@@ -128,14 +128,6 @@ std::string PendingPath()
 	return OrbisRoot() + "/update-pending.txt";
 }
 
-std::string EbootPath()
-{
-	// the eboot the console runs: /app0 is the app's own view of its folder (the console)
-	if (OrbisIsFile("/app0/eboot.bin"))
-		return "/app0/eboot.bin";
-	return (g_place.mount.empty() ? g_place.dir : g_place.mount) + "/eboot.bin";
-}
-
 const AppPlace& Place()
 {
 	return g_place;

@@ -236,6 +236,17 @@ int sceSystemServiceLoadExec(const char* path, const char**)
 	fprintf(stderr, "[host] sceSystemServiceLoadExec(%s)\n", path ? path : "(null)");
 	return -1;
 }
+// 1.5.4: the helper opening the app again: says what it was asked. MPCPS5_HOST_LAUNCH_RC=rc (hex): the system refuses
+// with that code
+int sceSystemServiceLaunchApp(const char* title_id, const char* argv[], SceSystemServiceLaunchCtx* ctx)
+{
+	const char* rc = getenv("MPCPS5_HOST_LAUNCH_RC");
+	fprintf(stderr, "[host] sceSystemServiceLaunchApp(%s, argv[0] %s, ctx size %u user %#x opt %u crash %llu check %u)%s\n",
+		title_id ? title_id : "(null)", argv && argv[0] ? argv[0] : "null", ctx ? ctx->structsize : 0u,
+		ctx ? ctx->user_id : 0u, ctx ? ctx->app_opt : 0u, ctx ? (unsigned long long)ctx->crash_report : 0ull,
+		ctx ? ctx->check_flag : 0u, rc ? ": refused" : "");
+	return rc ? int(strtoul(rc, nullptr, 16)) : 0;
+}
 
 // MPCPS5_HOST_VIDEO_BUSY=N: the first N opens find the screen held by another process (0x80290009)
 int sceVideoOutOpen(int, int, int, const void*)
@@ -420,8 +431,23 @@ int sceUserServiceInitialize(void*)
 {
 	return 0;
 }
+// MPCPS5_HOST_NO_USER=1: nobody signed in (user -1); =rc: the call fails with that code (hex)
+// MPCPS5_HOST_LAUNCH_COPY_PID=pid: a copy of the title opens just as the helper asks for the user, right before its
+// launch (the pid is added to MPCPS5_HOST_TITLE_PIDS_FILE)
 int sceUserServiceGetForegroundUser(int32_t* user)
 {
+	if (const char* copy = getenv("MPCPS5_HOST_LAUNCH_COPY_PID"))
+		if (const char* file = getenv("MPCPS5_HOST_TITLE_PIDS_FILE"))
+			if (FILE* f = fopen(file, "a"))
+			{
+				fprintf(f, "%s\n", copy);
+				fclose(f);
+			}
+	if (const char* none = getenv("MPCPS5_HOST_NO_USER"))
+	{
+		*user = -1;
+		return strcmp(none, "1") == 0 ? 0 : int(strtoul(none, nullptr, 16));
+	}
 	*user = 0x10000001;
 	return 0;
 }
