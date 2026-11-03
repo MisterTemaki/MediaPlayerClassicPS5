@@ -678,7 +678,9 @@ Honest limits:
   and open it again; if it is still old, run ShadowMount+ again from the Payload Manager (it mounts the app's folder
   again; up to 1.5.3 this said it "registers the app again", which it doesn't for an app already registered) or
   restart the PS5. Sulfurico-One64's way works too: close the app, uninstall it from the home screen, then run
-  ShadowMount+ again from the Payload Manager -- it installs the app again from its folder, with the new version.
+  ShadowMount+ again from the Payload Manager -- it installs the app again from its folder, with the new version (if
+  you listed the app in `/data/shadowmount/manual.lst`, add its line back first: ShadowMount+ removes the line of an app
+  uninstalled from the home screen).
 - **The version in App Information** (the home screen's information on the app) isn't changed by an update, and the app
   deliberately doesn't change it. It comes from the console's app databases: `/system_data/priv/mms/app.db`
   (`tbl_contentinfo`, its `AppInfoJson`) and `appinfo.db` (`tbl_appinfo`). An edit of one is put back after Rest Mode

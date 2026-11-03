@@ -486,7 +486,7 @@ uint32_t LoadModule(const char* name, uint32_t sysmodule_id)
 
 // Opens the title for the user in front. No authid change: the system's launch is asked as any launcher asks it (the
 // ELF loader's authid stays the helper's).
-Relaunch LaunchTitle(const std::string& title, std::string& why)
+Relaunch LaunchTitle(const std::string& title, int asker, std::string& why)
 {
 	using InitFn = int (*)(void*);
 	using UserFn = int (*)(int32_t*);
@@ -518,10 +518,18 @@ Relaunch LaunchTitle(const std::string& title, std::string& why)
 		why = "the process list couldn't be read right before the launch";
 		return Relaunch::Failed;
 	}
+	// (final review) the asking process listed again is not "a copy opened meanwhile": it hadn't ended after all, and
+	// the user is told (the notice), never left on the home screen with nothing
+	for (const int p : pids)
+		if (p != asker)
+		{
+			OrbisLog("[helper] relaunch: %s runs already (pid %d): not opened again", title.c_str(), p);
+			return Relaunch::AlreadyRuns;
+		}
 	if (!pids.empty())
 	{
-		OrbisLog("[helper] relaunch: %s runs already (pid %d): not opened again", title.c_str(), pids[0]);
-		return Relaunch::AlreadyRuns;
+		why = "the asking process is listed again: it hadn't ended (never two copies)";
+		return Relaunch::Failed;
 	}
 	SceSystemServiceLaunchCtx ctx;
 	memset(&ctx, 0, sizeof(ctx));
@@ -588,11 +596,19 @@ Relaunch RelaunchOnce(int pid, const std::string& title, std::string& why)
 		usleep(useconds_t(std::min<int64_t>(left, kRelaunchPollMs)) * 1000);
 		if (ProcessesOf(title, pids) && !pids.empty())
 		{
-			OrbisLog("[helper] relaunch: %s was opened meanwhile (pid %d): not opened again", title.c_str(), pids[0]);
-			return Relaunch::AlreadyRuns;
+			// (final review) another pid: a copy the user opened meanwhile; the asker's own pid back in the list: it
+			// hadn't ended after all -- told, not left on the home screen with nothing
+			for (const int p : pids)
+				if (p != pid)
+				{
+					OrbisLog("[helper] relaunch: %s was opened meanwhile (pid %d): not opened again", title.c_str(), p);
+					return Relaunch::AlreadyRuns;
+				}
+			why = "the asking process is listed again: it hadn't ended (never two copies)";
+			return Relaunch::Failed;
 		}
 	}
-	return LaunchTitle(title, why);
+	return LaunchTitle(title, pid, why);
 }
 
 // clears the busy flag however the thread ends

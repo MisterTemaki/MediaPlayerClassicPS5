@@ -353,7 +353,8 @@ bool RequestRelaunch(const std::string& title, const std::string& language, std:
 	size_t got = 0;
 	ssize_t n = 0;
 	int e = 0;
-	if (WriteAll(fd, &req, sizeof(req)))
+	const bool sent = WriteAll(fd, &req, sizeof(req));
+	if (sent)
 		while (got < sizeof(req))
 		{
 			n = recv(fd, reinterpret_cast<char*>(&req) + got, sizeof(req) - got, 0);
@@ -363,6 +364,13 @@ bool RequestRelaunch(const std::string& title, const std::string& language, std:
 			got += size_t(n);
 		}
 	close(fd);
+	if (!sent)
+	{
+		// (final review) not "an older helper": the request never went out
+		why = "the request couldn't be sent";
+		OrbisLog("[update] restart: the helper won't open the app again: %s (errno %d)", why.c_str(), errno);
+		return false;
+	}
 	const Reply r = ReplyOf(got, sizeof(req), n, e, req.magic == kMagic);
 	req.msg1[sizeof(req.msg1) - 1] = 0;
 	if (r == Reply::Answered && req.cmd == kCmdRelaunch && req.ret == 0)
