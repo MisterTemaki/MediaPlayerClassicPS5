@@ -15,13 +15,14 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.5.3):** builds with the ps5-payload-dev SDK into a signed native app and passes 581 host tests
+> **Status (1.5.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 613 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
 > HDR tone mapping, 5.1/7.1 output; disc images in stand-in drives). 1.5.1 was reported to open on a PS5, and 1.5.2 was
 > run on a PS5 before release by the author (it opens and plays); 1.5.3 was run on a PS5 before release by the author,
 > and its changes (Square with another action, the fullscreen controls shown over them, the picture following held
-> jumps) worked there. Much of the rest **hasn't been confirmed on a console yet** -- please report what works and what
+> jumps) worked there. **1.5.4's restart after an update (the helper opening the app again) hasn't been run on a PS5
+> yet.** Much of the rest **hasn't been confirmed on a console yet** -- please report what works and what
 > doesn't (with **View > Options > Miscellaneous > Debug logs** on -- `debug_logs=1` in `/data/mpcps5/mpc-hc.ini` -- the
 > log goes to `/data/mpcps5/logs/boot.log`).
 
@@ -30,6 +31,22 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.5.4:** a fix for **Restart after an in-app update**, reported on
+[#3](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/3) (PS5 13.60, ShadowMount+): Restart went back to
+the home screen instead of opening the new version, and the home screen's App Information still showed the old one.
+- **Restart opens the app again.** Up to 1.5.3 it was `sceSystemServiceLoadExec(eboot.bin)`, which on the console only
+  ends the app. Now the app asks the helper payload to open it again and ends the normal way; the helper waits until
+  the app's process is gone (up to 30 s: if it still runs then, nothing is opened -- never two copies), waits 8 s more
+  (a title opened while its old copy is still closing fails), checks that no copy of it was opened meanwhile, and asks
+  the system to open it for the user in front. If it can't, a notification in the app's language says to open it from
+  the home screen. This needs a **1.5.4 helper: put the 1.5.4 ELF in your autoload**. With an older helper (or none)
+  Restart says, as before, to close the app and open it again; and **updating to 1.5.4** from 1.5.3 still goes
+  through 1.5.3's restart (it is the old app that restarts). See [Updates](#updates).
+- **App Information's version is deliberately not written.** It lives in the console's app databases, which the app
+  doesn't touch (why, and how to refresh it: [Updates](#updates)); the restart question says it may keep showing an
+  older version. Help > About says the version that runs. The message at a start that still runs the old version no
+  longer says running ShadowMount+ again "registers the app again": it only mounts the folder again.
 
 **1.5.3:** what **Sulfurico-One64** asked for on [#3](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/3),
 playing films from an external hard disk:
@@ -256,8 +273,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.5.3.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.3.elf`).
+1. Send `MediaPlayerClassicPS5-v1.5.4.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.4.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon -- or, 1.5, updates the folder ShadowMount+
    already runs it from, see [Updates](#updates)) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
@@ -271,7 +288,7 @@ FBNeo, Mesen2, NES FCEUmm) is touched.
 
 1.5 doesn't open on the console (#3: "Error in game PPSA99015: signal: 12 (SIGSYS)"); 1.5.1 fixes that. To get a
 working app:
-- **Send the newest payload** (`MediaPlayerClassicPS5-v1.5.3.elf`) and put it in your autoload instead of 1.5's. It is
+- **Send the newest payload** (`MediaPlayerClassicPS5-v1.5.4.elf`) and put it in your autoload instead of 1.5's. It is
   newer than the installed 1.5, so it writes itself over it -- into the folder ShadowMount+ runs the app from (found
   as described in [Updates](#updates)); then close the app if it is open and open it again. A 1.4 app updates to the newest
   from **Help > Check for updates** as well (1.4's updater writes `/data/homebrew/PPSA99015`: if ShadowMount+ runs
@@ -642,20 +659,40 @@ Honest limits:
   autoloaded payload doesn't nag at every start; when the payload is newer its notification says it can't be written
   there (the helper still runs either way). Update the image or folder the way you made it, with
   the new version's folder from the release's zip.
-- **After the restart.** Restart now opens the eboot the console runs: `/app0/eboot.bin` when the app sees its own
-  `/app0` (after the jailbreak the app's root is usually the console's real `/`, where there is none), else the mount's
-  (`/system_ex/app/PPSA99015/eboot.bin`), else the folder's. The next start compares the
-  running version with the one installed: if it is still the old one, the app says what to do -- close the app
-  completely (Options on its card on the home screen, Close Application) and open it again; if it is still old,
-  run ShadowMount+ again from the Payload Manager (it registers the app again) or restart the PS5. Sulfurico-One64's
-  way works too: close the app, uninstall it from the home screen, then run ShadowMount+ again from the Payload
-  Manager -- it installs the app again from its folder, with the new version.
-- **The version on the home screen** (the app's information there) comes from the registration ShadowMount+ makes
-  (the console's app database): it only changes when ShadowMount+ registers the app again. That is cosmetic; the app
-  itself says its version in Help > About. The app doesn't touch that database.
+- **The restart (1.5.4).** Up to 1.5.3 Restart was `sceSystemServiceLoadExec` of the eboot the console runs, which on
+  a PS5 (13.60, #3) only ended the app: back to the home screen. Now Restart saves the position and the settings, asks
+  the helper payload to open the app again, and the app ends the normal way. The helper answers at once, then waits for
+  the app's process to be gone, looking every 0.2 s: gone means no longer running as PPSA99015 and not in the console's
+  process list (a list it can't read decides nothing). If it still runs after **30 s**, nothing is opened (never two
+  copies). Once it is gone the helper waits **8 s** more -- a title opened while its old copy is still closing fails
+  (ps5upload measured `0x80940010`) -- and if no copy was opened meanwhile (the list is read again right before) it
+  asks the system to open PPSA99015 for the user in front (`sceSystemServiceLaunchApp`, looked up at run time: the
+  payload doesn't link the system's launch library). When it can't (the app didn't end, nobody signed in, the system
+  refused), a notification in the app's language says to open it from the home screen. It needs a **1.5.4 helper**:
+  the payload of 1.5.4 or newer -- **put the 1.5.4 ELF in your autoload** (an older ELF there runs an older helper).
+  With an older helper, or none, Restart says, as 1.5.3 did, to close the app and open it again. **Updating to
+  1.5.4** from 1.5.3 still uses 1.5.3's restart (it is the old app that restarts): close the app and open it again
+  that once.
+- **After the restart.** The next start compares the running version with the one installed: if it is still the old
+  one, the app says what to do -- close the app completely (Options on its card on the home screen, Close Application)
+  and open it again; if it is still old, run ShadowMount+ again from the Payload Manager (it mounts the app's folder
+  again; up to 1.5.3 this said it "registers the app again", which it doesn't for an app already registered) or
+  restart the PS5. Sulfurico-One64's way works too: close the app, uninstall it from the home screen, then run
+  ShadowMount+ again from the Payload Manager -- it installs the app again from its folder, with the new version.
+- **The version in App Information** (the home screen's information on the app) isn't changed by an update, and the app
+  deliberately doesn't change it. It comes from the console's app databases: `/system_data/priv/mms/app.db`
+  (`tbl_contentinfo`, its `AppInfoJson`) and `appinfo.db` (`tbl_appinfo`). An edit of one is put back after Rest Mode
+  (TabShifter's wiki), the tools that edit them (TabShifter) back both up first, and a user corrupted the database
+  editing it by hand (ShadowMount+ issue #17). ShadowMount+ only registers titles missing from `app.db`, so running it
+  again doesn't refresh an installed one, and no system call is known to refresh an installed title's information; a
+  reboot isn't known to either. It is cosmetic: Help > About says the version that runs. **To refresh it**, uninstall
+  the app from the home screen and let ShadowMount+ add it again (run it from the Payload Manager); if you listed its
+  folder in `/data/shadowmount/manual.lst`, add that line back first -- ShadowMount+ removes a deleted game's line. The
+  same goes for an update by the payload: the files change, App Information doesn't.
 - Only a PS5 can confirm the ShadowMount+ part: the mount table (statfs, getfsstat, in the helper), writing through
-  `/system_ex/app`, the backport layer, `mount.lnk`, the same-eboot check through the mount and Restart's eboot have
-  been checked with a faked mount table on the host, not on a console yet.
+  `/system_ex/app`, the backport layer, `mount.lnk` and the same-eboot check through the mount have been checked with a
+  faked mount table on the host, not on a console yet; 1.5.4's restart (the process list, the system's launch calls,
+  the waits) with stand-ins on the host only.
 - **Your autoload:** the updated app is newer than the ELF in your autoload. The older ELF sees that and leaves the
   app alone (its notification says so). Put the new ELF in your autoload when you can.
 
@@ -702,7 +739,7 @@ make ps5           # build/ps5/MediaPlayerClassicPS5.elf (1.5.1: fails if the eb
                    # symbol a title can't -- libkernel_sys, libkernel_web: tools/check_imports.py, #3; 1.5.2: or take
                    # any of the C++ runtime from the console)
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.5.3.elf, the release zip, mpc-ps5-v1.5.3-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.5.4.elf, the release zip, mpc-ps5-v1.5.4-src.zip
 make send PS5_HOST=192.168.0.20
 ```
 
@@ -710,7 +747,8 @@ The layout is the emulator ports': `eboot.bin` is the player, a native title (`p
 `coreorbis/`, linked by `proto/native`'s tools); the payload is the installer and the helper, with the app
 folder inside (the eboot and the backgrounds compressed: the payload is about 12 MB). The host build runs
 the same code on Linux (`host/sce_host.cpp` fakes the PS5 calls; `MPCPS5_HOST_SCRIPT` and
-`MPCPS5_HOST_PAD` drive it, flips are saved as PPM). `tests/fuzz/fuzz_update.cpp` is a libFuzzer harness for the
+`MPCPS5_HOST_PAD` drive it, flips are saved as PPM; `tests/ask_helper.py` sends the helper a raw request, as the
+restart tests of 1.5.4 do). `tests/fuzz/fuzz_update.cpp` is a libFuzzer harness for the
 updater's parsers (GitHub's JSON, the release zip and its manifest), `tests/fuzz/fuzz_font.cpp` one for the fonts
 folder's check (`player/mpc_sfnt.cpp`) with stb_truetype behind it; the commands are at their tops.
 
