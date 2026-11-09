@@ -52,6 +52,8 @@ nosan() { expect "! grep -q 'runtime error\|AddressSanitizer' $1/out.txt" "no sa
 state() { grep "\[test\] state" "$1/root/logs/boot.log" | sed -n "${2}p"; }
 # the n-th state line's field: st pos dur video audio sub picture
 field() { state "$1" "$2" | sed -E "s/.* state ([0-9]+) pos ([0-9.]+) dur ([0-9.]+) video (-?[0-9]+) audio (-?[0-9]+) sub (-?[0-9]+) picture ([0-9]+).*/\\$3/"; }
+# the first boot.log line number matching $2 (test10 review: defined here, for any group)
+line() { grep -n -- "$2" "$1/root/logs/boot.log" | head -1 | cut -d: -f1; }
 near() { python3 -c "import sys; sys.exit(0 if abs(float('$1') - float('$2')) <= float('$3') else 1)"; }
 # 1.5.2: a test server's port taking connections (up to 20 s: a loaded machine starts Python slowly; a fixed sleep
 # made group 6's SMB server late now and then)
@@ -346,16 +348,16 @@ cp "$MEDIA/hevc10.mkv" "$MEDIA/red.mp4" "$MEDIA/av1.mkv" "$T/root/media/"
 rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "50:state;60:open $T/root/media/red.mp4;120:state;130:seek 4;190:state;200:open $T/root/media/av1.mkv;250:state;260:quit" \
 	"45,115,185,245" "$T/root/media/hevc10.mkv")
 expect "[ $rc = 0 ]" "exit code 0 (got $rc)"
-expect "grep -q 'hardware decoding available' $T/root/logs/boot.log" "the decoder's library and compute queue made at start"
-expect "grep -q 'video decoder: HEVC 640x360 (console decoder)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 1$'" "HEVC Main 10 on the console's decoder"
+expect "grep -q 'console decoder: on (H.264, HEVC 8 / 10-bit, VP9 8 / 10-bit, up to 4K)' $T/root/logs/boot.log" "the decoder's library and compute queue made at start"
+expect "grep -q 'video decoder: HEVC 640x360 (console decoder)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 1 gpu'" "HEVC Main 10 on the console's decoder"
 expect "grep -q 'pictures 640x368 (shown 640x360) 10-bit' $T/root/logs/boot.log" "10-bit pictures, the padding left out"
 expect "grep -q \"frame_format 2 with 2-byte samples isn't on the confirmed list yet\" $T/root/logs/boot.log" "a frame_format not confirmed on a console yet: said in the log"
 expect "$CHECK $T/dump/flip00045.ppm 960 400 255 0 255 12 >/dev/null" "its picture: magenta"
-expect "grep -q 'video decoder: H.264 640x360 (console decoder)' $T/root/logs/boot.log && state $T 2 | grep -q ' hw 1$'" "H.264 on it too"
+expect "grep -q 'video decoder: H.264 640x360 (console decoder)' $T/root/logs/boot.log && state $T 2 | grep -q ' hw 1 gpu'" "H.264 on it too"
 expect "$CHECK $T/dump/flip00115.ppm 960 400 red >/dev/null" "its picture: red"
 expect "near \$(field $T 3 2) \$(at $T 3.5 130 190) 1.2 && grep -q 'going on from a keyframe' $T/root/logs/boot.log" "a seek: on from the next keyframe (\$(field $T 3 2) s)"
 expect "$CHECK $T/dump/flip00185.ppm 960 400 red >/dev/null" "the picture after the seek"
-expect "grep -q 'video decoder: FFmpeg (not H.264 or HEVC)' $T/root/logs/boot.log && state $T 4 | grep -q ' hw 0$'" "AV1 stays with FFmpeg"
+expect "grep -q 'video decoder: FFmpeg (not H.264, HEVC or VP9)' $T/root/logs/boot.log && state $T 4 | grep -q ' hw 0 gpu'" "AV1 stays with FFmpeg"
 expect "$CHECK $T/dump/flip00245.ppm 960 400 255 255 0 60 >/dev/null" "its picture: yellow"
 nosan "$T"
 T=$(newroot t13b)
@@ -364,7 +366,7 @@ cp "$MEDIA/chapters.mkv" "$T/root/media/"
 rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_HWDEC_FAIL=20 run "$T" "0:0" "480:state;490:quit" "470" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ] && [ \$(grep -c 'stream error 0x811d0301: reset' $T/root/logs/boot.log) = 5 ]" "stream errors: reset, on from the next keyframe, five times"
 expect "grep -q 'handing the video to FFmpeg: stream errors keep coming' $T/root/logs/boot.log && grep -q 'video decoder: FFmpeg from now on' $T/root/logs/boot.log" "then the video is handed to FFmpeg"
-expect "state $T 1 | grep -q ' hw 0$' && near \$(field $T 1 2) 8.5 0.8 && $CHECK $T/dump/flip00470.ppm 960 400 blue >/dev/null" "it plays on to the end: the blue part"
+expect "state $T 1 | grep -q ' hw 0 gpu' && near \$(field $T 1 2) 8.5 0.8 && $CHECK $T/dump/flip00470.ppm 960 400 blue >/dev/null" "it plays on to the end: the blue part"
 nosan "$T"
 T=$(newroot t13c)
 cp "$MEDIA/red.mp4" "$T/root/media/"
@@ -374,7 +376,7 @@ T=$(newroot t13d)
 cp "$MEDIA/red.mp4" "$T/root/media/"
 ini "$T" "HardwareDecoding=0"
 rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "60:state;70:quit" "55" "$T/root/media/red.mp4")
-expect "grep -q 'video decoder: FFmpeg (turned off in the options)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 0$'" "Options > Output > Hardware decoding off: FFmpeg"
+expect "grep -q 'video decoder: FFmpeg (turned off in the options)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 0 gpu'" "Options > Output > Hardware decoding off: FFmpeg"
 fi
 
 if want 14; then
@@ -392,7 +394,7 @@ nosan "$T"
 T=$(newroot t14b)
 cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
 rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/hdr_pq.mkv")
-expect "state $T 1 | grep -q ' hw 1$' && grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "the same from the console's decoder (10-bit pictures)"
+expect "state $T 1 | grep -q ' hw 1 gpu' && grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "the same from the console's decoder (10-bit pictures)"
 T=$(newroot t14c)
 cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
 ini "$T" "HdrToneMapping=0"
@@ -609,7 +611,7 @@ sleep 0.5
 # e: the start after c: still 1.5 although 9.9 was installed: the app says so and what to do (once a start, three times)
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:key enter;80:quit" "")
-expect "[ $rc = 0 ] && grep -q '\[update\] after the update to 9.9 (in $T/homebrew/PPSA99015): this is $VER: still the old version' $T/root/logs/boot.log && grep -q '\[ui\] message: Media Player Classic PS5 9.9 was installed in $T/homebrew/PPSA99015, but this is still 1.5' $T/root/logs/boot.log" "the next start: still the old version: the app says so (close it, ShadowMount+ again, or restart)"
+expect "[ $rc = 0 ] && grep -q '\[update\] after the update to 9.9 (in $T/homebrew/PPSA99015): this is $VER: still the old version' $T/root/logs/boot.log && grep -q '\[ui\] message: Media Player Classic PS5 9.9 was installed in $T/homebrew/PPSA99015, but this is still $VER' $T/root/logs/boot.log" "the next start: still the old version: the app says so (close it, ShadowMount+ again, or restart)"
 printf '1.5\n/x\n0\n' >$T/root/update-pending.txt
 rm -f $T/root/logs/boot.log
 rc=$(u16run "$T" "0:0" "60:quit" "")
@@ -926,7 +928,7 @@ for odd in pitch size format depth; do
 	[ $odd = format ] && want_why="the pictures' layout changed in the middle of the stream"
 	[ $odd = depth ] && want_why="16-bit samples for an 8-bit stream"
 	expect "[ $rc = 0 ] && grep -q \"handing the video to FFmpeg: $want_why\" $T/root/logs/boot.log" "decoder output with an odd $odd: not read, the video handed to FFmpeg"
-	expect "state $T 1 | grep -q ' hw 0$' && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "... and it plays on: red"
+	expect "state $T 1 | grep -q ' hw 0 gpu' && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "... and it plays on: red"
 	nosan "$T"
 done
 # d: an SMB share with a password
@@ -1719,7 +1721,10 @@ if want 29; then
 echo "== 29. 1.5.1 (#3): the eboot imports only what a title may load (no libkernel_sys / libkernel_web); 1.5.2: its own C++ runtime, the Makefile's dependencies"
 SDKLIB=${PS5_PAYLOAD_SDK:-/opt/ps5-payload-sdk}/target/lib
 if [ -f build/app/mpc-pie.elf ] && [ -d "$SDKLIB" ]; then
-	python3 tools/check_imports.py build/app/mpc-pie.elf "$SDKLIB" build/app/stubs/libSceVideodec2.so >"$WORK/imports.txt" 2>&1
+	# 1.6: the GPU build (RADV) also loads AGC's two modules, as the Makefile's check allows
+	AGC=""
+	grep -q 'libvulkan_radeon\.ps5\.a(' build/app/mpc-pie.trace 2>/dev/null && AGC="$SDKLIB/libSceAgc.so $SDKLIB/libSceAgcDriver.so"
+	python3 tools/check_imports.py build/app/mpc-pie.elf "$SDKLIB" build/app/stubs/libSceVideodec2.so $AGC >"$WORK/imports.txt" 2>&1
 	rc=$?
 	expect "[ $rc = 0 ] && grep -q '^check_imports: ok' $WORK/imports.txt && ! grep -q 'libkernel_sys\|libkernel_web' $WORK/imports.txt" "the app's PIE (build/app/mpc-pie.elf): only allowed modules and symbols"
 	# 1.5.2: the eboot's C++ runtime is its own: its __gxx_personality_v0 defined (not imported), every CIE's
@@ -1949,6 +1954,64 @@ done
 rm -f $T/dump/*.ppm
 expect "[ $rc = 0 ] && [ $boxed -gt 0 ] && [ $boxed -lt 30 ]" "after a seek back, the replayed lines end again: the box on $boxed of 50 frames (a 0.1 s line every 0.5 s)"
 nosan "$T"
+# i (1.6, the audit's PGS item): normal display sets that use their epoch's palette and object (make_pgs.py epochs: a
+# palette update at 2.2 s, white -> red; a new object in the epoch's colour 2, green, at 4.2 s; a second epoch at 8.2 s,
+# a 200x100 box, colour 1 blue and 2 yellow). An external .sup's line is decoded when it shows: up to 1.5.4 on the file's
+# one decoder, left by the line decoded before -- after 8.2 s's, the line at 2.2 s was a 200x100 red box and 4.2 s's
+# yellow. Each line now has a decoder of its own with its epoch replayed first. Paused, seeks to 8.6, 2.6 and 4.6 s
+T=$(newroot t31i)
+python3 tests/make_pgs.py $T/root/media/film.sup epochs
+ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=25:d=12 -c:v libx264 -preset ultrafast -pix_fmt yuv420p $T/root/media/film.mp4
+rc=$(run "$T" "0:0" "20:cmd pause;30:seek 8.6;90:state;100:seek 2.6;160:state;170:seek 4.6;230:state;240:quit" "85,155,225" "$T/root/media/film.mp4")
+pgs_far="1100 850 1380 926" # the 1000x200 box's lower right (a 200x100 one, at its corner or in the middle, isn't there)
+pgs_box="500 700 1420 977"
+expect "[ $rc = 0 ] && log $T 'subtitles loaded: .*film.sup (bitmaps: 4 line(s)' && $REGION $T/dump/flip00085.ppm $pgs_box 0 0 255 40 500 >/dev/null && ! $REGION $T/dump/flip00085.ppm $pgs_far 0 0 255 40 100 >/dev/null" "the second epoch's line at 8.6 s: the small blue box"
+expect "$REGION $T/dump/flip00155.ppm $pgs_far 255 0 0 40 2000 >/dev/null" "then 2.6 s: the palette update drawn on its own epoch's object (the 1000x200 box, red)"
+expect "$REGION $T/dump/flip00225.ppm $pgs_box 0 255 0 40 2000 >/dev/null && ! $REGION $T/dump/flip00225.ppm $pgs_box 255 255 0 40 100 >/dev/null" "then 4.6 s: the new object in its epoch's colour 2 (green, not the later epoch's yellow)"
+nosan "$T"
+# j (1.6, the same in an MKV): the lines are decoded as the demuxer reads them (a minute ahead: the whole film here,
+# in order, right); after a seek back the packets read again went to the decoder left at the second epoch, and each
+# line replayed replaced the one decoded in order (1.5.4: a 200x100 red box at 2.5 s, yellow at 4.5 s; a keyframe
+# every 0.2 s). At a seek the PGS decoder is made again and given nothing until a display set that begins an epoch
+# (a new decoder alone made 4.2 s's object see-through: 2.2 s's palette update left colour 1 only): the lines decoded
+# in order stay
+T=$(newroot t31j)
+python3 tests/make_pgs.py $T/s.sup epochs
+ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=25:d=12 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -g 5 $T/v.mp4 &&
+	ffmpeg -v error -i $T/v.mp4 -i $T/s.sup -map 0 -map 1 -c copy $T/root/media/pgs.mkv
+rc=$(run "$T" "0:0" "120:state;130:cmd pause;140:seek 2.5;200:state;210:seek 4.5;270:state;280:quit" "195,265" "$T/root/media/pgs.mkv")
+expect "[ $rc = 0 ] && $REGION $T/dump/flip00195.ppm $pgs_far 255 0 0 40 2000 >/dev/null" "after a seek back to 2.5 s: the palette update on the 1000x200 box (red), as decoded in order"
+expect "$REGION $T/dump/flip00265.ppm $pgs_box 0 255 0 40 2000 >/dev/null && ! $REGION $T/dump/flip00265.ppm $pgs_box 255 255 0 40 100 >/dev/null" "then 4.5 s: the new object green (not the later epoch's yellow)"
+nosan "$T"
+# k (review): a line cleared by a normal display set, after a seek forward inside it (make_pgs.py clearing: a white box
+# 10-20 s, another line at 25 s). Paused, a seek to 15 s (the demuxer had read to ~12 s: the box open-ended), then to
+# 22 s: the clearing set at 20 s is read while the track waits for an epoch -- 1.6's first build passed it over and the
+# box stayed until 25 s. A display set with no object goes through. k: MKV (a display set a packet); l: M2TS (a segment
+# a packet: the clearing set's end segment goes through with it)
+for v in k:mkv l:m2ts; do
+	T=$(newroot t31${v%%:*})
+	ext=${v##*:}
+	python3 tests/make_pgs.py $T/s.sup clearing
+	ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=25:d=30 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -g 5 $T/v.mp4
+	if [ $ext = mkv ]; then
+		ffmpeg -v error -copyts -i $T/v.mp4 -i $T/s.sup -map 0 -map 1 -c copy $T/root/media/clear.mkv
+	else
+		ffmpeg -v error -copyts -i $T/v.mp4 -i $T/s.sup -map 0 -map 1 -c copy -f mpegts -mpegts_m2ts_mode 1 $T/root/media/clear.m2ts
+	fi
+	rc=$(run "$T" "0:0" "20:cmd pause;30:seek 15;90:state;100:seek 22;160:state;170:quit" "85,155" "$T/root/media/clear.$ext")
+	expect "[ $rc = 0 ] && $REGION $T/dump/flip00085.ppm $pgs_box 255 255 255 30 2000 >/dev/null" "$ext: at 15 s, inside the line: the white box"
+	expect "! $REGION $T/dump/flip00155.ppm $pgs_box 255 255 255 30 2000 >/dev/null" "$ext: then 22 s, past its clearing set at 20 s: no box"
+	nosan "$T"
+done
+# m (review): one epoch start (the palette) and 999 normal lines with new objects and no palette (make_pgs.py longepoch,
+# ~6,000 packets); the line at 90.2 s is drawn: its epoch's palette replayed from ~6,000 packets back (1.6's first
+# build replayed the last 4,096: no palette, the line never drawn)
+T=$(newroot t31m)
+python3 tests/make_pgs.py $T/root/media/film.sup longepoch
+ffmpeg -v error -f lavfi -i color=c=gray:s=320x180:r=25:d=93 -c:v libx264 -preset ultrafast -pix_fmt yuv420p $T/root/media/film.mp4
+rc=$(run "$T" "0:0" "20:cmd pause;30:seek 91;90:state;100:quit" "85" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'subtitles loaded: .*film.sup (bitmaps: 1000 line(s)' && $REGION $T/dump/flip00085.ppm $pgs_box 255 255 255 30 2000 >/dev/null" "a long epoch: the line at 90.2 s drawn with the palette of its start (~6,000 packets before)"
+nosan "$T"
 fi
 
 if want 32; then
@@ -1966,7 +2029,19 @@ P="0:0;40:0,200,128;46:0;50:$SQUARE;53:0;300:$SQUARE;303:0;340:0,200,128;346:0;3
 P="$P;400:0,60,128;406:0;410:$R3;413:8004;416:0;440:0,200,128;446:0;450:$TP2;454:0"
 rc=$(run "$T" "$P" "330:cmd options;380:key escape;470:key escape;480:quit" "" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ] && [ \$(count $T '\[ui\] Square: NextAudio') = 2 ] && [ \$(count $T '\[osd\] Audio: ') -ge 2 ]" "Square as Next audio track: with the pointer showing and without it, the track changes ($(count $T '\[ui\] Square: NextAudio') times)"
-line() { grep -n -- "$2" "$1/root/logs/boot.log" | head -1 | cut -d: -f1; }
+# (test5) the wall time in boot.log between the first lines matching $2 and $3, seconds (its [  12345.678] stamps): a
+# check of where a film is after it was opened that holds on a loaded machine (the frames come slower than 60 a second)
+since() { python3 - "$1/root/logs/boot.log" "$2" "$3" <<'PY'
+import re, sys
+t = {}
+for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
+    m = re.match(r'\[\s*([0-9.]+)\]', line)
+    for k, pat in ((2, sys.argv[2]), (3, sys.argv[3])):
+        if m and k not in t and re.search(pat, line):
+            t[k] = float(m.group(1))
+print('%.3f' % (t[3] - t[2]) if 2 in t and 3 in t else 'nan')
+PY
+}
 expect "log $T '\[ui\] Square: Statistics'" "R3 held with Square (the pointer showing): the statistics, as before"
 expect "[ \$(count $T '\[ui\] right-click at') = 1 ] && [ \$(line $T 'right-click at') -gt \$(line $T 'Square: Statistics') ]" "no right-click from Square in the window (in Options: Options' own, nothing); the touchpad pressed with two fingers: the window's right-click"
 nosan "$T"
@@ -2110,7 +2185,9 @@ expect "[ $rc = 0 ] && [ -n \"$X\" ] && python3 -c 'import sys; sys.exit(0 if $X
 nosan "$T"
 T=$(newroot t32n)
 film "$T"
-rc=$(run "$T" "0:0;100:$CROSS;102:$CROSS,60,128;110:$CROSS;150:$CROSS,60,128;180:$CROSS;200:0" "30:cmd pause;90:mouse 1890,1025;105:cmd about;220:key escape;260:quit" "" "$T/root/media/film.mp4")
+# (test5: the moves start once About is open -- before it, the held stick moves the volume by the wall clock's repeat,
+# more on a loaded machine; what is checked is that the moves over About leave the volume alone)
+rc=$(run "$T" "0:0;100:$CROSS;108:$CROSS,60,128;110:$CROSS;150:$CROSS,60,128;180:$CROSS;200:0" "30:cmd pause;90:mouse 1890,1025;105:cmd about;220:key escape;260:quit" "" "$T/root/media/film.mp4")
 VOL=$(sed -n 's/^Volume=//p' $T/root/mpc-hc.ini)
 expect "[ $rc = 0 ] && [ -n \"$VOL\" ] && [ \"$VOL\" -gt 20 ]" "the volume held as About opens: the moves over it leave the volume alone (Volume=$VOL)"
 nosan "$T"
@@ -2175,7 +2252,8 @@ cp "$MEDIA/red.mp4" "$T/root/media/b.mp4"
 ini "$T" "AfterPlayback=1"
 rc=$(run "$T" "0:0;40:$CROSS;200:0" "30:mouse 1900,995;230:state;240:quit" "" "$T/root/media/a.mkv")
 OPEN=$(line $T 'open .*b.mp4')
-expect "[ $rc = 0 ] && [ -n \"$OPEN\" ] && ! sed -n \"${OPEN:-1},\\\$p\" $T/root/logs/boot.log | grep -q 'seek bar' && [ \"\$(field $T 1 1)\" = 2 ] && python3 -c 'import sys; sys.exit(0 if $(field $T 1 2) < 3 else 1)'" "the seek bar held over the file's end: the next file plays from its start ($(field $T 1 2) s), the drag not carried into it"
+EL=$(since $T 'open .*b.mp4' '\[test\] state')
+expect "[ $rc = 0 ] && [ -n \"$OPEN\" ] && ! sed -n \"${OPEN:-1},\\\$p\" $T/root/logs/boot.log | grep -q 'seek bar' && [ \"\$(field $T 1 1)\" = 2 ] && python3 -c 'import sys; p = $(field $T 1 2); sys.exit(0 if p <= $EL + 0.3 and p < 5 else 1)'" "the seek bar held over the file's end: the next file plays from its start ($(field $T 1 2) s, $EL s after it opened), the drag not carried into it"
 nosan "$T"
 # u / v: Stop, or File > Close, in the middle of a held jump (let go just after): no exact seek to the hold's target
 # afterwards (2c61437: Stop kept the hold, and its release seeked there; fixed in 9cb73ae); closed: nothing left
@@ -2196,7 +2274,8 @@ T=$(newroot t32w)
 film "$T"
 cp "$MEDIA/red.mp4" "$T/root/media/b.mp4"
 rc=$(run "$T" "0:0;100:$CROSS;102:$CROSS,200,128;130:$CROSS;150:$CROSS,200,128;160:$CROSS;180:0" "30:cmd pause;40:seek 5;90:mouse 200,995;140:cmd close;200:open $T/root/media/b.mp4;260:state;270:quit" "" "$T/root/media/film.mp4")
-expect "[ $rc = 0 ] && ! sed -n \"\$(line $T 'cmd close'),\\\$p\" $T/root/logs/boot.log | grep -q 'seek bar' && [ \"\$(field $T 1 1)\" = 2 ] && python3 -c 'import sys; sys.exit(0 if $(field $T 1 2) < 3 else 1)'" "File > Close while the seek bar is held: the drag ends with it; the next file plays from its start ($(field $T 1 2) s)"
+EL=$(since $T 'open .*b.mp4' '\[test\] state')
+expect "[ $rc = 0 ] && ! sed -n \"\$(line $T 'cmd close'),\\\$p\" $T/root/logs/boot.log | grep -q 'seek bar' && [ \"\$(field $T 1 1)\" = 2 ] && python3 -c 'import sys; p = $(field $T 1 2); sys.exit(0 if p <= $EL + 0.3 and p < 5 else 1)'" "File > Close while the seek bar is held: the drag ends with it; the next file plays from its start ($(field $T 1 2) s)"
 nosan "$T"
 # x: Stop while the seek bar is held: the drag ends with it (no seek on the release: stopped at the start)
 T=$(newroot t32x)
@@ -2459,6 +2538,550 @@ BINS="$BIN $HELPER $INSTALLER"
 for f in build/ps5/MediaPlayerClassicPS5.elf build/ps5/MediaPlayerClassicPS5-helper.elf build/app/mpc-pie.elf; do [ -f $f ] && BINS="$BINS $f"; done
 expect "! strings $BINS | grep -q -e 'app\.db' -e 'appinfo\.db' -e sceAppInstUtil" "nothing built names app.db, appinfo.db or sceAppInstUtil ($(echo $BINS | wc -w) binaries)"
 stop_helpers
+fi
+
+if want 34; then
+echo "== 34. 1.6: the video drawn by the GPU (ps5-slang-gpu on lavapipe): every pixel format against the CPU path, HDR10 / HLG tone mapping, 4K 10-bit HDR at 24 / 30 / 60 fps, the window over the video, the fall-back"
+R3=4 # (the pad bit again: group 33 keeps the helper's answers in R1..R5)
+GM=$MEDIA/gpu
+[ -f "$GM/x_320x180_1.5.24fps.yuv" ] || bash tests/make_gpu_media.sh "$GM" >/dev/null
+COMPARE="python3 $PWD/tests/compare_ppm.py"
+# paused on the same picture (an exact seek), dumped: once on the CPU (1.5.4's path), once on the GPU
+SHOT="30:cmd pause;32:seek 0.5;60:state;62:quit"
+SHOT_AT=55
+# (4K: the CPU path's picture after the seek can take longer than 23 frames with two cores; dumped later there)
+SHOT4K="30:cmd pause;32:seek 0.5;100:state;102:quit"
+twice() { # name file ini -> $WORK/t34-<name>-{cpu,gpu}
+	local n=$1 f=$2 i=$3
+	for g in 0 1; do
+		local t shot=$SHOT at=$SHOT_AT
+		# (only the CPU run waits longer: the GPU's picture is there by frame 55, and its run must stay well inside the
+		# harness's 180 s on a loaded machine)
+		case $n in 4k*) [ $g = 0 ] && shot=$SHOT4K at=95 ;; esac
+		t=$(newroot t34-$n-$g)
+		ini "$t" "$i"
+		cp "$f" "$t/root/media/"
+		MPCPS5_HOST_GPU=$g run "$t" "0:0" "$shot" "$at" "$t/root/media/$(basename "$f")" >/dev/null
+		[ -f "$t/dump/flip000$at.ppm" ] && mv "$t/dump/flip000$at.ppm" "$t/dump/shot.ppm"
+	done
+}
+# (from row 130: above it, the OSD's box (x 10-234, y 76-128) is timed by the wall clock)
+same() { $COMPARE $WORK/t34-$1-0/dump/shot.ppm $WORK/t34-$1-1/dump/shot.ppm 0 130 1920 976 $2 $3; }
+# a: every pixel format a decoder gives, against libswscale's bicubic (the GPU's resizer set to bicubic too)
+for f in yuv420p yuv422p yuv444p yuv410p yuv420p10le yuv422p10le yuv444p12le yuv420p16le nv12 nv21 gray gray10le gbrp gbrp10le bgra rgba 0rgb; do
+	twice $f "$GM/fmt_$f.nut" "VideoResizer=1"
+	T=$WORK/t34-$f-1
+	r=$(same $f 2 12)
+	expect "same $f 2 12 >/dev/null && state $T 1 | grep -q ' gpu 1 \[GPU: upload' && ! grep -q 'drawn on the CPU' $T/root/logs/boot.log" "$f: drawn by the GPU, as the CPU path draws it ($r)"
+	nosan "$T"
+done
+twice yuvj420p "$GM/fmt_yuvj420p.mkv" "VideoResizer=1"
+expect "same yuvj420p 2 12 >/dev/null && ! grep -q 'drawn on the CPU' $WORK/t34-yuvj420p-1/root/logs/boot.log" "yuvj420p (MJPEG, full range): the same ($(same yuvj420p 2 12))"
+# b: what the GPU path doesn't take is drawn on the CPU, logged once
+for f in rgb24 yuyv422 pal8; do
+	twice $f "$GM/fmt_$f.nut" "VideoResizer=1"
+	expect "same $f 0.2 2 >/dev/null && grep -q 'picture is drawn on the CPU' $WORK/t34-$f-1/root/logs/boot.log" "$f: not a GPU format: drawn on the CPU, said once in the log ($(same $f 0.2 2))"
+done
+# c: HDR10 and HLG (group 14's pictures and expectations) on the GPU, the console decoder's stand-in too
+T=$(newroot t34c)
+cp "$MEDIA/hdr_pq.mkv" "$MEDIA/hdr_hlg.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:open $T/root/media/hdr_hlg.mkv;110:state;120:quit" "45,105" "$T/root/media/hdr_pq.mkv")
+expect "[ $rc = 0 ] && state $T 1 | grep -q ' gpu 1 '" "exit code 0, the GPU drew"
+expect "grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "PQ, BT.2390: 100 nits ~174, 1000 nits white (as the CPU path)"
+expect "grey_in $T/dump/flip00105.ppm 480 520 125 138 && grey_in $T/dump/flip00105.ppm 1440 520 205 235" "HLG: its OOTF then the curve (as the CPU path)"
+nosan "$T"
+T=$(newroot t34c2)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "state $T 1 | grep -q ' hw 1 gpu 1 ' && grey_in $T/dump/flip00045.ppm 480 520 168 179 && grey_in $T/dump/flip00045.ppm 1440 520 248 255" "the console decoder's 10-bit pictures (its stand-in) on the GPU"
+expect "grep -q 'pictures handed out in place (16 buffers' $T/root/logs/boot.log && grep -q 'KiB at .* imported (the GPU reads the pictures there)' $T/root/logs/boot.log && grep -q 'pictures read where it wrote them (no copy)' $T/root/logs/boot.log" "... read where the decoder wrote them: its buffers imported once, no CPU copy (16 buffers)"
+# the same 4K HDR10 film from the console decoder's stand-in, on the GPU: read in place, and copied once -- the same
+# pixels. (Against the CPU path: the 640x360 film after a seek, j below. At 4K lavapipe runs the window at about one frame
+# a second and the stand-in's pictures after a paused seek aren't the same ones from run to run.) Pictures decoded
+# while paused are copied; MPCPS5_HOST_INPLACE_PAUSED=1 hands them out in place all the same, so the picture compared
+# is one read in place (the state line says so). Below the OSD (y 66 of 540).
+for ip in 0 1; do
+	t=$(newroot t34-hw4k-$ip)
+	ini "$t" "VideoResizer=1"
+	cp "$GM/hdr4k_30.mkv" "$t/root/media/"
+	MPCPS5_HOST_INPLACE_PAUSED=1 MPCPS5_HOST_INPLACE=$ip MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_OUT=960x540 run "$t" "0:0" "30:cmd pause;32:seek 0.5;150:state;152:quit" "145" "$t/root/media/hdr4k_30.mkv" >/dev/null
+done
+r=$($COMPARE $WORK/t34-hw4k-0/dump/flip00145.ppm $WORK/t34-hw4k-1/dump/flip00145.ppm 0 66 960 540 0.2 2)
+expect "$COMPARE $WORK/t34-hw4k-0/dump/flip00145.ppm $WORK/t34-hw4k-1/dump/flip00145.ppm 0 66 960 540 0.2 2 >/dev/null && state $WORK/t34-hw4k-1 1 | grep -q ' hw 1 gpu 1 .*shown picture: in place' && state $WORK/t34-hw4k-0 1 | grep -q 'shown picture: copied' && grep -q 'pictures handed out in place' $WORK/t34-hw4k-1/root/logs/boot.log && ! grep -q 'pictures handed out in place' $WORK/t34-hw4k-0/root/logs/boot.log && ! grep -q 'out of picture buffers' $WORK/t34-hw4k-1/root/logs/boot.log" "4K HDR10 from the console decoder: read in place, the same picture as copied ($r), the decoder never short of buffers"
+T=$(newroot t34c3)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+ini "$T" "HdrToneMapping=0"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "grey_in $T/dump/flip00045.ppm 480 520 124 136 && grey_in $T/dump/flip00045.ppm 1440 520 186 198" "tone mapping Off: the PQ signal as it comes"
+T=$(newroot t34c4)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+ini "$T" "HdrToneMapping=2
+HdrPeak=150"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:quit" "45" "$T/root/media/hdr_pq.mkv")
+expect "grey_in $T/dump/flip00045.ppm 1440 520 240 255" "Hable, white at 150 nits"
+# d: 4K HEVC Main 10 HDR10 at 24, 30, 60 fps and HLG: the GPU's picture against the CPU's, each tone mapping
+for fps in 24 30 60; do
+	twice 4k$fps "$GM/hdr4k_$fps.mkv" "VideoResizer=1"
+	expect "same 4k$fps 2.5 16 >/dev/null && state $WORK/t34-4k$fps-1 1 | grep -q ' gpu 1 '" "3840x2160 10-bit HDR10, $fps fps, BT.2390: the GPU's as the CPU's ($(same 4k$fps 2.5 16))"
+done
+for m in 0 2 3; do
+	twice 4ktm$m "$GM/hdr4k_30.mkv" "VideoResizer=1
+HdrToneMapping=$m"
+	expect "same 4ktm$m 2.5 16 >/dev/null" "4K HDR10, tone mapping $m (0 off, 2 Hable, 3 Reinhard): the same ($(same 4ktm$m 2.5 16))"
+done
+twice 4khlg "$GM/hlg4k_30.mkv" "VideoResizer=1"
+expect "same 4khlg 2.5 16 >/dev/null" "4K HLG: the same ($(same 4khlg 2.5 16))"
+# e: the window over the video: subtitles, the statistics (R3 + Square), the File menu; the GPU's screen against the CPU's
+for g in 0 1; do
+	T=$(newroot t34e-$g)
+	cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+	printf '1\r\n00:00:00,000 --> 00:00:09,000\r\nSubtitles over the GPU picture\r\n' >"$T/root/media/movie.srt"
+	MPCPS5_HOST_GPU=$g run "$T" "0:0;40:$((R3 + SQUARE));42:0;70:$OPTIONS;72:0" "26:state;30:cmd pause;32:seek 1;50:state;90:quit" "55,85" "$T/root/media/movie.mp4" >/dev/null
+done
+# (the statistics' own text differs: the GPU's times, not "scale": rows 130 and below)
+r1=$($COMPARE $WORK/t34e-0/dump/flip00085.ppm $WORK/t34e-1/dump/flip00085.ppm 0 130 1920 1080 0.5 2)
+expect "$COMPARE $WORK/t34e-0/dump/flip00085.ppm $WORK/t34e-1/dump/flip00085.ppm 0 130 1920 1080 0.5 2 >/dev/null && $COMPARE $WORK/t34e-0/dump/flip00085.ppm $WORK/t34e-1/dump/flip00085.ppm 0 0 250 1080 0.2 1 >/dev/null" "the File menu, the subtitles and the window over the GPU's picture: the CPU's screen ($r1)"
+r2=$($COMPARE $WORK/t34e-0/dump/flip00055.ppm $WORK/t34e-1/dump/flip00055.ppm 0 200 1920 1080 0.5 2)
+expect "$COMPARE $WORK/t34e-0/dump/flip00055.ppm $WORK/t34e-1/dump/flip00055.ppm 0 200 1920 1080 0.5 2 >/dev/null" "the subtitles over it: the same ($r2)"
+expect "$REGION $WORK/t34e-1/dump/flip00055.ppm 20 80 900 110 224 224 224 40 300 >/dev/null" "the statistics shown over the GPU's picture (R3 + Square)"
+expect "state $WORK/t34e-1 1 | grep -q 'GPU: upload [0-9.]* ms (one copy), draw [0-9.]* ms, present [0-9.]* ms'" "... with the GPU path's times: $(state $WORK/t34e-1 1 | sed 's/.*\[\(GPU[^]]*\)\].*/\1/')"
+nosan "$WORK/t34e-1"
+# f: the fall-back: no Vulkan driver; a start that died setting the GPU up; the setting
+T=$(newroot t34f1)
+cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+rc=$(VK_ICD_FILENAMES=/nonexistent.json VK_DRIVER_FILES=/nonexistent.json MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'renderer: CPU (the GPU couldn.t be set up' $T/root/logs/boot.log && state $T 1 | grep -q ' gpu 0 ' && $CHECK $T/dump/flip00045.ppm 960 400 red >/dev/null" "no Vulkan driver: the CPU draws (logged: $(grep -m1 '\[gpu\]' $T/root/logs/boot.log | cut -c14-90))"
+expect "[ ! -e $T/root/logs/gpu-starting ]" "... the start guard's marker removed"
+T=$(newroot t34f2)
+cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+mkdir -p "$T/root/logs"
+printf 'attempts 0\nworks 1\nbuild test\n' >"$T/root/logs/gpu-attempts"
+: >"$T/root/logs/gpu-starting"
+rc=$(MPCPS5_HOST_GPU_BUILD_ID=test MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'CPU (a previous GPU start failed' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 1 gpu 0 ' && grep -q '^attempts 4' $T/root/logs/gpu-attempts" "one interrupted GPU start: software rendering immediately, hardware decoding retained"
+rc=$(MPCPS5_HOST_GPU_BUILD_ID=test MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/movie.mp4")
+expect "grep -q 'CPU (a previous GPU start failed' $T/root/logs/boot.log && state $T 1 | grep -q ' gpu 0 ' && grep -q '^attempts 4' $T/root/logs/gpu-attempts" "... later launches keep recovery without restarting the four-variant cycle"
+# A deliberately changed driver compatibility revision permits one new attempt.
+rc=$(MPCPS5_HOST_GPU_BUILD_ID=new-driver MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/movie.mp4")
+expect "grep -q 'driver revision changed' $T/root/logs/boot.log && grep -q 'GPU start: variant 1 works' $T/root/logs/boot.log && state $T 1 | grep -q ' gpu 1 ' && grep -q '^build new-driver' $T/root/logs/gpu-attempts" "a changed driver revision gets one new attempt, a displayed frame records success"
+rc=$(MPCPS5_HOST_GPU_BUILD_ID=new-driver MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/movie.mp4")
+expect "grep -q 'GPU start: the kept variant 1' $T/root/logs/boot.log && state $T 1 | grep -q ' gpu 1 '" "... the working GPU is kept for later launches"
+nosan "$T"
+T=$(newroot t34f8)
+cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+ini "$T" "GpuStart=1"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'renderer: CPU (the setting (Options > Output: GPU start: CPU only))' $T/root/logs/boot.log && state $T 1 | grep -q ' gpu 0 ' && $CHECK $T/dump/flip00045.ppm 960 400 red >/dev/null" "Options > Output > GPU start: CPU only: the GPU isn't started"
+nosan "$T"
+T=$(newroot t34f3)
+cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+ini "$T" "VideoRenderer=1"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "45" "$T/root/media/movie.mp4")
+expect "grep -q 'renderer: CPU (the setting' $T/root/logs/boot.log && state $T 1 | grep -q ' gpu 0 ' && grep -q '^VideoRenderer=1' $T/root/mpc-hc.ini" "Options > Output > Software renderer: the CPU, kept in mpc-hc.ini"
+# h (review M1): pictures whose plane images the GPU can't make are drawn on the CPU, not left black
+T=$(newroot t34h)
+cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
+ini "$T" "VideoResizer=1"
+PS5GPU_TEST_VIDEO_IMAGE_FAIL=3 MPCPS5_HOST_GPU=1 run "$T" "0:0" "$SHOT" "55" "$T/root/media/fmt_yuv420p.nut" >/dev/null
+expect "grep -q 'not taken: no memory for its plane images' $T/root/logs/boot.log && grep -q 'picture is drawn on the CPU' $T/root/logs/boot.log && $COMPARE $WORK/t34-yuv420p-0/dump/shot.ppm $T/dump/flip00055.ppm 0 66 1920 976 0.2 2 >/dev/null" "the GPU can't make a picture's images: refused, the CPU draws it (the same as 1.5.4's)"
+# i (review M2, M-A): a decoder that holds 10 / 3 of its buffers (its pipeline and reordering), 150 4K HDR10 pictures:
+# never short of buffers, no picture lost at the end; as many handed out in place as its buffers leave room for, the
+# others copied into the same two planes (the GPU's plane images made once for the film, never swapped)
+for h in 10 3; do
+	T=$(newroot t34i-$h)
+	ini "$T" "VideoResizer=1"
+	cp "$GM/hdr4k_30_5s.mkv" "$T/root/media/"
+	MPCPS5_HOST_HWDEC_HOLD=$h MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_OUT=320x180 MAXFLIPS=3000 run "$T" "0:0" "60:state;418:state;420:quit" "" "$T/root/media/hdr4k_30_5s.mkv" >/dev/null
+	CL=$(grep -o 'closed: .*' $T/root/logs/boot.log | head -1)
+	IP=$(echo "$CL" | sed -n 's/.*(\([0-9]*\) in place).*/\1/p')
+	SW=$(grep -c 'video planes: .*3840x2160' $T/root/logs/boot.log)
+	MIN=$([ $h = 10 ] && echo 45 || echo 120)
+	expect "state $T 1 | grep -q ' hw 1 gpu 1 ' && ! grep -q 'out of picture buffers\|handing the video to FFmpeg\|no picture buffer free' $T/root/logs/boot.log && echo '$CL' | grep -q 'closed: 150 access units, 150 pictures (.*), 0 errors'" "a decoder holding $h buffers: never short of them, all 150 pictures out ($CL)"
+	expect "[ \"${IP:-0}\" -ge $MIN ] && [ $SW = 1 ]" "... at least $MIN in place (${IP:-0}), the plane images made once ($SW)"
+	nosan "$T"
+done
+# j (review L1): an HDR10 film's peak from the stream's SEI on the console decoder's pictures (the container has none)
+T=$(newroot t34j)
+cp "$GM/hdr4000.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:state;42:quit" "35" "$T/root/media/hdr4000.mkv")
+expect "grep -q 'the stream.s mastering display: up to 4000 nits' $T/root/logs/boot.log && grep -q 'MaxCLL 4000' $T/root/logs/boot.log && grep -q 'film peak 4000 nits' $T/root/logs/boot.log" "the console decoder's pictures carry the stream's HDR metadata: tone mapped from 4000 nits"
+for g in 0 1; do
+	t=$(newroot t34j-$g)
+	ini "$t" "VideoResizer=1"
+	cp "$GM/hdr4000.mkv" "$t/root/media/"
+	MPCPS5_HOST_INPLACE_PAUSED=1 MPCPS5_HOST_HWDEC=$g MPCPS5_HOST_GPU=$g run "$t" "0:0" "$SHOT" "55" "$t/root/media/hdr4000.mkv" >/dev/null
+done
+r=$($COMPARE $WORK/t34j-0/dump/flip00055.ppm $WORK/t34j-1/dump/flip00055.ppm 0 130 1920 976 2.5 16)
+expect "$COMPARE $WORK/t34j-0/dump/flip00055.ppm $WORK/t34j-1/dump/flip00055.ppm 0 130 1920 976 2.5 16 >/dev/null && state $WORK/t34j-1 1 | grep -q ' hw 1 gpu 1 .*shown picture: in place'" "... read in place after a seek, as FFmpeg's pictures on the CPU path are ($r)"
+# k (review L2): a start that died at its first picture read in place: the next copies them, the one after tries again
+T=$(newroot t34k)
+cp "$MEDIA/hdr_pq.mkv" "$T/root/media/"
+mkdir -p "$T/root/logs" && : >"$T/root/logs/gpu-inplace-starting"
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:state;42:quit" "35" "$T/root/media/hdr_pq.mkv")
+expect "grep -q \"didn't get past its first picture read in place: this one copies them\" $T/root/logs/boot.log && ! grep -q 'pictures handed out in place' $T/root/logs/boot.log && [ ! -e $T/root/logs/gpu-inplace-starting ]" "a start that died at its first in-place picture: the next copies them (the marker gone)"
+# (final review 2) with each frame left in flight until the next Present, as on the console's display
+# (PS5GPU_TEST_OFFSCREEN_IN_FLIGHT): the marker goes only once the frame that read the first in-place picture is done
+# (two Presents after it was taken), and at the exit the picture the last frame read is let go before its import is
+rc=$(PS5GPU_TEST_OFFSCREEN_IN_FLIGHT=1 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:state;42:quit" "35" "$T/root/media/hdr_pq.mkv")
+GL=$(grep -o 'in-place start guard cleared: present [0-9]*, the first in-place picture taken after present [0-9]*' $T/root/logs/boot.log | head -1)
+GN=$(echo "$GL" | sed -n 's/.*cleared: present \([0-9]*\),.*/\1/p'); GP=$(echo "$GL" | sed -n 's/.*after present \([0-9]*\)$/\1/p')
+expect "grep -q 'pictures handed out in place' $T/root/logs/boot.log && [ ! -e $T/root/logs/gpu-inplace-starting ] && [ -n '$GN' ] && [ ${GN:-0} -ge \$((${GP:-0} + 2)) ] && state $T 1 | grep -q 'shown picture: in place'" "... the start after it reads them in place again; the marker removed once the frame that read the first one is done ($GL)"
+expect "[ \$(grep -c 'KiB at .* imported' $T/root/logs/boot.log) -ge 1 ] && [ \$(grep -c 'KiB at .* imported' $T/root/logs/boot.log) = \$(grep -c 'picture buffers let go (their import released)' $T/root/logs/boot.log) ] && ! grep -q 'only forgotten' $T/root/logs/boot.log" "... at the exit, the last frame still in flight: every import of the decoder's buffers released before the GPU shuts down"
+# an orderly exit right after the first pictures: the marker never stays behind
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "14:quit" "" "$T/root/media/hdr_pq.mkv")
+expect "[ $rc = 0 ] && [ ! -e $T/root/logs/gpu-inplace-starting ]" "an exit soon after the start: no marker left (gpu::Stop clears it)"
+# (review M-B) the marker is written before the import itself: a start that ends there leaves it for the next
+rc=$(MPCPS5_HOST_DIE_AT_IMPORT=1 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:state;42:quit" "35" "$T/root/media/hdr_pq.mkv")
+expect "[ $rc = 3 ] && grep -q 'the app ends at the import' $T/root/logs/boot.log && [ -e $T/root/logs/gpu-inplace-starting ]" "a start that ends in the import itself: the marker already there (exit $rc)"
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:state;42:quit" "35" "$T/root/media/hdr_pq.mkv")
+expect "grep -q \"didn't get past its first picture read in place: this one copies them\" $T/root/logs/boot.log && ! grep -q 'KiB at .* imported' $T/root/logs/boot.log" "... the next start copies the pictures (no import)"
+# l (review L3): the GPU lost while playing: the CPU and the scan-out buffers take over, the picture goes on
+T=$(newroot t34l)
+cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+rc=$(MPCPS5_HOST_GPU_FAIL_AT=40 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "30:state;80:state;90:quit" "85" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'three presents failed in a row' $T/root/logs/boot.log && state $T 1 | grep -q ' gpu 1 ' && state $T 2 | grep -q ' gpu 0 ' && $CHECK $T/dump/flip00085.ppm 960 400 red >/dev/null" "the GPU lost while playing: the CPU draws on, into the scan-out buffers (no wait of seconds)"
+expect "grep -q 'KiB at .* imported' $T/root/logs/boot.log && grep -q 'picture buffers let go (their import released)' $T/root/logs/boot.log && ! grep -q 'only forgotten' $T/root/logs/boot.log" "... the open decoder's import released while the GPU was still there"
+nosan "$T"
+
+# g: Options > Output shows the renderer and the resizer
+T=$(newroot t34g)
+ini "$T" "KeyOptions=OptionsOutput"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0;30:$OPTIONS;32:0" "60:quit" "50")
+expect "[ $rc = 0 ] && grep -q '^VideoResizer=0' $T/root/mpc-hc.ini && grep -q '^VideoRenderer=0' $T/root/mpc-hc.ini" "Options > Output (opened by Options: KeyOptions=OptionsOutput); the settings written"
+# (the page's look: checked by eye, $T/dump/flip00050.ppm)
+nosan "$T"
+fi
+
+if want 35; then
+echo "== 35. 1.6 test3: the console decoder at the start (one line, on or off and why), VP9 on it, 8K on the CPU (no freeze), raw .yuv and .y4m"
+GM=$MEDIA/gpu
+[ -f "$GM/x_320x180_1.5.24fps.yuv" ] || bash tests/make_gpu_media.sh "$GM" >/dev/null
+COMPARE="python3 $PWD/tests/compare_ppm.py"
+SHOT="30:cmd pause;32:seek 0.5;60:state;62:quit"
+# a: the start's lines: the console decoder on (its library loaded, every function bound, the queues made) or off, and
+# why; the imports' report (no table in the host build: tools/embed_imports.py writes it into the console's eboot)
+T=$(newroot t35a1)
+rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "20:quit" "")
+expect "grep -q '\[hwdec\] console decoder: on (H.264, HEVC 8 / 10-bit, VP9 8 / 10-bit, up to 4K)' $T/root/logs/boot.log && grep -q 'VP9 compute queue: ready' $T/root/logs/boot.log && grep -q '\[imports\] no table in this build' $T/root/logs/boot.log" "the console decoder on at the start, in one line (VP9's own queue made too)"
+T=$(newroot t35a2)
+rc=$(run "$T" "0:0" "20:quit" "")
+expect "grep -q \"\[hwdec\] console decoder: off (its library didn't load: 0x80020063)\" $T/root/logs/boot.log" "... off, and why"
+# b: VP9 8-bit (profile 0) and 10-bit (profile 2) on the console decoder's stand-in, drawn by the GPU: every picture
+# out, the same picture as FFmpeg's on the CPU path after a paused seek (the 10-bit one read in place)
+for b in 8 10; do
+	for g in 0 1; do
+		t=$(newroot t35b$b-$g)
+		ini "$t" "VideoResizer=1"
+		cp "$GM/vp9_$b.webm" "$t/root/media/"
+		MPCPS5_HOST_INPLACE_PAUSED=1 MPCPS5_HOST_HWDEC=$g MPCPS5_HOST_GPU=$g run "$t" "0:0" "$SHOT" "55" "$t/root/media/vp9_$b.webm" >/dev/null
+	done
+	T=$WORK/t35b$b-1
+	r=$($COMPARE $WORK/t35b$b-0/dump/flip00055.ppm $T/dump/flip00055.ppm 0 130 1920 976 2.5 16)
+	expect "grep -q 'video decoder: VP9 640x360 (console decoder)' $T/root/logs/boot.log && state $T 1 | grep -q ' hw 1 gpu 1 ' && $COMPARE $WORK/t35b$b-0/dump/flip00055.ppm $T/dump/flip00055.ppm 0 130 1920 976 2.5 16 >/dev/null" "VP9 $b-bit on the console decoder, drawn by the GPU: FFmpeg's picture ($r)"
+	nosan "$T"
+	t=$(newroot t35bp$b)
+	cp "$GM/vp9_$b.webm" "$t/root/media/"
+	MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$t" "0:0" "150:state;152:quit" "" "$t/root/media/vp9_$b.webm" >/dev/null
+	expect "grep -q 'closed: 50 access units, 50 pictures (.*), 0 errors' $t/root/logs/boot.log" "... played to its end: all 50 pictures ($(grep -o 'closed: [0-9]* access units, [0-9]* pictures' $t/root/logs/boot.log))"
+done
+# c: a VP9 the console's decoder refuses: FFmpeg, said why
+T=$(newroot t35c)
+cp "$GM/vp9_8.webm" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC_NO_VP9=1 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:state;42:quit" "" "$T/root/media/vp9_8.webm")
+expect "[ $rc = 0 ] && grep -q 'video decoder: FFmpeg (the decoder couldn.t be created)' $T/root/logs/boot.log && state $T 1 | grep -q 'picture 1 .* hw 0 gpu 1'" "VP9 the console's decoder refuses: FFmpeg plays it"
+# c2 (test12; test11's PS5 log): a 720x1280 phone video -- the console's decoder fails its memory query for pictures
+# under 1920x1088 (the stand-in does with MPCPS5_HOST_HWDEC_SMALL_FAILS=1): the decoder is made with room for 1920x1088
+# and plays it; its pictures are copied right (red at the middle)
+T=$(newroot t35c2)
+cp "$GM/portrait.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC_SMALL_FAILS=1 MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "60:state;62:quit" "55" "$T/root/media/portrait.mp4")
+expect "[ $rc = 0 ] && grep -q '720x1280: the decoder is made with room for 1920x1280 (smaller pictures fail its memory query)' $T/root/logs/boot.log && grep -q 'video decoder: H.264 720x1280 (console decoder)' $T/root/logs/boot.log && ! grep -q 'memory query 0x811d0200' $T/root/logs/boot.log && state $T 1 | grep -q 'picture 1 .* hw 1 ' && $CHECK $T/dump/flip00055.ppm 960 540 red >/dev/null" "a 720x1280 phone video on the console's decoder: made with room for 1920x1088 (the memory query fails below it), plays (red)"
+nosan "$T"
+# d: 8K HEVC 10-bit (test2: the app froze). (test12, after VLC for PS5) the pictures come from the console's direct memory
+# (some 12 GiB), so 8K opens; only with direct memory short too (200 MiB: another app holding it) is it refused, with
+# the honest message, at once; the app goes on
+for g in 0 1; do
+	T=$(newroot t35d$g)
+	cp "$GM/hevc8k_10.mp4" "$T/root/media/"
+	t0=$(date +%s)
+	rc=$(MPCPS5_HOST_DIRECT_FREE_MB=200 MPCPS5_HOST_HEAP_MB=360 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=$g run "$T" "0:0;40:$CROSS;42:0" "60:state;62:quit" "" "$T/root/media/hevc8k_10.mp4")
+	dt=$(( $(date +%s) - t0 ))
+	expect "[ $rc = 0 ] && grep -q \"failed: This 7680x4320 10-bit video can't be played here: the console's decoder takes up to 4K, and decoding it on the CPU needs about [0-9]* MiB of memory, more than the PS5 leaves the app (200 MiB). Even with the memory, the CPU would show it at about 30 pictures a second.\" $T/root/logs/boot.log && grep -q 'bigger than 4K' $T/root/logs/boot.log && [ $dt -lt 90 ]" "8K HEVC 10-bit with direct memory short (200 MiB), GPU $g: not opened, the message says why; the app answers (${dt} s)"
+done
+# e: the same 8K with the console's direct memory (12276 MiB free, as the console said): opened, 8 frame threads, the
+# pictures from direct memory (the bigmem allocator: blocks mapped, none left to FFmpeg's own), said on the OSD; a quit
+# while it decodes ends the app at once
+for g in 0 1; do
+	T=$(newroot t35e$g)
+	cp "$GM/hevc8k_10.mp4" "$T/root/media/"
+	t0=$(date +%s)
+	# (lavapipe shrinking 8K pictures takes seconds a frame at 960x540: the GPU run's output is 320x180)
+	rc=$(MPCPS5_HOST_HEAP_MB=360 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=$g MPCPS5_HOST_GPU_OUT=320x180 run "$T" "0:0" "90:state;92:quit" "" "$T/root/media/hevc8k_10.mp4")
+	dt=$(( $(date +%s) - t0 ))
+	BM=$(grep -o 'pictures: [0-9]* blocks mapped, [0-9]* taken from the free list, [0-9]* left to FFmpeg' $T/root/logs/boot.log | head -1)
+	expect "[ $rc = 0 ] && grep -q '7680x4320 10-bit, beyond the console.s decoder (4K): FFmpeg on the CPU, its pictures from direct memory (12276 MiB free)' $T/root/logs/boot.log && ! grep -q '7680x4320 10-bit on the CPU: ' $T/root/logs/boot.log && grep -q '\[osd\] 7680x4320 on the CPU (the console.s decoder takes up to 4K): it may play slowly.' $T/root/logs/boot.log && grep -q '\[player\] closed' $T/root/logs/boot.log && state $T 1 | grep -q 'video 0 .* picture 1' && echo '$BM' | grep -q 'pictures: [1-9][0-9]* blocks mapped, .* 0 left to FFmpeg' && [ $dt -lt 120 ]" "8K on the CPU with the memory, GPU $g: opened with 8 frame threads, its pictures from direct memory ($BM), a picture shown; quit while decoding: closed at once (${dt} s)"
+	nosan "$T"
+done
+# (test12) 8K with sound for 3 s (90 pictures): Auto decoding turns fast when the CPU can't keep up (the decoder slowed
+# too); Full never does; Fast starts so. The bigmem allocator's blocks come back from its free list (not mapped again)
+for m in 0 1 2; do
+	T=$(newroot t35e3-$m)
+	cp "$GM/hevc8k_10_3s.mp4" "$T/root/media/"
+	ini "$T" "DecodeMode=$m"
+	rc=$(MPCPS5_HOST_SLOW_DECODE=40,10 MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_OUT=320x180 MAXFLIPS=4000 run "$T" "0:0" "600:state;602:quit" "" "$T/root/media/hevc8k_10_3s.mp4")
+	BM=$(grep -o 'pictures: [0-9]* blocks mapped, [0-9]* taken from the free list, [0-9]* left to FFmpeg' $T/root/logs/boot.log | head -1)
+	case $m in
+	0) W="grep -q \"FFmpeg can't keep up (.*): faster decoding, level 1 (no loop filter)\" $T/root/logs/boot.log && grep -q '\[osd\] Fast decoding: softer picture so this video keeps up.' $T/root/logs/boot.log && ! grep -q 'decoding: fast (Options' $T/root/logs/boot.log"; D="Auto: faster decoding once it can't keep up, said on the OSD" ;;
+	1) W="grep -q 'decoding: fast (Options > Playback): no loop filter, FFmpeg.s fast flag, from the start' $T/root/logs/boot.log && ! grep -q 'faster decoding, level 1' $T/root/logs/boot.log"; D="Fast: fast from the start (no step to level 1)" ;;
+	2) W="! grep -q \"can't keep up\\|decoding: fast\" $T/root/logs/boot.log"; D="Full: never faster" ;;
+	esac
+	expect "[ $rc = 0 ] && $W && state $T 1 | grep -q 'video 0 audio 1 .* picture 1' && echo '$BM' | grep -q 'pictures: [1-9][0-9]* blocks mapped, [1-9][0-9]* taken from the free list, 0 left to FFmpeg'" "8K with sound, Decoding mode $m -- $D; pictures from direct memory, reused ($BM)"
+	nosan "$T"
+done
+# f: raw .yuv: no size inside; with its size in its name it opens as raw video; .y4m opens
+T=$(newroot t35f1)
+cp "$GM/BodeMuseum_PQ.yuv" "$T/root/media/"
+rc=$(run "$T" "0:0;30:$CROSS;32:0" "40:quit" "" "$T/root/media/BodeMuseum_PQ.yuv")
+expect "grep -q 'failed: Raw .yuv files have no picture size or format inside; convert it to .mp4 or .mkv (or .y4m)' $T/root/logs/boot.log" "a raw .yuv without its size: the message says what to do"
+T=$(newroot t35f2)
+cp "$GM/raw_320x180_10fps.yuv" "$GM/clip.y4m" "$T/root/media/"
+rc=$(run "$T" "0:0" "20:state;30:open $T/root/media/clip.y4m;50:state;60:quit" "" "$T/root/media/raw_320x180_10fps.yuv")
+expect "grep -q 'raw .yuv: 320x180 yuv420p at 10 fps, from its name' $T/root/logs/boot.log && state $T 1 | grep -q 'video 0 .* picture 1' && state $T 2 | grep -q 'video 0 .* picture 1' && grep -q 'opened .*clip.y4m' $T/root/logs/boot.log" "... with its size in its name: opened as raw video; a .y4m opens"
+nosan "$T"
+T=$(newroot t35f3)
+cp "$GM/raw_320x180_23.976fps.yuv" "$T/root/media/"
+rc=$(run "$T" "0:0" "20:state;30:quit" "" "$T/root/media/raw_320x180_23.976fps.yuv")
+expect "grep -q 'raw .yuv: 320x180 yuv420p at 23.976 fps, from its name' $T/root/logs/boot.log" "... a fractional rate in its name (23.976fps)"
+for n in "clip_320x180.60fps.yuv:60" "x_320x180_1.5.24fps.yuv:5.24"; do
+	T=$(newroot t35f4)
+	cp "$GM/${n%%:*}" "$T/root/media/"
+	rc=$(run "$T" "0:0" "20:quit" "" "$T/root/media/${n%%:*}")
+	expect "grep -q 'raw .yuv: 320x180 yuv420p at ${n##*:} fps, from its name' $T/root/logs/boot.log" "... ${n%%:*}: ${n##*:} fps"
+done
+# g (test4 review): a decoder slower than real time for the film's first 8 s (MPCPS5_HOST_SLOW_DECODE): FFmpeg decodes
+# faster a step at a time, measured at the decoder; the video catches up by keyframes; the sound never runs short; once
+# the load is gone, the steps come back down to full quality
+T=$(newroot t35g)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_SLOW_DECODE=80,6 MAXFLIPS=4000 run "$T" "0:0" "120:state;400:state;1740:state;1742:quit" "" "$T/root/media/slow28.mp4")
+U1=$(state $T 1 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p'); U2=$(state $T 2 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p')
+expect "grep -q \"FFmpeg can't keep up (.*): faster decoding, level 1 (no loop filter)\" $T/root/logs/boot.log && grep -q \"FFmpeg can't keep up (.*): faster decoding, level 2\" $T/root/logs/boot.log" "a decoder slower than real time: faster decoding, level 1 then 2 ($(grep -c "can't keep up" $T/root/logs/boot.log) steps)"
+expect "grep -q 'FFmpeg keeps up again: faster decoding, level 1' $T/root/logs/boot.log && grep -q 'FFmpeg keeps up again: faster decoding, level 0 (full quality)' $T/root/logs/boot.log" "... the load gone: back down a step at a time to full quality"
+expect "[ -n '$U1' ] && [ -n '$U2' ] && [ \$(( ${U2:-0} - ${U1:-0} )) -le 5 ]" "... the sound never ran short meanwhile (underruns $U1 -> $U2 between 2 s and 6.7 s)"
+expect "grep -q 'the video is .* behind: left out up to the next keyframe' $T/root/logs/boot.log && grep -q 'packets left out; decoding on from a keyframe (the decoder flushed)' $T/root/logs/boot.log" "... more than a second behind: the video goes on from the next keyframe, its decoder flushed"
+# (and none of it when the decoder keeps up: the same film, not slowed)
+T=$(newroot t35g2)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(run "$T" "0:0" "600:state;602:quit" "" "$T/root/media/slow28.mp4")
+expect "[ $rc = 0 ] && ! grep -q \"left out\\|can't keep up\" $T/root/logs/boot.log && state $T 1 | grep -q 'video 0 audio 1'" "... the same film decoded in time: nothing left out, no faster decoding"
+# (test6 review) the demuxer never leaves packets out; with the sound short it reads on past its limit, up to a cap
+# (MPCPS5_HOST_DEMUX_MB=1: 1 MiB "full", 1.5 MiB the cap; peak: what the demuxer held at most, at the close)
+peak_ok() { local k; k=$(sed -n 's/.*demuxer: at most \([0-9]*\) KiB of packets queued.*/\1/p' $1/root/logs/boot.log | tail -1); [ -n "$k" ] && [ "$k" -le $((1536 + 512)) ]; }
+peak() { sed -n 's/.*demuxer: at most \([0-9]*\) KiB of packets queued.*/\1/p' $1/root/logs/boot.log | tail -1; }
+# real starvation: a decoder far too slow for 10 s, at the small cap: the sound plays on (no new underruns), the video
+# catches up by the video thread's keyframe skip, nothing left out by the demuxer, the queues under the cap
+T=$(newroot t35g3)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_DEMUX_MB=1 MPCPS5_HOST_SLOW_DECODE=400,10 MAXFLIPS=4000 run "$T" "0:0" "180:state;600:state;602:quit" "" "$T/root/media/slow28.mp4")
+U1=$(state $T 1 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p'); U2=$(state $T 2 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p')
+expect "[ $rc = 0 ] && ! grep -q 'by the demuxer' $T/root/logs/boot.log && grep -q 'the video is .* behind: left out up to the next keyframe' $T/root/logs/boot.log && [ -n '$U1' ] && [ \$(( ${U2:-0} - ${U1:-0} )) -le 5 ] && peak_ok $T" "a decoder far too slow at a small cap: the sound plays on (underruns ${U1:-?} -> ${U2:-?}), the video catches up by the video thread's skip, nothing left out by the demuxer, at most $(peak $T) KiB queued (cap 1536)"
+nosan "$T"
+# ... the video thread kept from skipping too: the demuxer reads on to the cap and waits there (no packet left out)
+T=$(newroot t35g4)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_DEMUX_MB=1 MPCPS5_HOST_NO_VSKIP=1 MPCPS5_HOST_SLOW_DECODE=400,10 MAXFLIPS=4000 run "$T" "0:0" "600:state;602:quit" "" "$T/root/media/slow28.mp4")
+expect "[ $rc = 0 ] && grep -q 'the sound is short behind a full video queue: reading on (up to 1 MiB queued)' $T/root/logs/boot.log && ! grep -q 'left out' $T/root/logs/boot.log && peak_ok $T" "... the video thread kept from skipping: the demuxer reads on for the sound up to the cap and waits there (at most $(peak $T) KiB queued), nothing left out"
+nosan "$T"
+# (test7 review) ... and with the heap short: the cap is what the heap leaves past the pictures' estimate and a margin,
+# never under the normal limit (40 MiB of heap: none past the 1 MiB limit)
+T=$(newroot t35g5)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_HEAP_MB=40 MPCPS5_HOST_DEMUX_MB=1 MPCPS5_HOST_NO_VSKIP=1 MPCPS5_HOST_SLOW_DECODE=400,10 MAXFLIPS=4000 run "$T" "0:0" "600:state;602:quit" "" "$T/root/media/slow28.mp4")
+K=$(peak $T)
+expect "[ $rc = 0 ] && [ \$(grep -c 'the sound is short behind a full video queue: the heap leaves no room past 1 MiB (40 MiB free, about [0-9]* MiB kept for pictures)' $T/root/logs/boot.log) = 1 ] && ! grep -q 'reading on' $T/root/logs/boot.log && [ -n '$K' ] && [ ${K:-9999} -le $((1024 + 512)) ]" "... the heap short (40 MiB): no reading on past the normal limit, said once (at most ${K:-?} KiB queued)"
+nosan "$T"
+# (test7 review) the console's decoder slower than real time (its host stand-in slowed): the same keyframe skip, the
+# decoder reset there as after a seek; the sound plays on
+T=$(newroot t35g6)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_SLOW_DECODE=80,6 MAXFLIPS=4000 run "$T" "0:0" "120:state;400:state;402:quit" "" "$T/root/media/slow28.mp4")
+U1=$(state $T 1 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p'); U2=$(state $T 2 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p')
+expect "[ $rc = 0 ] && state $T 2 | grep -q ' hw 1 ' && grep -q 'the video is .* behind: left out up to the next keyframe' $T/root/logs/boot.log && grep -q 'packets left out; decoding on from a keyframe (the console.s decoder reset)' $T/root/logs/boot.log && [ -n '$U1' ] && [ \$(( ${U2:-0} - ${U1:-0} )) -le 5 ]" "the console's decoder slower than real time: it catches up by keyframes, reset there; the sound plays on (underruns ${U1:-?} -> ${U2:-?})"
+nosan "$T"
+# (test7 review) a long GOP on the CPU (5 s, 300 packets, at 60 fps), the decoder slower than real time for 12 s: the
+# skip goes to the queued keyframe all the same; the sound plays on; once the decoder is fast again the picture is with
+# the clock
+T=$(newroot t35g7)
+cp "$GM/long_gop60.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_SLOW_DECODE=40,12 MAXFLIPS=4000 run "$T" "0:0" "120:state;600:state;1320:state;1322:quit" "" "$T/root/media/long_gop60.mp4")
+U1=$(state $T 1 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p'); U2=$(state $T 2 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p')
+P3=$(field $T 3 2); I3=$(state $T 3 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p')
+expect "[ $rc = 0 ] && grep -q 'the video is .* behind: left out up to the next keyframe' $T/root/logs/boot.log && grep -q 'packets left out; decoding on from a keyframe (the decoder flushed)' $T/root/logs/boot.log && [ -n '$U1' ] && [ \$(( ${U2:-0} - ${U1:-0} )) -le 5 ] && python3 -c 'import sys; sys.exit(0 if abs(${P3:-0} - ${I3:--99}) < 1.0 else 1)'" "a 5 s GOP at 60 fps, the decoder too slow for 12 s: the skip to the queued keyframe (packets $(grep -o '[0-9]* packets left out' $T/root/logs/boot.log | head -1)); the sound plays on (underruns ${U1:-?} -> ${U2:-?}); then the picture with the clock (${I3:-?} s at ${P3:-?} s)"
+nosan "$T"
+# an exact seek into a 10 s GOP at 60 fps (test5 re-review: the demuxer left out the packets the decoder needed to
+# reach the target, and the picture froze), with FFmpeg and the console's decoder (the host stand-in)
+# (test8 review) the clock and the sound wait for the seek's first picture (the target's) and go on from it together:
+# while the old picture is up the position stands at the target; the first picture is the target's; no catching up
+# needed after it (no keyframe skip); nothing read on. (test10 review: the stand-in decodes about 170 pictures a second
+# here, so its target is 4.5 s -- 270 pictures from the keyframe -- to be there well within the hold's 3 s)
+for hw in 0 1; do
+	T=$(newroot t35gop$hw)
+	cp "$GM/gop600.mkv" "$T/root/media/"
+	if [ $hw = 1 ]; then TG=4.5; else TG=9.5; fi
+	SC="60:seek $TG;66:state;240:state;330:state;420:state;510:state;520:quit"
+	if [ $hw = 1 ]; then
+		rc=$(MPCPS5_HOST_HWDEC=1 MAXFLIPS=4000 run "$T" "0:0" "$SC" "" "$T/root/media/gop600.mkv")
+	else
+		rc=$(MAXFLIPS=4000 run "$T" "0:0" "$SC" "" "$T/root/media/gop600.mkv")
+	fi
+	SS=$(for i in 1 2 3 4 5; do state $T $i | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p'; done | tr '\n' ' ')
+	PP=$(for i in 1 2 3 4 5; do field $T $i 2; done | tr '\n' ' ')
+	FP=$(sed -n 's/.*exact seek: its first picture (\([0-9.]*\) s) after \([0-9.]*\) s.*/\1/p' $T/root/logs/boot.log | head -1)
+	HW=$(sed -n 's/.*exact seek: its first picture ([0-9.]* s) after \([0-9.]*\) s.*/\1/p' $T/root/logs/boot.log | head -1)
+	expect "[ $rc = 0 ] && [ -n '$FP' ] && python3 -c 'import sys; sys.exit(0 if abs(${FP:-0} - $TG) <= 0.1 and ${HW:-99} <= 3.0 else 1)' && ! grep -q 'left out up to the next keyframe\|reading on\|latest one decoded' $T/root/logs/boot.log && python3 -c 'import sys; s = [float(x) for x in \"$SS\".split()]; p = [float(x) for x in \"$PP\".split()]; ok = len(s) == 5 == len(p) and all(abs(b - $TG) < 0.06 for a, b in zip(s, p) if a < $TG - 0.1) and any(a >= $TG - 0.1 and abs(a - b) < 0.3 for a, b in zip(s, p)) and any(a >= $TG - 0.1 and b > a + 0.5 for a, b in zip(s, s[1:])) and abs(s[4] - p[4]) < 1.0; sys.exit(0 if ok else 1)'" "an exact seek into a 10 s GOP at 60 fps (hw $hw): its first picture ${FP:-?} s, the target's (after ${HW:-?} s, the position held at $TG meanwhile), then picture and clock together; no keyframe skip, nothing read on (pictures $SS; clock $PP)"
+	nosan "$T"
+done
+# ... paused while it waits, and sought again (exactly) before its first picture: the second target's picture, the
+# position there while paused, then on together once played
+T=$(newroot t35gopp)
+cp "$GM/gop600.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 MAXFLIPS=4000 run "$T" "0:0" "60:seek 9.5;66:cmd pause;72:seek 12;300:state;310:cmd play;480:state;490:quit" "" "$T/root/media/gop600.mkv")
+FP=$(sed -n 's/.*exact seek: its first picture (\([0-9.]*\) s) after.*/\1/p' $T/root/logs/boot.log | tr '\n' ' ')
+S1=$(state $T 1 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p'); P1=$(field $T 1 2); S2=$(state $T 2 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p'); P2=$(field $T 2 2)
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 3 ] && python3 -c 'import sys; f = \"$FP\".split(); sys.exit(0 if len(f) == 1 and abs(float(f[0]) - 12) <= 0.1 and abs(${P1:-0} - 12) < 0.06 and abs(${S1:-0} - 12) <= 0.1 and ${P2:-0} > 12.5 and abs(${P2:-0} - ${S2:-0}) < 1.0 else 1)'" "... paused while it waits, then sought again: one first picture, 12 s's (${FP:-?}), the position 12 s while paused (${P1:-?}), then together once played (${S2:-?} s at ${P2:-?} s)"
+nosan "$T"
+# (test10 review) the hold's 3 s bound: it lets go where the decoder is -- the latest picture decoded before the target,
+# the clock and the sound from its time (early, never late; nothing left out, no flush) -- or, with no picture decoded
+# yet (a slow source), the sound at the target and the video catching up by the keyframe skip. Each case ends with
+# picture and clock together, the picture moving:
+#   dec100 / dec30  the decoder at 100 / 30 ms a picture up to 10.6 s, seek to 9.5
+#   read2700        the seek's first read failing, the next one taking 2.7 s (the test9 re-review's freeze: none now)
+#   read4000        the same taking 4 s: no picture at all by 3 s
+#   nokey           seek to 15 with no keyframe after it (the next is the file's end), the decoder at 30 ms up to 12 s
+#   to3             seek to 3 with the decoder at 30 ms up to 10.6 s: early, never at the next keyframe (10 s)
+# (test11 review) a latest picture more than 1 s before the target is not shown (the sound would go back a GOP with
+# it, then jump forward at the keyframe skip): those cases take the "no picture" release; the "near" case (a decoder
+# slowed to 100 ms a picture only from 9 s on: the latest picture about 9.4 s, within 1 s of 9.5) shows it
+for c in "dec100:MPCPS5_HOST_SLOW_DECODE=100,10.6:9.5:420:600:none" "dec30:MPCPS5_HOST_SLOW_DECODE=30,10.6:9.5:360:480:none" \
+	"read2700:MPCPS5_HOST_SEEK_READ_FAULT=2700:9.5:300:420:none" "read4000:MPCPS5_HOST_SEEK_READ_FAULT=4000:9.5:420:600:none" \
+	"nokey:MPCPS5_HOST_SLOW_DECODE=30,12:15:300:420:none" "to3:MPCPS5_HOST_SLOW_DECODE=30,10.6:3:600:800:none" \
+	"near:MPCPS5_HOST_SLOW_DECODE=100,9.8,9.0:9.5:420:600:latest"; do
+	IFS=: read -r name env tg st1 st2 how <<<"$c"
+	T=$(newroot t35gb$name)
+	cp "$GM/gop600.mkv" "$T/root/media/"
+	rc=$(export "$env"; MAXFLIPS=4000 run "$T" "0:0" "60:seek $tg;$st1:state;$st2:state;$((st2 + 2)):quit" "" "$T/root/media/gop600.mkv")
+	HB=$(sed -n 's/.*exact seek: .* after \([0-9.]*\) s;.*/\1/p' $T/root/logs/boot.log | head -1)
+	FP=$(sed -n 's/.*exact seek: its first picture (\([0-9.]*\) s) after.*/\1/p' $T/root/logs/boot.log | head -1)
+	I1=$(state $T 1 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p'); I2=$(state $T 2 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p'); P2=$(field $T 2 2)
+	case $how in
+	latest) W="grep -q 'no picture at the target in 3 s: on from the latest one decoded' $T/root/logs/boot.log && python3 -c 'import sys; sys.exit(0 if $tg - 1.0 <= ${FP:-99} < $tg else 1)'" ;;
+	# (the picture at the first state is the target's region, or still the one from before the seek -- about 1 s --
+	# never a new one more than 1 s before the target)
+	none) W="grep -q 'exact seek: no picture in 3 s after' $T/root/logs/boot.log && ! grep -q 'latest one decoded' $T/root/logs/boot.log && python3 -c 'import sys; sys.exit(0 if ${I1:--99} >= $tg - 1.0 or ${I1:--99} < 1.5 else 1)'" ;;
+	*) W="true" ;;
+	esac
+	expect "[ $rc = 0 ] && [ -n '$HB' ] && $W && [ \"\$(field $T 2 1)\" = 2 ] && python3 -c 'import sys; sys.exit(0 if ${HB:-99} <= 3.2 and ${I2:--99} > ${I1:--99} + 1 and abs(${P2:-0} - ${I2:--99}) < 0.5 else 1)'" "the hold's bound ($name): let go after ${HB:-?} s$([ -n "$FP" ] && echo " at ${FP} s"), then together and moving (${I1:-?} s; ${I2:-?} s at ${P2:-?} s)"
+	nosan "$T"
+done
+# (test10 review) no underruns counted between files: a file closed, 3 s with none open, then another
+T=$(newroot t35gu)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(MAXFLIPS=4000 run "$T" "0:0" "120:state;122:cmd close;300:open $T/root/media/slow28.mp4;420:state;422:quit" "" "$T/root/media/slow28.mp4")
+U1=$(state $T 1 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p'); U2=$(state $T 2 | sed -n 's/.* underruns \([0-9]*\) .*/\1/p')
+expect "[ $rc = 0 ] && [ -n '$U1' ] && [ -n '$U2' ] && [ \$(( ${U2:-999} - ${U1:-0} )) -le 10 ]" "no underruns counted while no file plays (${U1:-?} before the close, ${U2:-?} 2 s into the next file)"
+nosan "$T"
+# (test9 review) an exact seek past the end of the video track (5 s of video, 300 s of sound) at a 1 MiB limit: no
+# picture can come; let go at once (it waited the whole bound: the sound held, the demuxer stopped at its limit)
+T=$(newroot t35gopv)
+cp "$GM/short_video.mkv" "$T/root/media/"
+rc=$(MPCPS5_HOST_DEMUX_MB=1 MAXFLIPS=4000 run "$T" "0:0" "60:seek 60;180:state;182:quit" "" "$T/root/media/short_video.mkv")
+HV=$(sed -n 's/.*exact seek: no picture can come (the video track ended before the target) after \([0-9.]*\) s.*/\1/p' $T/root/logs/boot.log | head -1)
+P1=$(field $T 1 2)
+expect "[ $rc = 0 ] && [ -n '$HV' ] && python3 -c 'import sys; sys.exit(0 if ${HV:-99} < 1.0 and ${P1:-0} > 60.5 else 1)'" "an exact seek past the end of the video track: let go after ${HV:-?} s (under 1), the sound on (${P1:-?} s)"
+nosan "$T"
+# (test9 review) the console's decoder giving up during the hold (MPCPS5_HOST_HWDEC_FAIL: every access unit from the
+# 35th fails -- after the seek, on the way to its target -- and after five resets FFmpeg takes over at a later keyframe): no
+# stuck state, held at most 3 s, the sound starting with that picture (not before it), then picture and clock together
+T=$(newroot t35gopf)
+cp "$GM/slow28.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_HWDEC_FAIL=35 MAXFLIPS=4000 run "$T" "0:0" "30:seek 12.9;150:state;330:state;340:quit" "" "$T/root/media/slow28.mp4")
+HF=$(sed -n 's/.*exact seek: .* after \([0-9.]*\) s;.*/\1/p' $T/root/logs/boot.log | head -1)
+P1=$(field $T 1 2); I1=$(state $T 1 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p'); P2=$(field $T 2 2); I2=$(state $T 2 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p')
+SK=$(line $T 'frame 30: seek'); HD=$(line $T 'video decoder: FFmpeg from now on')
+expect "[ $rc = 0 ] && [ -n '$HD' ] && [ ${HD:-0} -gt ${SK:-99999} ] && [ \"\$(field $T 2 1)\" = 2 ] && [ -n '$HF' ] && python3 -c 'import sys; sys.exit(0 if ${HF:-99} <= 3.1 and ${I2:--99} > ${I1:--99} and abs(${P2:-0} - ${I2:--99}) < 0.5 else 1)'" "the console's decoder giving up during an exact seek's hold: held ${HF:-?} s (at most 3), FFmpeg on, then together (${I1:-?} s at ${P1:-?} s; ${I2:-?} s at ${P2:-?} s)"
+nosan "$T"
+# ... and nothing read on when nothing starves: a 60 fps film with FLAC sound (100 ms packets), and a 60 s film whose
+# sound ends at 5 s (at the 1 MiB limit the demuxer is still reading when the sound is over); the picture plays on
+for f in flac60.mkv short_sound60.mkv; do
+	T=$(newroot t35g-$f)
+	cp "$GM/$f" "$T/root/media/"
+	rc=$(MPCPS5_HOST_DEMUX_MB=1 run "$T" "0:0" "300:state;900:state;902:quit" "" "$T/root/media/$f")
+	S1=$(state $T 1 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p'); S2=$(state $T 2 | sed -n 's/.*; its time \(-\{0,1\}[0-9.]*\)$/\1/p')
+	expect "[ $rc = 0 ] && ! grep -q 'left out\|reading on' $T/root/logs/boot.log && python3 -c 'import sys; sys.exit(0 if ${S2:-0} > ${S1:-0} + 5 else 1)' && peak_ok $T" "$f at the 1 MiB limit: nothing left out or read on, the picture plays on (${S1:-?} s, then ${S2:-?} s), at most $(peak $T) KiB queued"
+done
+SZ=$(stat -c %s "$GM/short_sound60.mkv")
+expect "[ $SZ -gt \$((4 << 20)) ] && state $WORK/t35g-short_sound60.mkv 2 | grep -Eq 'pos ([6-9]|[1-5][0-9])\.' && peak_ok $WORK/t35g-short_sound60.mkv" "... short_sound60.mkv ($((SZ >> 20)) MiB): at the state past the sound's end (5 s) and still reading the file (at most 1.5 MiB of it queued)"
+nosan "$T"
+# h (test4 review): a 4K film on the CPU with the heap a console start showed (360 MiB): FFmpeg keeps its frame threads
+# (test5 review) up to 4K the frame threads the heap takes: 8 with plenty, 3 with 600 MiB (24.9 MB pictures: 6
+# references + 3 being decoded + 6 queued + 2 drawn in 0.7 x 600 MiB), none (slice threads, 3 queued) with 360 MiB;
+# never refused
+# (test12) a 4K 10-bit picture is 25 MiB: from direct memory, whose free run is the budget (MPCPS5_HOST_DIRECT_FREE_MB;
+# 90% of it): 8 threads with 12 GiB, 3 with 470 MiB, none with 300 MiB
+for mb in 12276 470 300; do
+	T=$(newroot t35h$mb)
+	cp "$GM/hdr4k_30.mkv" "$T/root/media/"
+	MPCPS5_HOST_DIRECT_FREE_MB=$mb MPCPS5_HOST_HEAP_MB=360 MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_OUT=320x180 run "$T" "0:0" "60:state;62:quit" "" "$T/root/media/hdr4k_30.mkv" >/dev/null
+done
+expect "! grep -q '3840x2160 10-bit on the CPU' $WORK/t35h12276/root/logs/boot.log && grep -q '3840x2160 10-bit on the CPU: 3 frame threads (about [0-9]* MiB of 470 MiB free of direct memory)' $WORK/t35h470/root/logs/boot.log && grep -q '3840x2160 10-bit on the CPU: about [0-9]* MiB of 300 MiB free of direct memory; no frame threads, 3 pictures queued' $WORK/t35h300/root/logs/boot.log && state $WORK/t35h300 1 | grep -q 'picture 1' && ! grep -q 'player\] failed' $WORK/t35h300/root/logs/boot.log" "4K on the CPU: 8 frame threads with 12 GiB of direct memory, 3 with 470 MiB, none with 300 MiB (still played)"
+# (test6 review) past its own estimate's budget the 4K path opens, and the log says so
+expect "grep -q 'no frame threads, 3 pictures queued (warning: past the share kept for pictures; it may run short of memory)' $WORK/t35h300/root/logs/boot.log && ! grep -q 'warning' $WORK/t35h470/root/logs/boot.log" "... 300 MiB: past the budget (about $(grep -o 'about [0-9]* MiB of 300' $WORK/t35h300/root/logs/boot.log | head -1)): opened with a warning in the log"
+# (test6 review) the console's decoder gives up (MPCPS5_HOST_HWDEC_FAIL=1: it refuses the video): FFmpeg takes over with the threads
+# the heap took at the open (600 MiB: 3; 360 MiB: none, 3 pictures queued), not 8
+for mb in 470 300; do
+	T=$(newroot t35hf$mb)
+	cp "$GM/hdr4k_30_k5.mkv" "$T/root/media/"
+	MPCPS5_HOST_DIRECT_FREE_MB=$mb MPCPS5_HOST_HEAP_MB=360 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_HWDEC_FAIL=1 MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_OUT=320x180 MAXFLIPS=4000 run "$T" "0:0" "240:state;242:quit" "" "$T/root/media/hdr4k_30_k5.mkv" >/dev/null
+done
+expect "grep -q 'video decoder: HEVC 3840x2160 (console decoder)' $WORK/t35hf470/root/logs/boot.log && grep -q \"3840x2160 10-bit on the CPU should the console's decoder give up: 3 frame threads\" $WORK/t35hf470/root/logs/boot.log && grep -q 'FFmpeg with 3 frame threads$' $WORK/t35hf470/root/logs/boot.log && grep -q \"3840x2160 10-bit on the CPU should the console's decoder give up: about [0-9]* MiB of 300 MiB free of direct memory; no frame threads\" $WORK/t35hf300/root/logs/boot.log && grep -q 'FFmpeg with 8 slice threads, 3 pictures queued' $WORK/t35hf300/root/logs/boot.log && state $WORK/t35hf300 1 | grep -q 'picture 1'" "the console's decoder giving up on 4K 10-bit: FFmpeg takes over with 3 frame threads at 470 MiB of direct memory, none (3 pictures queued) at 300 MiB"
+nosan "$T"
+# i (test4 review): VP9 with blocks showing no frame alone (superframes split): its pictures keep their times whether
+# the decoder gives a picture for such a block (as VLC found the console does) or none (as FFmpeg); 12-bit to FFmpeg
+for mode in one none; do
+	for g in 0 1; do
+		t=$(newroot t35i$mode-$g)
+		ini "$t" "VideoResizer=1"
+		cp "$GM/vp9_split.nut" "$t/root/media/"
+		MPCPS5_HOST_VP9_HIDDEN=$mode MPCPS5_HOST_INPLACE_PAUSED=1 MPCPS5_HOST_HWDEC=$g MPCPS5_HOST_GPU=$g run "$t" "0:0" "$SHOT" "55" "$t/root/media/vp9_split.nut" >/dev/null
+	done
+	T=$WORK/t35i$mode-1
+	r=$($COMPARE $WORK/t35i$mode-0/dump/flip00055.ppm $T/dump/flip00055.ppm 0 130 1920 976 2.5 16)
+	expect "grep -q 'video decoder: VP9 640x360 (console decoder)' $T/root/logs/boot.log && $COMPARE $WORK/t35i$mode-0/dump/flip00055.ppm $T/dump/flip00055.ppm 0 130 1920 976 2.5 16 >/dev/null" "VP9 with lone hidden blocks, the decoder giving $mode picture for them: the picture FFmpeg shows at that time ($r)"
+done
+expect "grep -q 'VP9: [1-9][0-9]* blocks gave no picture, .* dropped: 0)' $WORK/t35inone-1/root/logs/boot.log && grep -q 'VP9: 0 blocks gave no picture, .* dropped: [1-9][0-9]*)' $WORK/t35ione-1/root/logs/boot.log" "... (none: such blocks get no time of their own; one: they give the picture that is dropped: $(grep -o 'VP9: [0-9]* blocks.*' $WORK/t35inone-1/root/logs/boot.log | cut -c1-40) / $(grep -o 'dropped: [0-9]*' $WORK/t35ione-1/root/logs/boot.log))"
+T=$(newroot t35i12)
+cp "$GM/vp9_12.webm" "$T/root/media/"
+rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "30:state;32:quit" "" "$T/root/media/vp9_12.webm")
+expect "grep -q 'video decoder: FFmpeg (VP9 12-bit)' $T/root/logs/boot.log && state $T 1 | grep -q 'picture 1'" "VP9 12-bit: FFmpeg (the console's decoder takes 10)"
+# j (test4 review): the import table the console's eboot carries, read by the app: a synthetic one naming the host's own
+# words (two bound, one left at 0), and a malformed one (a slot past the image's end)
+B=$BIN
+AV=$(nm $B | awk '$3=="mpcps5_crash_anchor"{print $1}'); SV=$(nm $B | awk '$3=="mpcps5_test_slots"{print $1}')
+SPAN=$(readelf -lW $B | python3 -c "import sys; print('%x' % max(int(p[2], 16) + int(p[5], 16) for p in (l.split() for l in sys.stdin) if p and p[0] == 'LOAD'))")
+printf 'MPCIMP03\n%s\n%s\n%x libTest.sprx bound_one\n%x libTest.sprx unbound_one\n%x libTest.sprx bound_two\n' $AV $SPAN $((0x$SV)) $((0x$SV + 8)) $((0x$SV + 16)) >$WORK/imports-ok.txt
+printf 'MPCIMP03\n%s\n%s\n%x libTest.sprx bound_one\n%x libTest.sprx far_away\n' $AV $SPAN $((0x$SV)) $((0x$SPAN + 64)) >$WORK/imports-bad.txt
+printf 'MPCIMP03\n%s\n%s\n%x libTest.sprx misaligned\n' $AV $SPAN $((0x$SV + 4)) >$WORK/imports-odd.txt
+T=$(newroot t35j)
+rc=$(MPCPS5_HOST_IMPORT_TABLE=$WORK/imports-ok.txt run "$T" "0:0" "10:quit" "")
+expect "grep -q '\[imports\] bound by the console: libTest.sprx 2/3' $T/root/logs/boot.log && grep -q '\[imports\] 1 left at 0: unbound_one' $T/root/logs/boot.log" "the import table read at the start: per module, and the names left at 0"
+rc=$(MPCPS5_HOST_IMPORT_TABLE=$WORK/imports-bad.txt run "$T" "0:0" "10:quit" "")
+expect "[ $rc = 0 ] && grep -q '\[imports\] table malformed' $T/root/logs/boot.log" "... a malformed one: said, not read further, no fault"
+rc=$(MPCPS5_HOST_IMPORT_TABLE=$WORK/imports-odd.txt run "$T" "0:0" "10:quit" "")
+expect "[ $rc = 0 ] && grep -q '\[imports\] table malformed' $T/root/logs/boot.log" "... a misaligned slot: the same"
+# (test5 review) the crash handler's pieces, called directly (its signals are the sanitizer's on the host)
+rc=$(MPCPS5_HOST_CRASH_SELFTEST=1 run "$T" "0:0" "10:quit" "")
+expect "grep -q '\[crash\] self-test: ok' $T/root/logs/boot.log && grep -q '^\[crash\] self-test: written through the handler.s own fd' $T/root/logs/boot.log" "the crash handler's line building, safe reads (an unmapped page too), address naming, and its own fd (made while logging) writing into boot.log"
+nosan "$T"
 fi
 
 echo

@@ -537,10 +537,20 @@ void Settings::Load()
 			audio_output = Clamp(n, 0, 1);
 		else if (k == "HardwareDecoding")
 			hw_decoding = b;
+		else if (k == "DecodeMode")
+			decode_mode = Clamp(n, 0, 2);
 		else if (k == "HdrToneMapping")
 			hdr_tonemap = Clamp(n, 0, 3);
 		else if (k == "HdrPeak")
 			hdr_peak = Clamp(n, 100, 400);
+		else if (k == "HdrOutput")
+			hdr_output = b;
+		else if (k == "VideoRenderer")
+			video_renderer = Clamp(n, 0, 1);
+		else if (k == "GpuStart")
+			gpu_start = Clamp(n, 0, 1);
+		else if (k == "VideoResizer")
+			video_resizer = Clamp(n, 0, 1);
 		else if (k == "SubFontSize")
 			sub_font_size = Clamp(n, 8, 72);
 		else if (k == "SubBold")
@@ -700,7 +710,10 @@ void Settings::Save() const
 		audio_delay_ms, audio_output);
 	fprintf(f, "AudioNormalize=%d\nAudioMaxNormFactor=%d\nAudioNormalizeRecover=%d\n", audio_normalize, audio_max_norm,
 		audio_norm_regain);
-	fprintf(f, "HardwareDecoding=%d\nHdrToneMapping=%d\nHdrPeak=%d\n", hw_decoding, hdr_tonemap, hdr_peak);
+	fprintf(f, "HardwareDecoding=%d\nHdrToneMapping=%d\nHdrPeak=%d\nDecodeMode=%d\n", hw_decoding, hdr_tonemap, hdr_peak,
+		decode_mode);
+	fprintf(f, "VideoRenderer=%d\nVideoResizer=%d\nGpuStart=%d\n", video_renderer, video_resizer, gpu_start);
+	fprintf(f, "HdrOutput=%d\n", hdr_output ? 1 : 0);
 	fprintf(f, "SubFont=%s\nSubFontSize=%d\nSubBold=%d\nSubBorderStyle=%d\nSubOutline=%d\nSubShadow=%d\n",
 		Escape(sub_font).c_str(), sub_font_size, sub_bold, sub_border, sub_outline, sub_shadow);
 	fprintf(f, "SubColor=%06X\nSubOutlineColor=%06X\nSubBoxOpacity=%d\nSubMarginBottom=%d\nSubPosition=%d\nSubDelay=%d\n",

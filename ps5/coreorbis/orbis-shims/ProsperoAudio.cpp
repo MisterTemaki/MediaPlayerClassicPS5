@@ -43,7 +43,8 @@ struct State
 	alignas(64) std::atomic<uint32_t> tail{0}; // written by the audio thread
 	std::atomic<uint64_t> underruns{0};
 	std::atomic<uint64_t> played{0}; // frames of the ring played (not the silence)
-	std::atomic<bool> paused{false};
+	std::atomic<bool> paused{true}; // (test11: opened paused -- silence, no underruns counted -- until a file plays)
+	std::atomic<bool> held{false}; // (test8) silence, not an underrun, until the next Push (an exact seek's wait)
 	std::atomic<uint32_t> clear_req{0}, clear_ack{0};
 	std::atomic<int> gain{65536}; // 16.16
 	int16_t ring[kCapacity * 8]; // 8 slots per frame; stereo uses the first two
@@ -75,7 +76,7 @@ void Run()
 		const uint32_t avail = head - tail;
 		const int h8 = g->handle8.load(std::memory_order_acquire);
 		const int ch = g->channels.load(std::memory_order_acquire) == 8 && h8 > 0 ? 8 : 2;
-		if (g->paused.load(std::memory_order_relaxed))
+		if (g->paused.load(std::memory_order_relaxed) || (avail < uint32_t(kGrain) && g->held.load(std::memory_order_relaxed)))
 			memset(grain, 0, sizeof(grain));
 		else if (avail >= uint32_t(kGrain))
 		{
@@ -177,6 +178,7 @@ int Push(const int16_t* samples, int frames, int channels)
 			d[c] = c < channels ? s[c] : 0;
 	}
 	g->head.store(head + n, std::memory_order_release);
+	g->held.store(false, std::memory_order_relaxed);
 	return n;
 }
 
@@ -225,6 +227,12 @@ void SetPaused(bool paused)
 {
 	if (g)
 		g->paused.store(paused);
+}
+
+void HoldUntilPush()
+{
+	if (g)
+		g->held.store(true);
 }
 
 void Clear()

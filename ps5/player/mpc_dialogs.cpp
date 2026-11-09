@@ -12,6 +12,7 @@
 #include "mpc_ui.h"
 
 #include "OrbisPaths.h"
+#include "ProsperoVideo.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -1574,8 +1575,11 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	d->Group(p, "Control", 5, 55, 126, 46);
 	d->Text(p, "Volume step:", 11, 67, 68, 8);
 	d->Number(p, 81, 64, 46, 14, 5, 1, 100, 1, " %")->enabled = false;
-	d->Group(p, "Default zoom", 137, 55, 154, 46);
-	d->Check(p, "Auto-zoom:", 142, 67, 75, 8, true, false);
+	// 1.6 (test12): FFmpeg's decoding, as VLC for PS5's Decoding setting (the console's decoder isn't affected)
+	d->Group(p, "Decoding (FFmpeg)", 137, 55, 154, 46);
+	ComboBox* dmode = d->Combo(p, 142, 67, 144, 13,
+		{"Auto: faster when it can't keep up", "Fast: softer picture, from the start", "Full: never faster"}, s.decode_mode);
+	d->Text(p, "the next file opened", 142, 85, 144, 8);
 	d->Group(p, "Playback", 5, 104, 126, 54);
 	CheckBox* rplay = d->Radio(p, "Play", 10, 117, 55, 8, s.repeat == 0, 3);
 	CheckBox* rforever = d->Radio(p, "Repeat forever", 10, 129, 116, 8, s.repeat != 0, 3);
@@ -1592,8 +1596,9 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	d->Check(p, "Use worker thread to construct the filter graph", 10, 200, 276, 8, true, false);
 	d->Check(p, "Report pins which fail to render", 10, 212, 276, 8, false, false);
 	CheckBox* autosub = d->Check(p, "Auto-load subtitle files next to the video", 10, 224, 276, 8, s.auto_load_subtitles);
-	d->apply_fns.push_back([&s, vol, rplay, rforever, rmode, after, autosub] {
+	d->apply_fns.push_back([&s, vol, rplay, rforever, rmode, after, autosub, dmode] {
 		s.volume = vol->pos;
+		s.decode_mode = dmode->sel;
 		s.repeat = rplay->checked ? 0 : (rmode->sel == 1 ? 2 : 1);
 		(void)rforever;
 		s.after_playback = AfterPlayback(after->sel);
@@ -1602,32 +1607,68 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 
 	// ---- Output (what this player draws with) ----
 	p = d->NewPage("Output");
-	d->Group(p, "DirectShow Video", 5, 5, 285, 43);
-	d->Combo(p, 10, 16, 276, 13, {"Software renderer (FFmpeg / libswscale, bicubic)"}, 0)->enabled = false;
-	CheckBox* hwdec = d->Check(p, "Hardware decoding (H.264 / HEVC on the PS5's video decoder)", 10, 33, 276, 8,
+	// 1.6: the renderer (the GPU by default; takes effect at the next start) and the GPU's resizer
+	d->Group(p, "DirectShow Video", 5, 5, 285, 74);
+	ComboBox* ren = d->Combo(p, 10, 16, 276, 13,
+		{"GPU renderer (Vulkan: scaling, colour, HDR; at the next start)", "Software renderer (FFmpeg / libswscale, bicubic)"},
+		s.video_renderer);
+	ComboBox* rsz = d->Combo(p, 10, 32, 180, 13, {"Resizer: Bilinear", "Resizer: Bicubic (sharper)"}, s.video_resizer);
+	rsz->enabled = s.video_renderer == 0;
+	CheckBox* hwdec = d->Check(p, "Hardware decoding (H.264 / HEVC on the PS5's video decoder)", 10, 50, 276, 8,
 		s.hw_decoding);
-	d->Group(p, "HDR (HDR10 / HLG on the SDR picture)", 5, 50, 285, 36);
-	ComboBox* tm = d->Combo(p, 10, 63, 150, 13, {"Off (as it comes)", "Tone mapping: BT.2390", "Tone mapping: Hable", "Tone mapping: Reinhard"},
+	// (test13) a GPU start variant that released the console decoder's compute queues: its decoder is off this run
+	if (ps5video::GpuStartVariant() >= 3)
+		d->Text(p, Fmt(T("(off this run: the GPU start needed it, variant %d)"), ps5video::GpuStartVariant()).c_str(), 24, 59, 262, 8);
+	// Automatic preserves recovery after a failed GPU start; retry is an explicit action below.
+	ComboBox* gstart = d->Combo(p, 195, 32, 91, 13, {"GPU start: Automatic", "GPU start: CPU only"}, s.gpu_start);
+	gstart->enabled = s.video_renderer == 0;
+	ren->on_change = [ren, rsz, gstart] { rsz->enabled = gstart->enabled = ren->sel == 0; };
+	d->Group(p, "HDR output / SDR tone mapping", 5, 81, 285, 36);
+	ComboBox* tm = d->Combo(p, 10, 94, 150, 13, {"Off (as it comes)", "Tone mapping: BT.2390", "Tone mapping: Hable", "Tone mapping: Reinhard"},
 		s.hdr_tonemap);
-	d->Text(p, "White:", 170, 66, 30, 8);
-	NumberBox* white = d->Number(p, 200, 63, 60, 13, s.hdr_peak, 100, 400, 10, " nits");
-	d->Group(p, "Audio Renderer", 5, 90, 285, 30);
-	ComboBox* aout = d->Combo(p, 10, 102, 276, 13,
+	d->Text(p, "White:", 170, 97, 30, 8);
+	NumberBox* white = d->Number(p, 200, 94, 60, 13, s.hdr_peak, 100, 400, 10, " nits");
+	CheckBox* hdrout = d->Check(p, "HDR10 output on compatible TVs (next start)", 10, 108, 276, 8, s.hdr_output);
+	d->Group(p, "Audio Renderer", 5, 121, 285, 30);
+	ComboBox* aout = d->Combo(p, 10, 133, 276, 13,
 		{"PlayStation 5 audio out: stereo (5.1/7.1 mixed down)", "PlayStation 5 audio out: surround (5.1/7.1, 8 channels)"},
 		s.audio_output);
-	d->Group(p, "Video frame", 5, 125, 285, 60);
-	ComboBox* vf = d->Combo(p, 10, 137, 180, 13,
+	d->Group(p, "Video frame", 5, 156, 285, 60);
+	ComboBox* vf = d->Combo(p, 10, 168, 180, 13,
 		{"Half Size", "Normal Size", "Double Size", "Stretch To Window", "Touch Window From Inside", "Zoom 1", "Zoom 2",
 			"Touch Window From Outside"},
 		int(s.video_frame));
-	ComboBox* ar = d->Combo(p, 10, 156, 180, 13, {"Default (DAR)", "4:3", "5:4", "16:9", "235:100", "185:100", "Assume square pixels (SAR)"},
+	ComboBox* ar = d->Combo(p, 10, 187, 180, 13, {"Default (DAR)", "4:3", "5:4", "16:9", "235:100", "185:100", "Assume square pixels (SAR)"},
 		s.aspect_ratio);
-	d->apply_fns.push_back([&s, vf, ar, hwdec, tm, white, aout] {
+	Button* retry_gpu = d->P(p, new Button, 10, 221, 108, 14);
+	retry_gpu->text = T("Retry GPU next start");
+	auto retry_requested = std::make_shared<bool>(false);
+	retry_gpu->on_click = [retry_requested, retry_gpu, ren, gstart] {
+		*retry_requested = true;
+		ren->sel = 0;
+		gstart->sel = 0;
+		if (ren->on_change) ren->on_change();
+		retry_gpu->text = T("Apply to retry next start");
+	};
+	d->Text(p, "After a GPU failure, software rendering is kept until you request a retry.", 125, 220, 161, 18);
+	d->apply_fns.push_back([&s, ren, rsz, gstart, retry_requested, retry_gpu] {
+		s.video_renderer = ren->sel;
+		s.video_resizer = rsz->sel;
+		s.gpu_start = gstart->sel;
+		if (*retry_requested)
+		{
+			const bool saved = ps5video::RetryGpuNextStart();
+			retry_gpu->text = T(saved ? "Retry on next start" : "Could not save retry");
+			*retry_requested = !saved;
+		}
+	});
+	d->apply_fns.push_back([&s, vf, ar, hwdec, tm, white, aout, hdrout] {
 		s.video_frame = VideoFrame(vf->sel);
 		s.aspect_ratio = ar->sel;
 		s.hw_decoding = hwdec->checked;
 		s.hdr_tonemap = tm->sel;
 		s.hdr_peak = white->value;
+		s.hdr_output = hdrout->checked;
 		s.audio_output = aout->sel;
 	});
 

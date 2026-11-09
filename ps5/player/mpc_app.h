@@ -9,6 +9,6 @@ namespace mpc
 {
 // Runs until File > Exit (or the window's close button). first: a file or URL to open at once.
 int RunApp(const std::string& first, bool have_data);
-// "FFmpeg n7.1.1" for the boot log and the About box
+// "FFmpeg n7.1.5" for the boot log and the About box
 std::string EngineVersion();
 } // namespace mpc

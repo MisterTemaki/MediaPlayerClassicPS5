@@ -248,6 +248,11 @@ bool SafeRel(const std::string& rel)
 {
 	if (rel.empty() || rel[0] == '/' || rel.find('\\') != std::string::npos)
 		return false;
+	// These names also pass through C filesystem APIs and the line-based journal.
+	// A NUL would truncate the path; tabs/newlines would change the journal's records.
+	for (unsigned char c : rel)
+		if (c < 32 || c == 127)
+			return false;
 	size_t a = 0;
 	while (a <= rel.size())
 	{
@@ -256,6 +261,10 @@ bool SafeRel(const std::string& rel)
 			b = rel.size();
 		const std::string part = rel.substr(a, b - a);
 		if (part.empty() || part == "." || part == "..")
+			return false;
+		// Payload files must not alias the updater's journal, staging files or backups.
+		if (part == "update.journal" || part == "update.journal.tmp" || part.find(".old.") != std::string::npos ||
+			(part.size() >= 4 && part.compare(part.size() - 4, 4, ".new") == 0))
 			return false;
 		a = b + 1;
 	}
@@ -397,7 +406,7 @@ std::string ReadZip(const std::vector<uint8_t>& z, std::vector<ZipEntry>& out)
 		const size_t data = size_t(local) + 30 + Le16(&z[local + 26]) + Le16(&z[local + 28]);
 		if (data + usize > z.size())
 			return "the zip is cut short at " + e.name;
-		e.data = &z[data];
+		e.data = z.data() + data;
 		e.size = usize;
 		out.push_back(e);
 	}
@@ -693,7 +702,7 @@ struct JournalEntry
 	std::string old_sha; // the replaced file's SHA-256: tells "already put back" from "lost" when its copy is gone
 };
 
-// The whole file's SHA-256, read in blocks (a file that can't be opened hashes as empty, as before). Up to 1.5.1 this
+// The whole file's SHA-256, read in blocks; an I/O failure returns no digest. Up to 1.5.1 this
 // went through ReadText, which stops after 1 MiB: the journal's "old SHA-256" of eboot.bin (tens of MB) and of the
 // backgrounds was that of their first MiB only, so a file whose first MiB matched the old one's was taken as "already
 // put back" after an interrupted install.
@@ -706,8 +715,12 @@ static std::string FileSha(const std::string& path)
 		size_t n;
 		while ((n = fread(buf.data(), 1, buf.size(), f)) > 0)
 			s.Add(buf.data(), n);
-		fclose(f);
+		const bool ok = !ferror(f);
+		if (fclose(f) != 0 || !ok)
+			return "";
 	}
+	else
+		return "";
 	return s.Hex();
 }
 
@@ -739,8 +752,9 @@ static std::string FileShaFirstMiB(const std::string& path)
 			break;
 		}
 	}
-	fclose(f);
-	return more ? s.Hex() : "";
+	const bool ok = !ferror(f);
+	const bool closed = fclose(f) == 0;
+	return ok && closed && more ? s.Hex() : "";
 }
 
 // the file is the one the journal names (its whole SHA-256; or, for a journal of 1.5.1, its first MiB's)
@@ -843,7 +857,7 @@ static bool SyncDirsOf(const std::string& app_dir, const Journal& j)
 
 // Puts the old version back for the journal's files: each old copy renamed back over the new file, a file the
 // install added removed, a <name>.new not yet moved deleted. Returns the entries that could NOT be put back and can
-// be tried again (their old copy is still there); `lost` gets the files whose old copy is gone.
+// be tried again, including files whose old copy is gone (`lost` lists that subset for diagnostics).
 static std::vector<JournalEntry> PutBack(const std::string& app_dir, const Journal& j, std::vector<std::string>* lost)
 {
 	std::vector<JournalEntry> left;
@@ -863,8 +877,13 @@ static std::vector<JournalEntry> PutBack(const std::string& app_dir, const Journ
 					continue;
 				}
 			}
-			else if (moved && !SameAsJournal(f, it->old_sha) && lost)
-				lost->push_back(it->rel); // not the old file, and its old copy is gone (else: already put back)
+			else if (moved && !SameAsJournal(f, it->old_sha))
+			{
+				if (lost)
+					lost->push_back(it->rel);
+				left.push_back(*it); // keep the journal: a later install must not hide an incomplete recovery
+				continue;
+			}
 		}
 		else if (moved && Exists(f) && unlink(f.c_str()) != 0)
 		{
@@ -963,7 +982,8 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 	{
 		if (e.name.compare(0, prefix.size(), prefix) != 0 || !SafeRel(e.name.substr(prefix.size())))
 			return "The zip holds " + e.name + ", outside " + prefix + ": nothing was changed.";
-		files[e.name.substr(prefix.size())] = &e;
+		if (!files.emplace(e.name.substr(prefix.size()), &e).second)
+			return "The zip repeats " + e.name + ": nothing was changed.";
 	}
 	auto man_it = files.find("manifest.sha256");
 	if (man_it == files.end())
@@ -972,6 +992,8 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 	const auto manifest = ParseManifest(man_text);
 	if (manifest.empty())
 		return "The zip's manifest is empty: nothing was changed.";
+	if (manifest.count("manifest.sha256") || files.size() != manifest.size() + 1)
+		return "The zip and its manifest don't list the same files: nothing was changed.";
 	for (const char* must : {"eboot.bin", "sce_sys/param.json"})
 		if (!manifest.count(must))
 			return std::string("The release has no ") + must + ": nothing was changed.";
@@ -1032,7 +1054,13 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 	{
 		const std::string f = c.app_dir + "/" + rel;
 		const bool had = Exists(f);
-		jr.entries.push_back({rel, had, had ? FileSha(f) : "-"});
+		const std::string old_sha = had ? FileSha(f) : "-";
+		if (had && old_sha.empty())
+		{
+			undo();
+			return "Couldn't read the old " + rel + ": nothing was changed.";
+		}
+		jr.entries.push_back({rel, had, old_sha});
 	}
 	if (!WriteJournal(c.app_dir, jr))
 	{
@@ -1051,7 +1079,7 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 			return head + "the old version was put back, but the disk didn't confirm it; it is checked again when the "
 						  "app starts.";
 		OrbisLog("[update] %zu file(s) not put back, %zu without their old copy", left.size(), lost.size());
-		return head + "the old version couldn't be put back completely (" + std::to_string(left.size() + lost.size()) +
+		return head + "the old version couldn't be put back completely (" + std::to_string(left.size()) +
 			   " file(s)); it is tried again when the app starts. If the app doesn't open, send the payload again "
 			   "to repair it.";
 	};
@@ -1069,8 +1097,17 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 	// all in: on the disk first (else everything goes back), then the journal goes, then the old copies
 	if (!SyncDirsOf(c.app_dir, jr))
 		return give_back("The new files couldn't be written to the disk for sure: ");
-	if (unlink((c.app_dir + "/" + kJournal).c_str()) != 0 || !SyncDir(c.app_dir))
-		OrbisLog("[update] the journal couldn't be removed: the next start will check the files again");
+	if (unlink((c.app_dir + "/" + kJournal).c_str()) != 0)
+		return give_back("Couldn't remove the update's journal: ");
+	if (!SyncDir(c.app_dir))
+	{
+		// The commit is not durable. Re-establish its recovery record before moving files again.
+		// If even that fails, retain every backup and report failure; never discard the only old copies.
+		if (!WriteJournal(c.app_dir, jr))
+			return "Couldn't confirm the update on disk or restore its journal. The backups were kept: send the "
+				   "payload again to repair the app.";
+		return give_back("Couldn't confirm removal of the update's journal: ");
+	}
 	for (const auto& m : moved)
 		if (m.second)
 			unlink(jr.Old(c.app_dir, m.first).c_str());
@@ -1117,7 +1154,7 @@ int RecoverInterrupted(const std::string& app_dir)
 	std::vector<std::string> lost;
 	const std::vector<JournalEntry> left = PutBack(app_dir, j, &lost);
 	const bool all = SettleJournal(app_dir, j, left);
-	const int back = int(j.entries.size() - left.size() - lost.size());
+	const int back = int(j.entries.size() - left.size());
 	for (const std::string& rel : lost)
 		OrbisLog("[update] %s: its old copy is gone, it can't be put back", rel.c_str());
 	if (all && lost.empty())

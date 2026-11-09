@@ -1,0 +1,461 @@
+--- a/include/ps5gpu/gpu.h
++++ b/include/ps5gpu/gpu.h
+@@ -83,6 +83,10 @@
+ 	// beyond the display's, every picture copied (MPC on the PS5 died enumerating the GPUs; a start without them tells
+ 	// whether they are why)
+ 	bool host_import = true;
++	// MPC local extension: switch VideoOut to HDR10 while an HDR video is visible. SDR remains the fallback.
++	bool hdr_output = false;
++	int (*set_hdr_output)(bool on, int width, int height) = nullptr;
++	int (*hdr_output_range)() = nullptr;
+ };
+ // Before Init (a later call changes nothing of a running renderer but the log).
+ void Configure(const Config& config);
+@@ -275,6 +279,7 @@
+ };
+ // The video pipeline is there (Config::video, the GPU on, its self-test passed).
+ bool VideoAvailable();
++bool HdrOutputActive();
+ // This frame's layout can be drawn (planes, sizes, bits); false: draw it another way.
+ bool VideoFormatSupported(const VideoFrame& f);
+ // The next Present's picture. False: not taken (VideoAvailable() false, a layout or size it can't take, no memory for
+--- a/src/gpu.cpp
++++ b/src/gpu.cpp
+@@ -198,6 +198,15 @@
+ 	VkSampler samplers[2][4] = {};
+ 	VkDescriptorPool dpool = VK_NULL_HANDLE;
+ 	Chain ui_chain;
++	// MPC HDR extension: render PQ into a real 10:10:10:2 image, then copy its bits to VideoOut's retyped buffers.
++	Image hdr_target;
++	VkRenderPass hdr_pass = VK_NULL_HANDLE;
++	VkPipeline hdr_video_pipe = VK_NULL_HANDLE;
++	Chain hdr_ui_chain;
++	bool hdr_active = false, hdr_wish = false, hdr_refused = false, hdr_readback = false, hdr_broken = false;
++	double hdr_wish_since = 0;
++	int hdr_check_frames = 0;
++	std::vector<uint8_t> hdr_host_pixels;
+ 	Chain game_chain;
+ 	// shaders built off the frame loop: the old one stays on screen meanwhile
+ 	VkPipelineCache pcache = VK_NULL_HANDLE; // saved to <root>/cache/gpu-pipelines.bin: a shader built once loads fast
+@@ -617,7 +626,7 @@
+ 	}
+ }
+ 
+-bool BuildChain(Chain& c, int preset, bool ui)
++bool BuildChain(Chain& c, int preset, bool ui, VkRenderPass output_pass = VK_NULL_HANDLE)
+ {
+ 	FreeChain(c);
+ 	if (preset < 0 || preset >= ps5slang::PresetCount())
+@@ -658,7 +667,7 @@
+ 		p.format = last ? g.target_format : PassFormat(p.def->framebuffer);
+ 		if (!last)
+ 			p.render_pass = MakeRenderPass(p.format, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true);
+-		if (!BuildPass(p, last ? g.final_pass : p.render_pass, ui))
++		if (!BuildPass(p, last ? (output_pass ? output_pass : g.final_pass) : p.render_pass, ui))
+ 		{
+ 			internal::Log("[gpu] preset %s: pass %d could not be built", pr.name, i);
+ 			return false;
+@@ -1016,7 +1025,7 @@
+ 		g.out_h = want_h;
+ 		g.target_format = VK_FORMAT_B8G8R8A8_UNORM;
+ 		if (!MakeImage(g.offscreen_target, want_w, want_h, g.target_format,
+-				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT))
++				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT))
+ 			return false;
+ 		if (!MakeBuffer(g.readback, VkDeviceSize(want_w) * want_h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+ 			return false;
+@@ -2204,7 +2213,7 @@
+ }
+ 
+ // The uniform block for the picture the images hold, drawn at `out` (output pixels)
+-void FillVideoUbo(VideoUbo& u, const VideoFrame& f, const VideoView& v, double out_w, double out_h)
++void FillVideoUbo(VideoUbo& u, const VideoFrame& f, const VideoView& v, double out_w, double out_h, bool hdr_output = false)
+ {
+ 	memset(&u, 0, sizeof(u));
+ 	const int cw = gv.nplanes > 1 ? gv.pw[1] : gv.pw[0], ch = gv.nplanes > 1 ? gv.ph[1] : gv.ph[0];
+@@ -2235,6 +2244,7 @@
+ 	const double white = std::max(1.0, v.white_nits);
+ 	const double top = f.transfer == VideoTransfer::Hlg ? 1000.0 : std::max(f.peak_nits, white);
+ 	u.tm[0] = float(top), u.tm[1] = float(white), u.tm[2] = float(1.0 / white);
++	u.tm[3] = hdr_output ? 1.0f : 0.0f;
+ 	const double src = PqInvD(top), max_lum = PqInvD(white) / src;
+ 	u.pq[0] = float(src), u.pq[1] = float(max_lum), u.pq[2] = float(1.5 * max_lum - 0.5);
+ 	// the chroma siting: a chroma sample covering s luma pixels sits at luma s*j + 0.5 + pos*(s - 1); in chroma texels
+@@ -2475,7 +2485,7 @@
+ 	if (cx1 <= cx0 || cy1 <= cy0)
+ 		return;
+ 	VideoUbo u;
+-	FillVideoUbo(u, gv.shown, gv.view, x1 - x0, y1 - y0);
++	FillVideoUbo(u, gv.shown, gv.view, x1 - x0, y1 - y0, g.hdr_active);
+ 	memcpy(gv.ubo.map, &u, sizeof(u));
+ 	UpdateVideoSet();
+ 	const float rect[4] = {float(x0 / g.out_w * 2 - 1), float(y0 / g.out_h * 2 - 1), float(x1 / g.out_w * 2 - 1),
+@@ -2484,7 +2494,7 @@
+ 	const VkRect2D sc = {{cx0, cy0}, {uint32_t(cx1 - cx0), uint32_t(cy1 - cy0)}};
+ 	vkCmdSetViewport(cmd, 0, 1, &view);
+ 	vkCmdSetScissor(cmd, 0, 1, &sc);
+-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gv.pipe);
++	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g.hdr_active ? g.hdr_video_pipe : gv.pipe);
+ 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gv.layout, 0, 1, &gv.set, 0, nullptr);
+ 	vkCmdPushConstants(cmd, gv.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(rect), rect);
+ 	vkCmdDraw(cmd, 4, 1, 0, 0);
+@@ -2547,6 +2557,139 @@
+ 	return ok;
+ }
+ 
++// HDR10 uses the same presentation method as VLC-PS5: typed 10-bit rendering, then a size-compatible raw image
++// copy into the WSI's 32-bit buffers after VideoOut changes their scanout attribute. No 8-bit render or quantization.
++void FreeHdr()
++{
++	FreeChain(g.hdr_ui_chain);
++	if (g.hdr_video_pipe) vkDestroyPipeline(g.device, g.hdr_video_pipe, nullptr);
++	g.hdr_video_pipe = VK_NULL_HANDLE;
++	FreeImage(g.hdr_target);
++	if (g.hdr_pass) vkDestroyRenderPass(g.device, g.hdr_pass, nullptr);
++	g.hdr_pass = VK_NULL_HANDLE;
++}
++
++bool MakeHdr()
++{
++	if (g.hdr_pass) return true;
++	const VkFormat format = VK_FORMAT_A2R10G10B10_UNORM_PACK32;
++	VkFormatProperties props = {};
++	vkGetPhysicalDeviceFormatProperties(g.phys, format, &props);
++	const auto need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
++	if ((props.optimalTilingFeatures & need) != need) return false;
++	bool ok = MakeImage(g.hdr_target, g.out_w, g.out_h, format,
++		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
++	if (ok)
++	{
++		g.hdr_pass = MakeRenderPass(format, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, true);
++		g.hdr_target.fb = MakeFramebuffer(g.hdr_pass, g.hdr_target.view, g.out_w, g.out_h);
++		ok = g.hdr_pass && g.hdr_target.fb && BuildVideoPipeline(g.hdr_pass, &g.hdr_video_pipe) &&
++			BuildChain(g.hdr_ui_chain, 1, true, g.hdr_pass);
++	}
++	if (!ok) FreeHdr();
++	return ok;
++}
++
++bool ChangeHdr(bool on)
++{
++	const auto& c = CurrentConfig();
++	if (on && !MakeHdr()) return false;
++	// No frame in the previous pixel format may be submitted after VideoOut switches.
++	if (!Check(vkDeviceWaitIdle(g.device), "vkDeviceWaitIdle (HDR switch)")) return false;
++	const int rc = c.set_hdr_output ? c.set_hdr_output(on, g.out_w, g.out_h) : g.offscreen ? 0 : -1;
++	internal::Log("[gpu] HDR10 output %s: %s (%#x)", on ? "on" : "off", rc == 0 ? "accepted" : "refused", unsigned(rc));
++	if (rc != 0) return false; // Keep writing the format that VideoOut last accepted.
++	g.hdr_active = on;
++	g.hdr_check_frames = on && c.hdr_output_range ? 60 : 0;
++	return true;
++}
++
++void UpdateHdr()
++{
++	const auto& c = CurrentConfig();
++	const auto& f = gv.pend.set ? gv.meta : gv.shown;
++	const bool wish = c.hdr_output && gv.ok && gv.show && (gv.pend.set || gv.picture) &&
++		f.transfer != VideoTransfer::Sdr && !g.game && !g.scene_on && !g.ui_straight;
++	const double now = NowMs();
++	if (wish != g.hdr_wish)
++	{
++		g.hdr_wish = wish;
++		g.hdr_wish_since = now;
++		if (!wish) g.hdr_refused = false;
++	}
++	if (g.hdr_check_frames > 0 && --g.hdr_check_frames == 0 && c.hdr_output_range() != 2)
++	{
++		internal::Log("[gpu] HDR10 was not confirmed by the display: restoring SDR tone mapping");
++		g.hdr_refused = true;
++		if (!ChangeHdr(false)) g.hdr_broken = true;
++	}
++	const double hold = c.sync_build ? 0 : wish ? 400 : 1000;
++	if (wish != g.hdr_active && !(wish && g.hdr_refused) && now - g.hdr_wish_since >= hold)
++	{
++		if (!ChangeHdr(wish))
++		{
++			if (wish) g.hdr_refused = true;
++			else g.hdr_broken = true; // Never send SDR pixels while VideoOut still expects PQ (or vice versa).
++		}
++	}
++}
++
++void CopyHdrToOutput(VkCommandBuffer cmd, uint32_t index)
++{
++	VkImage dst = g.offscreen ? g.offscreen_target.img : g.swap_images[index];
++	VkImageMemoryBarrier barriers[2] = {{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}, {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}};
++	for (auto& b : barriers)
++	{
++		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++		b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
++	}
++	barriers[0].image = g.hdr_target.img;
++	barriers[0].oldLayout = barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
++	barriers[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
++	barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
++	barriers[1].image = dst;
++	barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++	barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
++	barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
++		0, 0, nullptr, 0, nullptr, 2, barriers);
++	VkImageCopy copy = {};
++	copy.srcSubresource = copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++	copy.extent = {uint32_t(g.out_w), uint32_t(g.out_h), 1};
++	vkCmdCopyImage(cmd, g.hdr_target.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
++		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
++	barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
++	barriers[1].newLayout = g.offscreen ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
++	barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++	barriers[1].dstAccessMask = g.offscreen ? VK_ACCESS_TRANSFER_READ_BIT : 0;
++	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
++		g.offscreen ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
++		0, 0, nullptr, 0, nullptr, 1, &barriers[1]);
++}
++
++// The host callback stays BGRA8; decode the raw 10-bit copy only for its preview, never on the console.
++void HostPresent(bool vsync)
++{
++	const auto callback = CurrentConfig().host_present;
++	if (!callback) return;
++	const uint8_t* pixels = static_cast<const uint8_t*>(g.readback.map);
++	if (g.hdr_readback)
++	{
++		const size_t count = size_t(g.out_w) * g.out_h;
++		g.hdr_host_pixels.resize(count * 4);
++		for (size_t i = 0; i < count; i++)
++		{
++			uint32_t p;
++			memcpy(&p, pixels + 4 * i, 4);
++			for (int k = 0; k < 3; k++)
++				g.hdr_host_pixels[i * 4 + k] = uint8_t((((p >> (k * 10)) & 1023u) * 255 + 511) / 1023);
++			g.hdr_host_pixels[i * 4 + 3] = 255;
++		}
++		pixels = g.hdr_host_pixels.data();
++	}
++	callback(pixels, g.out_w, g.out_h, vsync);
++}
++
+ // The pipeline's self-test: a 4x2 NV12 picture of known colours and a 16-bit planar one drawn into an image of the
+ // target's format and read back, against the same arithmetic on the CPU. A driver that gets them wrong leaves the
+ // pictures to the program's CPU path.
+@@ -2628,6 +2771,8 @@
+ 		gv.host_import ? "yes (VK_EXT_external_memory_host)" : "no (one copy each)", gv.host_align);
+ }
+ } // namespace
++
++bool HdrOutputActive() { return g.ok && g.hdr_active; }
+ 
+ bool VideoAvailable()
+ {
+@@ -3154,7 +3299,11 @@
+ 	}
+ 	internal::Log("[gpu] Init: the GPUs: counting them");
+ 	uint32_t pc = 0;
+-	vkEnumeratePhysicalDevices(g.instance, &pc, nullptr);
++	if (!Check(vkEnumeratePhysicalDevices(g.instance, &pc, nullptr), "vkEnumeratePhysicalDevices (count)"))
++	{
++		Shutdown();
++		return false;
++	}
+ 	if (pc == 0)
+ 	{
+ 		internal::Log("[gpu] no GPU");
+@@ -3163,7 +3312,11 @@
+ 	}
+ 	internal::Log("[gpu] Init: the GPUs: %u, listing them", pc);
+ 	std::vector<VkPhysicalDevice> devs(pc);
+-	vkEnumeratePhysicalDevices(g.instance, &pc, devs.data());
++	if (!Check(vkEnumeratePhysicalDevices(g.instance, &pc, devs.data()), "vkEnumeratePhysicalDevices (list)"))
++	{
++		Shutdown();
++		return false;
++	}
+ 	g.phys = devs[0];
+ 	internal::Log("[gpu] Init: the GPUs: the first one's properties");
+ 	VkPhysicalDeviceProperties props;
+@@ -3404,6 +3557,9 @@
+ 			vkDestroyPipelineCache(g.device, g.pcache, nullptr);
+ 		if (g.upload_pool)
+ 			vkDestroyCommandPool(g.device, g.upload_pool, nullptr);
++		if (g.hdr_active && CurrentConfig().set_hdr_output)
++			CurrentConfig().set_hdr_output(false, g.out_w, g.out_h);
++		FreeHdr();
+ 		FreeScene();
+ 		FreeVideo();
+ 		FreeChain(g.game_chain);
+@@ -3767,7 +3923,7 @@
+ 		// host tests (PS5GPU_TEST_OFFSCREEN_IN_FLIGHT): the last frame's read-back, now that its fence was waited
+ 		g.deferred_host_present = false;
+ 		if (CurrentConfig().host_present)
+-			CurrentConfig().host_present(static_cast<const uint8_t*>(g.readback.map), g.out_w, g.out_h, wait_vsync);
++			HostPresent(wait_vsync);
+ 	}
+ 	vkResetFences(g.device, 1, &g.fence);
+ 	// the surface's changed rows to the staging buffer
+@@ -3782,6 +3938,9 @@
+ 		for (int y = dirty.y; y < dirty.y + dirty.h; y++)
+ 			memcpy(static_cast<uint32_t*>(g.ui_staging.map) + size_t(y) * g.ui_w + dirty.x,
+ 				ui + size_t(y) * g.ui_w + dirty.x, size_t(dirty.w) * 4);
++
++	UpdateHdr();
++	if (g.hdr_broken) return false;
+ 
+ 	// the game's chain for the shader picked: built on a thread of its own, the picture going on meanwhile with the
+ 	// shader it had (or the plain picture, which builds at once)
+@@ -3961,11 +4120,11 @@
+ 				Barrier(cmd, *t.im, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+ 		}
+ 	}
+-	VkFramebuffer fb = g.offscreen ? g.offscreen_target.fb : g.swap_fbs[index];
++	VkFramebuffer fb = g.hdr_active ? g.hdr_target.fb : g.offscreen ? g.offscreen_target.fb : g.swap_fbs[index];
+ 	VkClearValue cv = {};
+ 	cv.color.float32[3] = 1.0f;
+ 	VkRenderPassBeginInfo rb = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+-	rb.renderPass = g.final_pass;
++	rb.renderPass = g.hdr_active ? g.hdr_pass : g.final_pass;
+ 	rb.framebuffer = fb;
+ 	rb.renderArea = {{0, 0}, {uint32_t(g.out_w), uint32_t(g.out_h)}};
+ 	rb.clearValueCount = 1;
+@@ -3990,7 +4149,7 @@
+ 	RecordVideoDraw(cmd);
+ 	// the surface over everything
+ 	{
+-		Chain& uc = g.ui_chain;
++		Chain& uc = g.hdr_active ? g.hdr_ui_chain : g.ui_chain;
+ 		PassRt& p = uc.passes[0];
+ 		const ps5slang::Pass& d = *p.def;
+ 		const int set_idx = int(g.frame_count & 1);
+@@ -4015,6 +4174,7 @@
+ 		float push[8];
+ 		SizeVec(push, g.ui_w, g.ui_h);
+ 		SizeVec(push + 4, g.out_w, g.out_h);
++		if (g.hdr_active) { push[6] = -1; push[7] = 203; }
+ 		const VkViewport view = {0, 0, float(g.out_w), float(g.out_h), 0, 1};
+ 		const VkRect2D sc = {{0, 0}, {uint32_t(g.out_w), uint32_t(g.out_h)}};
+ 		vkCmdSetViewport(cmd, 0, 1, &view);
+@@ -4028,6 +4188,8 @@
+ 		vkCmdDraw(cmd, 4, 1, 0, 0);
+ 	}
+ 	vkCmdEndRenderPass(cmd);
++	if (g.hdr_active) CopyHdrToOutput(cmd, index);
++	g.hdr_readback = g.hdr_active;
+ 	if (g.timestamps)
+ 	{
+ 		vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g.queries, 1);
+@@ -4107,7 +4269,7 @@
+ 		if (CurrentConfig().host_present)
+ 		{
+ 			const double h0 = NowMs();
+-			CurrentConfig().host_present(static_cast<const uint8_t*>(g.readback.map), g.out_w, g.out_h, wait_vsync);
++			HostPresent(wait_vsync);
+ 			waited += NowMs() - h0; // the host's stand-in for the display (its read-back and its vsync)
+ 		}
+ 	}
+--- a/src/stub.cpp
++++ b/src/stub.cpp
+@@ -47,6 +47,7 @@
+ void ClearScene() {}
+ // 1.1: video
+ bool VideoAvailable() { return false; }
++bool HdrOutputActive() { return false; }
+ bool VideoFormatSupported(const VideoFrame&) { return false; }
+ bool SetVideo(const VideoFrame& f, const VideoView&)
+ {
+--- a/shaders/ui.slang
++++ b/shaders/ui.slang
+@@ -31,8 +31,25 @@
+ layout(location = 0) out vec4 FragColor;
+ layout(set = 0, binding = 2) uniform sampler2D Source;
+ 
++// MPC local HDR extension. Graphics white at 203 nits (BT.2408), BT.709 -> BT.2020, then ST.2084.
++vec3 UiPq(vec3 nits)
++{
++	vec3 v = pow(clamp(nits / 10000.0, 0.0, 1.0), vec3(0.1593017578125));
++	return pow((vec3(0.8359375) + 18.8515625 * v) / (vec3(1.0) + 18.6875 * v), vec3(78.84375));
++}
++
+ void main()
+ {
+ 	ivec2 p = ivec2(min(vTexCoord * params.SourceSize.xy, params.SourceSize.xy - 1.0));
+ 	FragColor = texelFetch(Source, p, 0);
++	if (params.OutputSize.z < 0.0 && FragColor.a > 0.0)
++	{
++		vec3 light = pow(clamp(FragColor.rgb / FragColor.a, 0.0, 1.0), vec3(2.2)) * params.OutputSize.w;
++		light = vec3(dot(light, vec3(0.6274, 0.3293, 0.0433)), dot(light, vec3(0.0691, 0.9195, 0.0114)),
++			dot(light, vec3(0.0164, 0.0880, 0.8956)));
++		// As in VLC-PS5's UI layer, compensate translucent coverage for blending on PQ codes.
++		float alpha = FragColor.a >= 1.0 ? 1.0 :
++			1.0 - UiPq(vec3(100.0 * pow(1.0 - FragColor.a, 2.2))).x / UiPq(vec3(100.0)).x;
++		FragColor = vec4(UiPq(light) * alpha, alpha);
++	}
+ }
+--- a/shaders/video.frag
++++ b/shaders/video.frag
+@@ -194,7 +194,26 @@
+ 		}
+ 	}
+ 	rgb = clamp(rgb, 0.0, 1.0);
+-	if (u.mode.y != kSdr && u.mode.z != kOff)
++	if (u.tm.w > 0.5) // Native HDR10 output: preserve PQ; convert HLG/SDR to absolute light and encode PQ.
++	{
++		if (u.mode.y != kPq)
++		{
++			vec3 light;
++			if (u.mode.y == kHlg)
++			{
++				light = vec3(HlgInvOetf(rgb.r), HlgInvOetf(rgb.g), HlgInvOetf(rgb.b));
++				light *= 1000.0 * pow(max(dot(light, vec3(0.2627, 0.6780, 0.0593)), 0.0), 0.2);
++			}
++			else
++			{
++				light = pow(rgb, vec3(2.4)) * 203.0;
++				light = vec3(dot(light, vec3(0.6274, 0.3293, 0.0433)), dot(light, vec3(0.0691, 0.9195, 0.0114)),
++					dot(light, vec3(0.0164, 0.0880, 0.8956)));
++			}
++			rgb = vec3(PqInv(light.r), PqInv(light.g), PqInv(light.b));
++		}
++	}
++	else if (u.mode.y != kSdr && u.mode.z != kOff)
+ 		rgb = ToneMap(rgb);
+ 	FragColor = vec4(rgb, 1.0);
+ }
+--- a/VENDOR.txt
++++ b/VENDOR.txt
+@@ -1,12 +1,12 @@
+-# ps5-slang-gpu, vendored by its tools/vendor.sh: the files of the commit below, unchanged.
+-# tools/check_vendor.py checks them (every program's build does); don't edit them here: change the library,
+-# commit, and vendor it again.
++# Base commit below, with MPC local patches; hashes pin the delivered modified copy.
++# Patches: native HDR10 target, VideoOut callbacks, PQ/HLG output, HDR UI and enumeration errors.
++# See docs/GPU-HDR-CHANGES.md and docs/patches/gpu-hdr.diff (repository root); this is not an untouched upstream checkout.
+ commit 5531e732bc76b4eb1c1165f3044e5c0471fe44fa
+ 181314065df2f2fdaf920b1a8b5311daa216a2d6489a06ada5b49cc514d89417  .gitignore
+ 4e35910329ed8442c5babfee979c4e200c884c08553b357e763e6cc82e115b6a  LICENSE
+ 1587364aac37a209d58e1dbb6ffba553b1bab1aec6850d00cf23a139aa4c4742  Makefile
+ 8fe3b51d67e5263b74d92e0b60ff9f7e2c2bf737da09533a538e475e901ac880  README.md
+-9110d5d7fce88da74ecf67305633ccc6cac1e62b2b7e85911e320a75df10f210  include/ps5gpu/gpu.h
++1f06b548b31269c163030c380d3e0124dfc9dd1275fdc1c71d72092de7df91f2  include/ps5gpu/gpu.h
+ 4de96dc35f156214e3838ada0c6b0555efdf1a7df22eaf980339ef3a37241c1e  include/ps5gpu/slang.h
+ bcac6cc54216262f1276dfd054e49909f17fb0e393dff13dd3b1af09006d1aaf  mk/slang-gpu.mk
+ 8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643  shaders/licences/GPL-2.0.txt
+@@ -286,15 +286,15 @@
+ e07f8c0b8583bf78babe1d23333b83ebae40c3f5a664e35fdd041ae6fccb5410  shaders/slang/include/quad-pixel-communication.h
+ 0b5dbbaef443327756958b0f59caad87e23f13f499e0fcd5bac97860b069b3ab  shaders/slang/include/special-functions.h
+ fa7d346e3706a351aa77dc8e77bd049b8bfde635baf4376fedcf81f38d9a4008  shaders/slang/stock.slang
+-f7e0ed5e47dfbba5e348cd119d911ec0b06d8665e965da432971a3a90fffbc7c  shaders/ui.slang
+-1c42960616b095f38f1a3365171342fc4b1e8b71b37ddc6deef6c7864f3e21a7  shaders/video.frag
++54183a847e747bacd4b4ca5e5a3f2951960126ca48c4f372c0a4ac5435805925  shaders/ui.slang
++fcf83d9a5add36a7e6bccc007da5a7587da12fd8d0209adc8b20730440552c38  shaders/video.frag
+ 1e510fdd5b0837d1d5d73e66898c87de847de080e62d86c4fe6edc4756f64e36  shaders/video.vert
+ f343f0208a6078d45f764abb47932fb7a14a4bb37faa9151e95fb90635e641c4  src/common.cpp
+-b8c998decb4d9967d9d600bb620791e3d3f68ab743605278d629f5e432bfacd5  src/gpu.cpp
++aa816c91ffc392c6c5532a215d5bccf56baec2196c69bf487efd866545d40591  src/gpu.cpp
+ e813596cc2836f4effa0e7cbda637f38efa6b713d9ee822668e47deb27cac2fa  src/internal.h
+ d5b9a8c5869e75560b0bb40a5e13a39d70be14c9f4149d7bd7031f85f05b206b  src/sha256.cpp
+ 9d8233eb7a92de340f7d928fd38f76ca3e84e1759d4bdff315fd79370e87d261  src/slang_loader.cpp
+-d5ae2ccd980959fad2a5e243c46c123b9ca5a856376161a74f24ae653c8848a5  src/stub.cpp
++9b3937269dc2473bd37e8078ed86f18a275384f03837b50c1f32313f8d1ca647  src/stub.cpp
+ a89a5565d644d71b9d96732a3eb4cc21983ea1166938e8a46250c329db4f9209  tests/gpu_test.cpp
+ d5407c6ab90f3ee40888ab4ea026abc0a6f9feb1092060dc5f561122c23bfd3f  tests/run-tests.sh
+ 53300c142e71072cc79e46b7729dd7ee18f0685e3fc763fa8b780856421924c6  tests/stub_test.cpp

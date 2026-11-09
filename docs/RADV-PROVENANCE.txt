@@ -1,0 +1,12 @@
+RADV built against ps5-native-runtime-mit's MIT ps5platform headers, by platform/radv-shim/build-radv-mit.sh
+mesa revision: 7b59ef27c1b09b9671bc4153c41940c3155c3af2 (PS5_Mesa)
+mesa tree: db544590b101bbf7f8940b0ec2feac6ee3e655c8 (that revision with PS5-ECAM 5.1.0's patches/mesa 0006, 0007, 0008, 0009)
+build id: 7b59ef27c1b09b9671bc4153c41940c3155c3af2
+sdk: the payload SDK fork's install (b83202be73e930050e00de0f1b4d9ec46c0391bf) without ps5platform/ and libps5platform.a
+ps5platform headers (MIT):
+  ff8fed72444e61c4be1dbad65ada52ead3decc4033bb364ca85a22af18c9baff  agc.h
+  3592f06690fb78282787a96c0c8b1101df40dfed168dbdf2225e665470afda89  kernel.h
+  8c34b82a704dd25fc9c5492efd861d7b67b4a9936b7b36c038f63d3d11f8a498  videoout.h
+meson options: -Dvulkan-drivers=amd -Dgallium-drivers= -Dplatforms= -Dradv-winsys=ps5 -Dllvm=disabled -Damd-use-llvm=false -Dvideo-codecs= -Dbuildtype=debugoptimized -Db_ndebug=true -Dglx=disabled -Degl=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Dvalgrind=disabled -Dlibunwind=disabled -Dzstd=disabled -Dzlib=enabled --force-fallback-for=zlib -Dexpat=disabled -Dxmlconfig=disabled -Dshader-cache=enabled -Dbuild-tests=false -Dvulkan-layers= -Dtools= -Dmesa-clc=system
+cross files: sdk constant above + PS5_Vulkan tooling/radv/ps5-cross.ini
+archive sha256: 15a9d80e5a07cab8c0bb9f6abbba338a391dfca8df05f2d5db504c837891ab84

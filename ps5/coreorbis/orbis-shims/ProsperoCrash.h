@@ -36,6 +36,22 @@ void DisarmThread(void* stack);
 
 // Record where a thread group is now. `where` must be a string literal / long-lived pointer.
 void Stage(Area area, const char* where);
+// The same with a text of the moment (copied: the GPU's set-up steps, from its log lines)
+void StageText(Area area, const char* text);
+
+// 1.6 (test2's console run: hardware decoding off, the GPU start crashing): what the console bound.
+// Each import's slot as the console left it (the link writes the table into the eboot: tools/embed_imports.py), logged
+// per module at the start: "[imports] libSceSysmodule 1/1, libSceAgc 2/2, ...", and the names of those left at 0.
+void ReportImports();
+// Every import of `module` (its soname, e.g. "libSceAgc.sprx") bound; false and the first one that isn't otherwise.
+// True when there is no table (the host build).
+bool ImportsBound(const char* module, const char** missing);
+// The system's modules and where their code is (logged once at the start), so that a crash names the module and offset
+// of an address outside the eboot.
+void NoteModules();
+// Host tests (MPCPS5_HOST_CRASH_SELFTEST=1): the handler's pieces called directly -- its line building, its safe
+// reads, its address naming -- and the result logged ("[crash] self-test: ok"). Nothing on the console.
+void SelfTest();
 } // namespace crashlog
 
 // Short form used on the hot paths.

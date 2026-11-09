@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 
+struct AVFrame;
+
 namespace mpc
 {
 enum class TrackType
@@ -102,6 +104,7 @@ struct PlayerStats
 	double buffered_s = 0;
 	uint64_t underruns = 0;
 	uint64_t seek_pictures = 0; // 1.5.3: seeks (and openings) whose first picture was shown
+	double picture_s = -1;      // 1.6 (test6): the shown picture's time (-1: none yet)
 };
 
 class Player
@@ -145,6 +148,9 @@ public:
 	void SetNormalize(bool on, int max_percent, bool regain);
 	// HDR10 / HLG pictures on the SDR screen (mpc_tonemap.h): 0 off, 1 BT.2390, 2 Hable, 3 Reinhard; white in nits
 	void SetToneMapping(int mode, int white_nits);
+	// 1.6 (test12): Options > Playback > Decoding: 0 Auto (faster when the CPU can't keep up, back when it does),
+	// 1 Fast (from the start), 2 Full (never faster). Takes effect at the next file.
+	void SetDecodeMode(int mode);
 	// 0 SDR, 1 HDR10 (PQ), 2 HLG: the picture shown
 	int HdrKind() const;
 	// Surround: 5.1 / 7.1 tracks on the console's 8-channel output; off, everything is mixed down to stereo
@@ -179,6 +185,16 @@ public:
 	bool UpdateVideo();
 	// Scales the current picture into dst (w x h, pitch in pixels); false when there is none.
 	bool RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force = false);
+	// 1.6: the current picture as it is, for the GPU (mpc_gpu.h), and an id that changes with each picture shown (unique
+	// across files); nullptr when there is none. Valid until the next UpdateVideo.
+	const AVFrame* Picture(uint64_t* id) const;
+	int ToneMapMode() const;  // SetToneMapping's
+	int ToneMapWhite() const;
+	// 1.6: how much later than 1.5.4's direct flip a picture reaches the screen (the GPU's swapchain queues one more
+	// frame): the clock looks that far ahead when it picks the picture, so sound and picture stay together
+	void SetDisplayDelay(double seconds);
+	// 1.6: a message for the OSD since the last call ("" for none): a video decoded slowly, faster decoding...
+	std::string TakeNotice();
 	bool HasPicture() const;
 	// Saves the current picture (File > Save Image), at the video's own size, as PNG.
 	bool SavePicture(const std::string& path, std::string* error);

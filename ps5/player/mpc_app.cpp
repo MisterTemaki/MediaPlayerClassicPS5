@@ -6,6 +6,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "mpc_gpu.h"
 #include "mpc_app.h"
 #include "mpc_tonemap.h"
 
@@ -32,6 +33,7 @@
 #include "ProsperoVideo.h"
 
 #include <algorithm>
+#include <map>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -259,6 +261,12 @@ private:
 	bool idle_ = false;
 	double last_activity_ = 0, last_paint_ = 0;
 	unsigned long long idle_presents_ = 0;
+	// 1.6: frame pacing, for the log: how many refreshes each picture stayed on screen (a 24 fps film on a 60 Hz screen:
+	// 2 and 3 in turn; a 30 fps one: 2 each), counted while playing
+	std::map<int, uint64_t> pace_hist_;
+	int pace_last_frame_ = -1;
+	uint64_t pace_pictures_ = 0;
+	void LogPacing(const char* when);
 	double last_click_t_ = 0;
 	PlayState last_state_ = PlayState::Closed;
 	std::string current_url_;
@@ -843,6 +851,12 @@ std::vector<std::pair<std::string, std::string>> MainFrame::StatsRows() const
 		snprintf(b, sizeof(b), T("decode %.1f ms, scale %.1f ms"), st.decode_ms, st.convert_ms);
 		rows.push_back({"Timing", b});
 		rows.push_back({"Decoder", T(st.hw_decoding ? "PS5 video decoder (hardware)" : "FFmpeg (software)")});
+		rows.push_back({"Renderer", ps5video::RendererName()});
+		if (ps5video::GpuStartVariant() >= 3)
+			rows.push_back({"GPU start", Fmt(T("variant %d: the console decoder is off this run"), ps5video::GpuStartVariant())});
+		const std::string g = gpu::TakeStats();
+		if (!g.empty())
+			rows.push_back({"GPU", g.substr(5)});
 	}
 	snprintf(b, sizeof(b), "%lld kb/s", (long long)(st.bitrate / 1000));
 	rows.push_back({"Bitrate", b});
@@ -1030,6 +1044,7 @@ void MainFrame::PaintVideo(CDC& dc)
 	const bool show_video = Loaded() && player_.HasVideo() && player_.HasPicture();
 	if (!show_video)
 	{
+		gpu::Hide();
 		// the logo (CChildView::OnEraseBkgnd): at its own size (here: scaled with the window), smaller if needed;
 		// an audio file's cover art instead when it has one
 		const Image* cover = Loaded() ? player_.CoverArt() : nullptr;
@@ -1131,7 +1146,26 @@ void MainFrame::PaintVideo(CDC& dc)
 		int(std::lround(cy + h / 2)));
 	CRect vis = video_rect_;
 	if (!vis.Intersect(area))
+	{
+		gpu::Hide();
 		return;
+	}
+	// 1.6: the GPU draws the picture (mpc_gpu.h) under the surface, which is left transparent over it; what it doesn't
+	// take is drawn below, on the CPU, as up to 1.5.4
+	if (gpu::Active())
+	{
+		uint64_t id = 0;
+		const AVFrame* pic = player_.Picture(&id);
+		gpu::Options o;
+		o.tone_map = player_.ToneMapMode();
+		o.white_nits = player_.ToneMapWhite();
+		o.resizer = s_.video_resizer;
+		if (pic && gpu::Show(pic, id, video_rect_, o, nullptr))
+		{
+			dc.ClearRect(vis);
+			return;
+		}
+	}
 	// the visible part only (Double Size of a 4K picture would be 7680 wide): the source cropped to match
 	if (video_layer_.Width() != vis.Width() || video_layer_.Height() != vis.Height())
 		video_layer_.Create(vis.Width(), vis.Height());
@@ -1245,10 +1279,17 @@ void MainFrame::PaintOsd(CDC& dc)
 	{
 		const PlayerStats st = player_.Stats();
 		char b[256];
-		snprintf(b, sizeof(b), T("%dx%d  %.3f fps (%.1f shown)  dropped %llu  decode %.1f ms  scale %.1f ms"),
-			player_.VideoWidth(), player_.VideoHeight(), st.fps, st.shown_fps, (unsigned long long)st.dropped,
-			st.decode_ms, st.convert_ms);
+		const std::string g = gpu::ShortStats();
+		if (g.empty())
+			snprintf(b, sizeof(b), T("%dx%d  %.3f fps (%.1f shown)  dropped %llu  decode %.1f ms  scale %.1f ms"),
+				player_.VideoWidth(), player_.VideoHeight(), st.fps, st.shown_fps, (unsigned long long)st.dropped,
+				st.decode_ms, st.convert_ms);
+		else
+			snprintf(b, sizeof(b), T("%dx%d  %.3f fps (%.1f shown)  dropped %llu  decode %.1f ms"), player_.VideoWidth(),
+				player_.VideoHeight(), st.fps, st.shown_fps, (unsigned long long)st.dropped, st.decode_ms);
 		text = text.empty() ? b : text + "   " + b;
+		if (!g.empty())
+			text += "  " + g;
 	}
 	if (text.empty())
 		return;
@@ -1705,6 +1746,7 @@ void MainFrame::ApplyAudio()
 	player_.SetNormalize(s_.audio_normalize, s_.audio_max_norm, s_.audio_norm_regain);
 	// Options > Output: the next file opened uses the console's decoder or not; the rest applies at once
 	hwdec::SetEnabled(s_.hw_decoding);
+	player_.SetDecodeMode(s_.decode_mode);
 	player_.SetToneMapping(s_.hdr_tonemap, s_.hdr_peak);
 	player_.SetSurround(s_.audio_output == 1);
 }
@@ -3380,6 +3422,8 @@ int MainFrame::Run(const std::string& first)
 	}
 	WindowManager::Get().screen = CRect(0, 0, kW, kH);
 	disc::Start(); // the disc drives (mpc_disc.h)
+	gpu::Start();  // 1.6: the console decoder's pictures in place when the GPU draws them
+	player_.SetDisplayDelay(gpu::DisplayDelay());
 	ApplyAudio();
 	if (!first.empty())
 		OpenAny(first);
@@ -3408,6 +3452,9 @@ int MainFrame::Run(const std::string& first)
 
 	Bitmap screen{ps5video::Surface(), ps5video::kWidth, ps5video::kHeight, ps5video::kWidth};
 	CDC dc(screen);
+	// (test13) a GPU start variant that turned the console's decoder off for this run: said once, on the OSD
+	if (ps5video::GpuStartVariant() >= 3)
+		Osd(Fmt(T("GPU on, console decoder off (start variant %d); Options > Output explains."), ps5video::GpuStartVariant()), 6);
 	const char* quit_after = getenv("MPCPS5_HOST_QUIT_AFTER");
 	const double quit_at = quit_after ? NowSeconds() + atof(quit_after) : 0;
 	const char* script = getenv("MPCPS5_HOST_SCRIPT"); // host tests: commands by frame, "frame:cmd;..."
@@ -3516,11 +3563,11 @@ int MainFrame::Run(const std::string& first)
 				{
 					const PlayerStats ps = player_.Stats();
 					OrbisLog("[test] state %d pos %.2f dur %.2f video %d audio %d sub %d picture %d queued %d shown %.1f dropped %llu "
-							 "decode %.1f scale %.1f underruns %llu hw %d",
+							 "decode %.1f scale %.1f underruns %llu hw %d gpu %d [%s] shown picture: %s; its time %.2f",
 						int(player_.State()), player_.Position(), player_.Duration(), player_.CurrentTrack(TrackType::Video),
 						player_.CurrentTrack(TrackType::Audio), player_.CurrentTrack(TrackType::Subtitle), int(player_.HasPicture()),
 						ps.queued_video, ps.shown_fps, (unsigned long long)ps.dropped, ps.decode_ms, ps.convert_ms,
-						(unsigned long long)ps.underruns, int(ps.hw_decoding));
+						(unsigned long long)ps.underruns, int(ps.hw_decoding), int(gpu::Active()), gpu::TakeStats().c_str(), gpu::ShownKind(), ps.picture_s);
 				}
 			}
 		std::vector<InputEvent> events;
@@ -3580,6 +3627,23 @@ int MainFrame::Run(const std::string& first)
 		if (input_.CursorVisible())
 			DrawCursor(dc, input_.CursorX(), input_.CursorY());
 		ps5video::Present(0, 0, ps5video::kWidth, ps5video::kHeight, true);
+		// (review L-d) the display delay of the renderer drawing now: 0 once the GPU is lost and the CPU flips again
+		player_.SetDisplayDelay(gpu::DisplayDelay());
+		{
+			const std::string n = player_.TakeNotice();
+			if (!n.empty())
+				Osd(n, 6.0); // (logged as [osd])
+		}
+		if (new_picture && player_.State() == PlayState::Playing)
+		{
+			if (pace_last_frame_ >= 0)
+				pace_hist_[std::min(frame - pace_last_frame_, 9)]++;
+			pace_last_frame_ = frame;
+			if (++pace_pictures_ % 600 == 0)
+				LogPacing("600 pictures");
+		}
+		else if (player_.State() != PlayState::Playing)
+			pace_last_frame_ = -1;
 		frame++;
 		if (frame % 3600 == 0 && Loaded())
 		{
@@ -3589,14 +3653,30 @@ int MainFrame::Run(const std::string& first)
 				st.decode_ms, st.convert_ms, (unsigned long long)st.underruns);
 		}
 	}
+	LogPacing("at the end");
 	SavePosition();
 	player_.Close();
+	hwdec::StopCopyHelpers();
+	gpu::Stop();
 	disc::Stop();
 	tonemap::Shutdown(); // the HDR workers stopped and joined (the player's threads are gone)
 	s_.Save();
 	return 0;
 }
 } // namespace
+
+void MainFrame::LogPacing(const char* when)
+{
+	if (pace_hist_.empty())
+		return;
+	std::string h;
+	for (const auto& e : pace_hist_)
+		h += " " + std::to_string(e.first) + (e.first == 9 ? "+" : "") + ":" + std::to_string(e.second);
+	const PlayerStats st = player_.Stats();
+	OrbisLog("[pacing] %s: %.3f fps stream, refreshes each picture stayed on screen (refreshes:pictures)%s; %llu dropped; %s",
+		when, st.fps, h.c_str(), (unsigned long long)st.dropped, ps5video::RendererName());
+	pace_hist_.clear();
+}
 
 std::string EngineVersion()
 {

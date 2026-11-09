@@ -29,6 +29,8 @@ int Queued(); // frames waiting to be played
 uint64_t Underruns();
 // the player: silence at once while paused (the ring is kept)
 void SetPaused(bool paused);
+// (test8) an exact seek's sound waits for its first picture: silence till the next Push, not counted as underruns
+void HoldUntilPush();
 // drops everything queued (a seek); returns once the output thread has done it
 void Clear();
 // frames of pushed sound played so far (the audio clock)

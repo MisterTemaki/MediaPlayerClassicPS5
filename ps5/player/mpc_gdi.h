@@ -158,6 +158,8 @@ public:
 	void FillSolidRect(int x, int y, int w, int h, COLORREF c) { FillSolidRect(CRect(x, y, x + w, y + h), c); }
 	// alpha: 0..255 over what is there
 	void BlendRect(const CRect& r, COLORREF c, int alpha);
+	// 1.6: transparent (0): the GPU's video picture shows there (ps5video::GpuActive)
+	void ClearRect(const CRect& r);
 	void Draw3dRect(const CRect& r, COLORREF topLeft, COLORREF bottomRight);
 	void FrameRect(const CRect& r, COLORREF c) { Draw3dRect(r, c, c); }
 	void SetPixel(int x, int y, COLORREF c);

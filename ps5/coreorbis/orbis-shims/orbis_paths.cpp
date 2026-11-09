@@ -9,10 +9,12 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <cstdarg>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +25,37 @@ namespace
 {
 std::mutex s_log_mutex;
 FILE* s_log = nullptr;
+// (test4 review) its fd, kept for the crash handler, which mustn't call fileno() (it takes the FILE's lock)
+std::atomic<int> s_log_fd{-1};
+// (test6 review) the crash handler's own copy, made here while logging (never in the handler): its number stays valid for
+// the process's life (dup2 points it at the log again, or at /dev/null when logging stops), so a crash never writes
+// into whatever file reused a closed number
+std::atomic<int> s_crash_fd{-1};
+std::atomic<bool> s_crash_on{false};
+
+void CrashFdFollow(int fd) // fd: the open log's, or -1 when it closes (under s_log_mutex)
+{
+	int cur = s_crash_fd.load();
+	if (fd >= 0)
+	{
+		if (cur < 0)
+			s_crash_fd = cur = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+		else
+			dup2(fd, cur);
+		s_crash_on = cur >= 0;
+		return;
+	}
+	s_crash_on = false;
+	if (cur >= 0)
+	{
+		const int nul = open("/dev/null", O_WRONLY | O_CLOEXEC);
+		if (nul >= 0)
+		{
+			dup2(nul, cur);
+			close(nul);
+		}
+	}
+}
 bool s_enabled = true; // the "Debug logs" setting
 std::string s_name;    // the log OrbisLogOpen opened (or would have), to open again when logs are turned on
 bool s_rotated = false; // this run's log file was started (the one before kept as <name>.prev.log)
@@ -150,6 +183,8 @@ void OrbisLogOpen(const char* name)
 	const std::string prev = dir + "/" + name + ".prev.log";
 	rename(cur.c_str(), prev.c_str()); // keep the run before, like PS5SX2's logs
 	s_log = fopen(cur.c_str(), "w");
+	s_log_fd = s_log ? fileno(s_log) : -1;
+	CrashFdFollow(s_log_fd.load());
 	s_rotated = s_log != nullptr;
 	if (s_log)
 	{
@@ -167,12 +202,20 @@ void OrbisLogOpen(const char* name)
 int OrbisLogFd()
 {
 	// the open boot.log's fd, for the crash handler's signal-safe write(); -1 before it is open
-	return s_log ? fileno(s_log) : -1;
+	return s_log_fd.load();
+}
+
+int OrbisCrashLogFd()
+{
+	// the crash handler's copy of it (see s_crash_fd); -1 while no log is open
+	return s_crash_on.load() ? s_crash_fd.load() : -1;
 }
 
 // A password in an address (scheme://user:password@host/...) as "***", in place: an smb:// share's password, or an
 // http:// one, never reaches a log or the console's output, whoever logs the address.
-void OrbisHidePasswords(char* line)
+namespace
+{
+void HidePasswords(char* line, bool truncated)
 {
 	for (char* p = strstr(line, "://"); p; p = strstr(p, "://"))
 	{
@@ -205,8 +248,25 @@ void OrbisHidePasswords(char* line)
 			else
 				memset(colon + 1, '*', secret);
 		}
+		else if (!at && truncated && !*end)
+		{
+			// Formatting may have cut user:password@host before the @. Treat an unfinished
+			// authority's suffix as secret rather than printing a password prefix verbatim.
+			for (char* q = auth; q < end; q++)
+				if (*q == ':')
+				{
+					memset(q + 1, '*', size_t(end - q - 1));
+					break;
+				}
+		}
 		p = auth;
 	}
+}
+} // namespace
+
+void OrbisHidePasswords(char* line)
+{
+	HidePasswords(line, false);
 }
 
 void OrbisLog(const char* fmt, ...)
@@ -214,9 +274,9 @@ void OrbisLog(const char* fmt, ...)
 	char line[1024];
 	va_list ap;
 	va_start(ap, fmt);
-	vsnprintf(line, sizeof(line), fmt, ap);
+	const int length = vsnprintf(line, sizeof(line), fmt, ap);
 	va_end(ap);
-	OrbisHidePasswords(line);
+	HidePasswords(line, length >= int(sizeof(line)));
 
 	timespec ts = {};
 	clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -258,6 +318,8 @@ void OrbisLogSetEnabled(bool on)
 		if (s_log)
 		{
 			fprintf(s_log, "[%10.3f] [log] debug logs turned off\n", t);
+			s_log_fd = -1;
+			CrashFdFollow(-1);
 			fclose(s_log);
 			s_log = nullptr;
 		}
@@ -275,6 +337,8 @@ void OrbisLogSetEnabled(bool on)
 		if (!s_rotated)
 			rename(cur.c_str(), (dir + "/" + s_name + ".prev.log").c_str());
 		s_log = fopen(cur.c_str(), s_rotated ? "a" : "w");
+		s_log_fd = s_log ? fileno(s_log) : -1;
+		CrashFdFollow(s_log_fd.load());
 		s_rotated = s_rotated || s_log != nullptr;
 	}
 	printf("[mpc-ps5 %10.3f] [log] debug logs turned on\n", t);
@@ -318,6 +382,8 @@ void OrbisLogClose()
 	std::lock_guard<std::mutex> lock(s_log_mutex);
 	if (s_log)
 	{
+		s_log_fd = -1;
+		CrashFdFollow(-1);
 		fclose(s_log);
 		s_log = nullptr;
 	}

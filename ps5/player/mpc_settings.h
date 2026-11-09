@@ -202,8 +202,15 @@ struct Settings
 	int audio_output = 0; // 0 stereo (5.1/7.1 mixed down), 1 surround: the console's 8-channel output
 	// Output (video)
 	bool hw_decoding = true; // H.264 / HEVC on the console's video decoder (mpc_vdec.h)
+	int decode_mode = 0;     // 1.6 (test12): FFmpeg's decoding: 0 Auto (faster when it can't keep up), 1 Fast, 2 Full
 	int hdr_tonemap = 1;     // HDR10 / HLG on an SDR picture: 0 off (as it comes), 1 BT.2390, 2 Hable, 3 Reinhard
 	int hdr_peak = 250;      // the picture's white after tone mapping, in nits (100..400)
+	bool hdr_output = true; // native HDR10 on a compatible TV, otherwise SDR tone mapping; read at startup
+	// 1.6: who draws the video: 0 the GPU (Vulkan: scaling, colour, HDR, the default), 1 the CPU (libswscale, as up to
+	// 1.5.4); read at start (ProsperoVideo.cpp reads VideoRenderer= itself: the video comes up before the settings)
+	int video_renderer = 0;
+	int gpu_start = 0; // 0 Automatic (software after a failed GPU start, until explicitly retried), 1 CPU only
+	int video_resizer = 0; // the GPU's scaling: 0 bilinear, 1 bicubic
 	// Subtitles (Default Style): the text formats other than ASS/SSA; sizes in a 288-line script's pixels, as
 	// VSFilter scales SRT text with the picture
 	std::string sub_font; // a file in <data>/fonts ("name.ttf", "name.ttc#1"); "" Selawik, "Roboto" the app's own

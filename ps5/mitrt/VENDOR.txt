@@ -1,0 +1,6 @@
+ps5-native-runtime-mit (MIT), vendored for the GPU build's platform layer (platform/: RADV's needs) and its link flags
+commit 67bb3df (branch radv-platform), git archive, with local audit patches:
+- platform/src/ps5rt_locale.c: explicit eight-byte ABI tag initializer (GCC 15 -Werror compatibility).
+- tests/test_new.cpp: call operator new[] directly to prevent allocation elision in the failure test.
+- platform/tests/test_check_link.sh: preserve paths with spaces when invoking the checker.
+- platform/radv-shim/build-radv-mit.sh: install the Vulkan headers required by consumers of the archive.
