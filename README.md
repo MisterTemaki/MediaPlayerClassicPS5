@@ -15,13 +15,16 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-> **Status (1.6-gpu-hdr2):** the shared player was run on PS5 13.60 with kstuff: RADV opened on the first attempt,
+> **Status (1.6.0):** the shared player was run on PS5 13.60 with kstuff: RADV opened on the first attempt,
 > and H.264 and 4K HEVC Main10 used the console decoder. The 4K test decoded 1,797 frames with no decoder errors,
 > with seven displayed frames dropped; it included pauses and controls, so it was not a continuous benchmark.
 > **hdr2 corrects the app's HDR profile and still needs a console retest. Native HDR10 output has not been
 > confirmed on an HDR10 TV.** SDR tone mapping remained available on the test TV, which does not support HDR10.
 > See [changes](docs/GPU-HDR-CHANGES.md), [test results](docs/PS5-VALIDATION-v1.6-gpu-hdr2.md)
-> and [build notes](docs/BUILD-GPU-HDR.md). Historical 1.5.4 status follows.
+> and [build notes](docs/BUILD-GPU-HDR.md). The [1.6.0 release notes](docs/RELEASE-NOTES-v1.6.0.md) list the downloads
+> and update instructions. The application ZIP is available for **Help > Check for updates**; its installation
+> was checked with the 1.5.4 and 1.6 updater code on the host. A console update test is still needed.
+> Historical 1.5.4 status follows.
 >
 > **Status (1.5.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 613 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
@@ -672,7 +675,7 @@ Honest limits:
 - It asks GitHub for this repository's newest release
   (`api.github.com/repos/MisterTemaki/MediaPlayerClassicPS5/releases/latest`). With a newer one it says so and asks
   "Download it and install it now?". Yes downloads the release's `MediaPlayerClassicPS5-v<version>-PPSA99015.zip`
-  (about 40 MB) with the progress on the screen, installs it, then offers to restart into the new version.
+  with the progress on the screen, installs it, then offers to restart into the new version.
 - Once a day, when the app starts, it looks by itself (a notification, and the same question). Nothing is
   installed unless you answer Yes.
 - The app does it with FFmpeg's HTTPS (the one the network streams use), always with the certificate checked
