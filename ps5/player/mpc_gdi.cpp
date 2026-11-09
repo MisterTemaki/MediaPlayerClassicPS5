@@ -16,7 +16,17 @@ inline uint32_t Px(COLORREF c)
 	return 0xff000000u | (c & 0xffffff);
 }
 
-// dst = src (premultiplied, a 0..255) over dst
+// 1.6: the alpha a blend leaves. The screen is opaque everywhere (alpha 255, unchanged: the same pixels as up to 1.5.4)
+// except where the GPU draws the video under it (ps5video::GpuActive: the video's rectangle is cleared to 0, transparent):
+// there the surface is premultiplied and whatever is drawn over the video (subtitles, the OSD, menus, the pointer) keeps
+// the coverage it has, so the GPU lays it over the picture as the CPU used to blend it.
+inline uint32_t OutAlpha(uint32_t dst, uint32_t a)
+{
+	const uint32_t da = dst >> 24;
+	return da == 255 ? 255 : a + (da * (255 - a) + 127) / 255;
+}
+
+// dst = src (premultiplied, a 0..255) over dst (premultiplied)
 inline uint32_t Over(uint32_t dst, uint32_t src)
 {
 	const uint32_t a = src >> 24;
@@ -28,16 +38,16 @@ inline uint32_t Over(uint32_t dst, uint32_t src)
 	const uint32_t rb = (((dst & 0x00ff00ffu) * ia + 0x00800080u) >> 8) & 0x00ff00ffu;
 	const uint32_t g = (((dst & 0x0000ff00u) * ia + 0x00008000u) >> 8) & 0x0000ff00u;
 	uint32_t r = (src & 0x00ffffffu) + rb + g;
-	return 0xff000000u | r;
+	return (OutAlpha(dst, a) << 24) | r;
 }
 
-inline uint32_t Mix(uint32_t dst, COLORREF c, uint32_t a) // a 0..255, c straight
+inline uint32_t Mix(uint32_t dst, COLORREF c, uint32_t a) // a 0..255, c straight, dst premultiplied
 {
 	const uint32_t ia = 255 - a;
 	const uint32_t r = ((dst & 0xff) * ia + (c & 0xff) * a + 127) / 255;
 	const uint32_t g = (((dst >> 8) & 0xff) * ia + ((c >> 8) & 0xff) * a + 127) / 255;
 	const uint32_t b = (((dst >> 16) & 0xff) * ia + ((c >> 16) & 0xff) * a + 127) / 255;
-	return 0xff000000u | r | (g << 8) | (b << 16);
+	return (OutAlpha(dst, a) << 24) | r | (g << 8) | (b << 16);
 }
 } // namespace
 
@@ -51,6 +61,18 @@ void CDC::FillSolidRect(const CRect& rr, COLORREF c)
 	{
 		uint32_t* row = bmp_.px + size_t(y) * bmp_.pitch;
 		std::fill(row + r.left, row + r.right, p);
+	}
+}
+
+void CDC::ClearRect(const CRect& rr)
+{
+	CRect r = rr;
+	if (!bmp_.Valid() || !r.Intersect(clip_))
+		return;
+	for (int y = r.top; y < r.bottom; y++)
+	{
+		uint32_t* row = bmp_.px + size_t(y) * bmp_.pitch;
+		std::fill(row + r.left, row + r.right, 0u);
 	}
 }
 

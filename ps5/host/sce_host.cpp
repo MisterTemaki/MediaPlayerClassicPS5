@@ -161,8 +161,11 @@ size_t sceKernelGetDirectMemorySize(void)
 }
 int sceKernelAvailableDirectMemorySize(int64_t, int64_t, size_t, int64_t* start_out, size_t* size_out)
 {
+	// (test12) MPCPS5_HOST_DIRECT_FREE_MB=n: the largest free run of direct memory (the console said 12276 MiB at a
+	// start; the pictures' budget), else 12276
 	*start_out = 0;
-	*size_out = size_t(64) << 20;
+	const char* e = getenv("MPCPS5_HOST_DIRECT_FREE_MB");
+	*size_out = size_t(e ? atoi(e) : 12276) << 20;
 	return 0;
 }
 int sceKernelMapNamedFlexibleMemory(void**, size_t, int, int, const char*)
@@ -171,14 +174,17 @@ int sceKernelMapNamedFlexibleMemory(void**, size_t, int, int, const char*)
 }
 int sceKernelAvailableFlexibleMemorySize(size_t* size)
 {
-	*size = 0;
+	// 1.6: the heap left (the console's malloc takes flexible memory); MPCPS5_HOST_HEAP_MB=n: n MiB (the console said
+	// 360 at a start), else 8 GiB
+	const char* e = getenv("MPCPS5_HOST_HEAP_MB");
+	*size = e ? size_t(atoll(e)) << 20 : size_t(8) << 30;
 	return 0;
 }
 int sceKernelAllocateMainDirectMemory(size_t len, size_t, int, intptr_t* phys_out)
 {
 	if (DirectFails(len))
 		return (int)0x80020023;
-	void* p = aligned_alloc(0x20000, len);
+	void* p = aligned_alloc(0x20000, (len + 0x1ffff) & ~size_t(0x1ffff)); // (a multiple of the alignment: ASan checks)
 	*phys_out = reinterpret_cast<intptr_t>(p);
 	return p ? 0 : -1;
 }
@@ -292,6 +298,52 @@ int sceVideoOutRegisterBuffers2(int, int, int, SceVideoOutBuffers* buffers, int 
 	memcpy(&g_h, attr->junk0 + 4, 4);
 	return 0;
 }
+// 1.6: the GPU renderer's frames (ps5-slang-gpu off screen on lavapipe, MPCPS5_HOST_GPU=1), read back as B8G8R8A8:
+// counted, dumped and paced as the scan-out flips are (MPCPS5_HOST_DUMP, MPCPS5_HOST_MAX_FLIPS, MPCPS5_HOST_REALTIME)
+void MpcHostGpuFlip(const uint8_t* bgra, int w, int h, bool wait_vsync)
+{
+	InitEnv();
+	const uint64_t n = g_flips.fetch_add(1);
+	if (g_dumps.count(n))
+	{
+		const char* dir = getenv("MPCPS5_HOST_DUMP_DIR");
+		char path[512];
+		snprintf(path, sizeof(path), "%s/flip%05llu.ppm", dir ? dir : ".", (unsigned long long)n);
+		if (FILE* f = fopen(path, "wb"))
+		{
+			fprintf(f, "P6\n%d %d\n255\n", w, h);
+			std::vector<uint8_t> row(size_t(w) * 3);
+			for (int y = 0; y < h; y++)
+			{
+				const uint8_t* p = bgra + size_t(y) * w * 4;
+				for (int x = 0; x < w; x++)
+				{
+					row[x * 3] = p[x * 4 + 2];
+					row[x * 3 + 1] = p[x * 4 + 1];
+					row[x * 3 + 2] = p[x * 4];
+				}
+				fwrite(row.data(), 1, row.size(), f);
+			}
+			fclose(f);
+			fprintf(stderr, "[host] dumped %s (GPU)\n", path);
+		}
+	}
+	if (const char* m = getenv("MPCPS5_HOST_MAX_FLIPS"))
+		if (n >= strtoull(m, nullptr, 10))
+		{
+			fprintf(stderr, "[host] MPCPS5_HOST_MAX_FLIPS reached: abort\n");
+			_exit(3);
+		}
+	if (wait_vsync && getenv("MPCPS5_HOST_REALTIME"))
+	{
+		// the display's vblank, 60 Hz, as the console's FIFO swapchain paces it
+		static const auto t0 = std::chrono::steady_clock::now();
+		const auto period = std::chrono::microseconds(16667);
+		const auto since = std::chrono::steady_clock::now() - t0;
+		std::this_thread::sleep_until(t0 + (since / period + 1) * period);
+	}
+}
+
 int sceVideoOutSubmitFlip(int, int idx, uint32_t, int64_t)
 {
 	const uint64_t n = g_flips.fetch_add(1);

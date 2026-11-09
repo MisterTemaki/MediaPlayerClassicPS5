@@ -1,0 +1,11 @@
+# Stable shell/source line endings on Windows; vendor manifests hash exact bytes.
+* text=auto eol=lf
+ps5/ps5-slang-gpu/** -text
+ps5/mitrt/** -text
+*.png -text
+*.jpg -text
+*.dds -text
+*.ttf -text
+*.bmp -text
+*.bin -text
+*.prx -text

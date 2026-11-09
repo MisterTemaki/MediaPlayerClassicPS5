@@ -11,6 +11,9 @@
 //                                a sample ("pitch": 3x the samples); =size: a buffer size too small for the
 //                                picture; =format: another frame_format number; =depth: 16-bit samples for an
 //                                8-bit stream (the player must not read any of these, and hands the video to FFmpeg)
+//   MPCPS5_HOST_HWDEC_HOLD=n     1.6: the decoder keeps n picture buffers to itself, as the console's does for its
+//                                pipeline and reordering: each buffer handed in is accepted, and a picture comes out in
+//                                the oldest one only once more than n are held (in the one handed in, when n is 0)
 //
 // SPDX-License-Identifier: MIT
 
@@ -92,8 +95,11 @@ struct HostDecoder
 	uint32_t codec = 0;
 	int max_w = 0, max_h = 0;
 	std::deque<AVFrame*> ready;
+	std::deque<std::pair<void*, uint64_t>> held; // MPCPS5_HOST_HWDEC_HOLD: buffers accepted, not given back yet
 	bool draining = false;
 	unsigned aus = 0;
+	uint32_t profile = 0;
+	AVFrame* last = nullptr; // VP9: the last picture, given again for a block that shows no frame (as the console does)
 };
 
 int Pitch(int w)
@@ -223,6 +229,10 @@ int sceVideodec2ReleaseComputeQueue(void*)
 }
 int sceVideodec2QueryDecoderMemoryInfo(const HostVdecConfig* config, HostVdecMemory* memory)
 {
+	// (test12) MPCPS5_HOST_HWDEC_SMALL_FAILS=1: a picture size under 1920x1088 fails the query with 0x811d0200, as the
+	// console's does (test11's PS5 log: a 720x1280 phone video)
+	if (getenv("MPCPS5_HOST_HWDEC_SMALL_FAILS") && (config->max_frame_width < 1920 || config->max_frame_height < 1088))
+		return (int)0x811d0200;
 	memory->cpu_memory_size = 1 << 20;
 	memory->gpu_memory_size = 1 << 20;
 	memory->cpu_gpu_memory_size = 1 << 20;
@@ -234,13 +244,19 @@ int sceVideodec2CreateDecoder(const HostVdecConfig* config, const HostVdecMemory
 {
 	if (getenv("MPCPS5_HOST_HWDEC_REFUSE"))
 		return (int)0x811D0101;
-	const AVCodec* codec = avcodec_find_decoder(config->codec_type == 1 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC);
+	// 1: H.264, 974921: HEVC, 2382845: VP9 (profile 0 or 2: 8 / 10-bit)
+	if (config->codec_type == 2382845 && getenv("MPCPS5_HOST_HWDEC_NO_VP9"))
+		return (int)0x811D0101;
+	const AVCodec* codec = avcodec_find_decoder(config->codec_type == 1 ? AV_CODEC_ID_H264
+												: config->codec_type == 2382845 ? AV_CODEC_ID_VP9
+																				: AV_CODEC_ID_HEVC);
 	if (!codec)
 		return -1;
 	HostDecoder* d = new HostDecoder;
 	d->c = avcodec_alloc_context3(codec);
-	d->c->thread_count = 2;
+	d->c->thread_count = config->codec_type == 2382845 ? 1 : 2; // (VP9: a picture out of each block at once)
 	d->codec = config->codec_type;
+	d->profile = config->profile;
 	d->max_w = config->max_frame_width;
 	d->max_h = config->max_frame_height;
 	if (avcodec_open2(d->c, codec, nullptr) < 0)
@@ -257,6 +273,7 @@ int sceVideodec2DeleteDecoder(void* decoder)
 	HostDecoder* d = static_cast<HostDecoder*>(decoder);
 	for (AVFrame* f : d->ready)
 		av_frame_free(&f);
+	av_frame_free(&d->last);
 	avcodec_free_context(&d->c);
 	delete d;
 	return 0;
@@ -268,6 +285,14 @@ int sceVideodec2Decode(void* decoder, const HostVdecInput* in, HostVdecFrameBuff
 	if (const char* f = getenv("MPCPS5_HOST_HWDEC_FAIL"))
 		if (d->aus >= unsigned(atoi(f)))
 			return (int)0x811D0301; // a stream error
+	const uint8_t* au = static_cast<const uint8_t*>(in->au_data);
+	if (d->codec == 2382845 && in->au_size && (au[0] >> 6) == 2)
+	{
+		// a VP9 frame of another profile than the decoder was made for: refused, as the console refuses them
+		const uint32_t prof = ((au[0] >> 5) & 1) | (((au[0] >> 4) & 1) << 1);
+		if (prof != d->profile)
+			return (int)0x811D0300;
+	}
 	AVPacket* p = av_packet_alloc();
 	p->data = static_cast<uint8_t*>(in->au_data);
 	p->size = int(in->au_size);
@@ -275,8 +300,36 @@ int sceVideodec2Decode(void* decoder, const HostVdecInput* in, HostVdecFrameBuff
 	av_packet_free(&p);
 	if (r < 0 && r != AVERROR(EAGAIN))
 		return (int)0x811D0302;
+	const size_t before = d->ready.size();
 	Pull(d);
-	Give(d, fb, out);
+	if (d->codec == 2382845)
+	{
+		if (d->ready.size() > before)
+		{
+			av_frame_free(&d->last);
+			d->last = av_frame_clone(d->ready.back());
+		}
+		else if (d->last && !(getenv("MPCPS5_HOST_VP9_HIDDEN") && !strcmp(getenv("MPCPS5_HOST_VP9_HIDDEN"), "none")))
+			d->ready.push_back(av_frame_clone(d->last)); // a block that shows no frame still gives a picture
+		// (MPCPS5_HOST_VP9_HIDDEN=none: as FFmpeg, nothing for it, its buffer not taken)
+	}
+	static const size_t hold = getenv("MPCPS5_HOST_HWDEC_HOLD") ? size_t(atoi(getenv("MPCPS5_HOST_HWDEC_HOLD"))) : 0;
+	if (hold == 0)
+	{
+		Give(d, fb, out);
+		return 0;
+	}
+	if (fb && fb->frame_buffer)
+	{
+		d->held.push_back({fb->frame_buffer, fb->frame_buffer_size});
+		fb->is_accepted = true;
+	}
+	if (!d->ready.empty() && d->held.size() > hold)
+	{
+		HostVdecFrameBuffer oldest = {sizeof(oldest), d->held.front().first, d->held.front().second, false};
+		d->held.pop_front();
+		Give(d, &oldest, out);
+	}
 	return 0;
 }
 int sceVideodec2Flush(void* decoder, HostVdecFrameBuffer* fb, HostVdecOutput* out)
@@ -288,6 +341,14 @@ int sceVideodec2Flush(void* decoder, HostVdecFrameBuffer* fb, HostVdecOutput* ou
 		d->draining = true;
 	}
 	Pull(d);
+	if (!d->held.empty() && !d->ready.empty())
+	{
+		// draining: the held buffers come back with the last pictures
+		HostVdecFrameBuffer oldest = {sizeof(oldest), d->held.front().first, d->held.front().second, false};
+		d->held.pop_front();
+		Give(d, &oldest, out);
+		return 0;
+	}
 	Give(d, fb, out);
 	return 0;
 }
@@ -298,6 +359,7 @@ int sceVideodec2Reset(void* decoder)
 	for (AVFrame* f : d->ready)
 		av_frame_free(&f);
 	d->ready.clear();
+	d->held.clear();
 	d->draining = false;
 	return 0;
 }

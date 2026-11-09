@@ -11,10 +11,12 @@
 #include "mpc_smb.h"
 #include "mpc_tonemap.h"
 #include "mpc_vdec.h"
+#include "mpc_bigmem.h"
 
 #include "OrbisPaths.h"
 #include "ProsperoAudio.h"
 #include "ProsperoThread.h"
+#include "ProsperoSce.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -96,8 +98,13 @@ struct PacketQueue
 	std::deque<QPacket> q;
 	size_t bytes = 0;
 	int64_t duration = 0; // in the stream's time base
+	// (test7 review) kept as packets come and go, for answers without a walk over the queue: where the last one queued
+	// ends, and the queued keyframes' times in order (pts, or dts without one; AV_NOPTS_VALUE without either)
+	int64_t end_ts = AV_NOPTS_VALUE;
+	std::deque<int64_t> keys;
 	bool abort = false;
 
+	static int64_t Ts(const AVPacket* p) { return p->pts != AV_NOPTS_VALUE ? p->pts : p->dts; }
 	void Put(AVPacket* p, int serial)
 	{
 		std::lock_guard<std::mutex> l(mu);
@@ -106,8 +113,36 @@ struct PacketQueue
 		{
 			bytes += size_t(p->size) + sizeof(*p);
 			duration += p->duration;
+			const int64_t t = Ts(p);
+			if (t != AV_NOPTS_VALUE && (end_ts == AV_NOPTS_VALUE || t + p->duration > end_ts))
+				end_ts = t + p->duration;
+			if (p->flags & AV_PKT_FLAG_KEY)
+				keys.push_back(t);
 		}
 		cv.notify_all();
+	}
+	// (test6) the time the queued packets cover, in seconds: their durations, or the first one's time to the last one's
+	// end (test7 review: no walk over the queue)
+	double Seconds(AVRational tb)
+	{
+		std::lock_guard<std::mutex> l(mu);
+		int64_t span = 0;
+		if (!q.empty() && q.front().pkt && end_ts != AV_NOPTS_VALUE)
+		{
+			const int64_t t = Ts(q.front().pkt);
+			if (t != AV_NOPTS_VALUE && end_ts > t)
+				span = end_ts - t;
+		}
+		return double(std::max(duration, span)) * av_q2d(tb);
+	}
+	// (test7 review) the next queued keyframe's time (AV_NOPTS_VALUE: none queued, or one without a time)
+	bool NextKey(int64_t* ts)
+	{
+		std::lock_guard<std::mutex> l(mu);
+		if (keys.empty())
+			return false;
+		*ts = keys.front();
+		return true;
 	}
 	void Flush()
 	{
@@ -117,6 +152,8 @@ struct PacketQueue
 		q.clear();
 		bytes = 0;
 		duration = 0;
+		end_ts = AV_NOPTS_VALUE;
+		keys.clear();
 		cv.notify_all();
 	}
 	void Abort()
@@ -143,7 +180,11 @@ struct PacketQueue
 		{
 			bytes -= size_t(out.pkt->size) + sizeof(*out.pkt);
 			duration -= out.pkt->duration;
+			if ((out.pkt->flags & AV_PKT_FLAG_KEY) && !keys.empty())
+				keys.pop_front();
 		}
+		if (q.empty())
+			end_ts = AV_NOPTS_VALUE;
 		cv.notify_all();
 		return 1;
 	}
@@ -160,6 +201,7 @@ struct Clock
 	double pts = 0, at = 0;
 	double rate = 1;
 	bool paused = true;
+	bool held = false; // (test8) an exact seek waiting for its first picture: the clock stands at the target
 	void Set(double p)
 	{
 		std::lock_guard<std::mutex> l(mu);
@@ -169,24 +211,34 @@ struct Clock
 	double Get()
 	{
 		std::lock_guard<std::mutex> l(mu);
-		return paused ? pts : pts + (NowS() - at) * rate;
+		return paused || held ? pts : pts + (NowS() - at) * rate;
+	}
+	void Freeze(bool& flag, bool v) // (under mu)
+	{
+		const bool was = paused || held;
+		const double now = NowS();
+		if (!was)
+			pts += (now - at) * rate;
+		at = now;
+		flag = v;
 	}
 	void SetPaused(bool p)
 	{
 		std::lock_guard<std::mutex> l(mu);
-		if (paused == p)
-			return;
-		const double now = NowS();
-		if (!paused)
-			pts += (now - at) * rate;
-		at = now;
-		paused = p;
+		if (paused != p)
+			Freeze(paused, p);
+	}
+	void SetHeld(bool h)
+	{
+		std::lock_guard<std::mutex> l(mu);
+		if (held != h)
+			Freeze(held, h);
 	}
 	void SetRate(double r)
 	{
 		std::lock_guard<std::mutex> l(mu);
 		const double now = NowS();
-		if (!paused)
+		if (!paused && !held)
 			pts += (now - at) * rate;
 		at = now;
 		rate = r;
@@ -210,6 +262,11 @@ struct SubItem
 	// its pictures are to be decoded (not yet, or let go by the budget)
 	int first_pkt = -1, last_pkt = -1;
 	bool need_pics = false;
+	// a PGS line's epoch: the packet of the last presentation segment up to it that wasn't "normal" (an epoch start,
+	// acquisition point or epoch continue: the decoder's palettes and objects begin again there); -1: none, the file's
+	// start. A normal display set (a palette update, a new object on the epoch's palette) is drawn with what its epoch
+	// defined before it, so its pictures are decoded from there (DecodeShown)
+	int epoch_pkt = -1;
 };
 
 // 1.5.2: the compressed packets of an external bitmap subtitle file kept at most (a film's .sup is tens of MB), each
@@ -217,6 +274,54 @@ struct SubItem
 constexpr size_t kMaxExtBitmapBytes = size_t(128) << 20;
 constexpr size_t kExtPacketOverhead = 256; // an AVPacket, its buffer's reference and padding
 constexpr size_t kMaxExtBitmapLines = 20000;
+// PGS segment types. A packet holds one segment from FFmpeg's sup and M2TS readers, a whole display set from MKV.
+constexpr uint8_t kPgsPalette = 0x14, kPgsObject = 0x15, kPgsPresentation = 0x16, kPgsDisplayEnd = 0x80;
+
+// what a PGS packet's segments are (pgssubdec.c reads them the same way)
+struct PgsInfo
+{
+	int segments = 0;
+	bool presentation = false; // a presentation segment: a display set begins
+	bool epoch = false;        // ... whose composition state isn't "normal" (00): FFmpeg's decoder lets go of its
+							   // palettes and objects there (parse_presentation_segment)
+	bool clears = false;       // ... with no object: the display set takes the line off the screen
+	bool palette = false, object = false, end = false;
+	bool object_first = false; // the object's first fragment (its definition begins: older ones are replaced)
+	int object_id = -1;
+};
+
+PgsInfo PgsScan(const AVPacket* p)
+{
+	PgsInfo g;
+	const uint8_t* d = p ? p->data : nullptr;
+	int n = p ? p->size : 0;
+	while (d && n >= 3)
+	{
+		const int type = d[0], len = (d[1] << 8) | d[2];
+		if (len > n - 3)
+			break;
+		g.segments++;
+		if (type == kPgsPresentation && len >= 11)
+		{
+			g.presentation = true;
+			g.epoch = g.epoch || (d[3 + 7] >> 6) != 0;
+			g.clears = g.clears || d[3 + 10] == 0;
+		}
+		else if (type == kPgsPalette)
+			g.palette = true;
+		else if (type == kPgsObject && len >= 4)
+		{
+			g.object = true;
+			g.object_id = (d[3] << 8) | d[4];
+			g.object_first = g.object_first || (d[3 + 3] & 0x80) != 0;
+		}
+		else if (type == kPgsDisplayEnd)
+			g.end = true;
+		d += 3 + len;
+		n -= 3 + len;
+	}
+	return g;
+}
 
 size_t PictureBytes(const SubtitleShow& s)
 {
@@ -483,11 +588,13 @@ struct Player::Impl
 	std::atomic<bool> a_stop{false}; // the audio thread is asked to end (a track change)
 	int ctx_w = 0, ctx_h = 0, ctx_sw = 0, ctx_sh = 0, ctx_fmt = -1; // the scaler's sizes
 	bool ctx_hdr = false;                                            // the scaler makes 16-bit R'G'B' for tone mapping
+	int ctx_chroma = -1; // 1.6: the chroma siting the context was made for
 	// HDR on the SDR picture (mpc_tonemap.h): Options > Output
 	std::atomic<int> tm_mode{tonemap::Bt2390};
 	std::atomic<int> tm_white{250};
 	std::vector<uint16_t> hdr_buf;
 	std::atomic<int> hdr_shown{0}; // 0 SDR, 1 PQ, 2 HLG: what the last picture was
+	std::atomic<double> display_delay{0}; // 1.6: SetDisplayDelay
 
 	bool Seekable_() const
 	{
@@ -497,9 +604,14 @@ struct Player::Impl
 	AVCodecContext* vdec = nullptr;
 	// the console's video decoder (mpc_vdec.h) for H.264 / HEVC; vdec (FFmpeg) when it can't or gives up
 	hwdec::Decoder* hw = nullptr;
+	std::atomic<int> hw_serial{-1}; // (review L-b) the serial the console decoder is decoding for
 	std::atomic<bool> hw_active{false};
 	AVCodecContext* adec = nullptr;
 	std::map<int, AVCodecContext*> sdecs;
+	// (the demuxer's thread) the PGS tracks waiting, after a seek, for a display set that begins an epoch (NewPgsDecoders)
+	std::set<int> pgs_wait;
+	// ... and those of them inside a clearing display set let through, until its end segment (M2TS: one segment a packet)
+	std::set<int> pgs_clearing;
 	std::vector<int> sub_streams;
 	double duration = 0;
 	bool seekable = true;
@@ -527,6 +639,106 @@ struct Player::Impl
 	std::atomic<double> skip_until{-1e18}; // frames before this (in the current serial) are not shown
 	std::atomic<double> serial_start{0}; // where the current serial starts: the last seek's target, 0 at the start
 	std::atomic<bool> show_after_seek{false};
+	// (test8 review) an exact seek holds the clock and the sound until its first picture (the target's) is shown, then
+	// both go on from it together (mpv's hr-seek, VLC).
+	// (test10 review: the keyframe finish and the decode-rate rule of test9 are gone) It holds until (a) the target's
+	// picture is shown, (b) no picture can come (NoPictureCanCome: the video track ended there), or (c) kHoldMax of
+	// holding (on hold_clock, standing while paused). At (c) it lets go where the decoder is: the latest picture decoded
+	// before the target (kept in hold_last) is shown and the clock and the sound start at its time -- a little early,
+	// never late, nothing left out, no flush; with no picture decoded at all yet (a slow source) the sound starts at the
+	// target and the pictures before it count as late (hold_gaveup_serial), so the bounded keyframe skip catches up.
+	// The sound isn't decoded while it holds (the audio thread waits before its packets), so it can start at either.
+	static constexpr double kHoldMax = 3.0;
+	std::atomic<int> hold_serial{-1};
+	std::atomic<int> hold_gaveup_serial{-1}; // let go with no picture
+	Clock hold_clock;                        // how long it has held (standing while paused)
+	std::mutex hold_mu;                      // a seek's start against a release (skip_until, v_seek_target, hold_serial)
+	// the latest picture decoded before the target (fmu). At the bound it is pushed to the front of `frames` and
+	// taken by UpdateVideo's "show_after_seek || cur_serial != ser" branch -- show_after_seek stays true for the whole
+	// hold (set at the seek, cleared only by that take), which is what makes that take, and the release, happen
+	VFrame hold_last{nullptr, 0, 0, -1};
+	static constexpr double kHoldNear = 1.0; // (test11) shown at the bound only within this of the target
+	double HoldElapsed() { return hold_clock.Get(); }
+	// (c), fmu held: true when the latest picture decoded was put up front, for UpdateVideo's take to let go with
+	bool HoldBoundLocked(int ser)
+	{
+		if (hold_serial.load() != ser || HoldElapsed() <= kHoldMax)
+			return false;
+		// a picture is waiting to be taken (the target's, or the latest one put up front already): its take lets go
+		if (!frames.empty())
+			return false;
+		// (test11 review) only a picture close to the target (within kHoldNear): one a whole GOP early would take the
+		// sound back with it, and the keyframe skip would then jump both forward again a few seconds later
+		if (hold_last.f && hold_last.serial == ser && v_seek_target.load() - hold_last.pts <= kHoldNear)
+		{
+			OrbisLog("[player] exact seek: no picture at the target in 3 s: on from the latest one decoded (%.2f s), the "
+					 "sound with it",
+				hold_last.pts);
+			frames.push_front(hold_last);
+			hold_last.f = nullptr;
+			return true;
+		}
+		if (hold_last.f && hold_last.serial == ser)
+			OrbisLog("[player] exact seek: the latest picture decoded (%.2f s) is more than %.0f s before the target: not shown",
+				hold_last.pts, kHoldNear);
+		ReleaseHold(ser, -1e18, "no picture in 3 s");
+		return false;
+	}
+	// from the sound's wait (any thread but one holding fmu)
+	void HoldCheck(int ser)
+	{
+		if (hold_serial.load() != ser || HoldElapsed() <= kHoldMax)
+			return;
+		std::lock_guard<std::mutex> l(fmu);
+		HoldBoundLocked(ser); // (a picture put up front is taken, and the hold let go, by UpdateVideo)
+	}
+	// (second / third reviews; test9: the hold too) no picture can come for this serial, with no video left to decode
+	// (none queued, none being decoded, no picture waiting): its reads have failed for a second with no read in progress
+	// (a read that blocks, however long, never counts), or the sound read has run 10 s past both its first packet and
+	// the last video packet (the video track ended there), paused or playing. (fmu held.)
+	bool NoPictureCanCome(int ser)
+	{
+		if (!frames.empty() || vq.Count() != 0 || vbusy)
+			return false;
+		std::lock_guard<std::mutex> pl(prog_mu);
+		if (prog_serial != ser)
+			return false;
+		if (fail_since > 0 && !in_read && NowS() - fail_since >= 1.0)
+			return true;
+		return apkt_max >= std::max(vpkt_max, apkt_first) + 10;
+	}
+	// true: this call let the hold go (pic: the first picture's time, or -1e18 for none). fmu held.
+	bool ReleaseHold(int ser, double pic, const char* why)
+	{
+		{
+			// (test10 review) where the sound starts is set before its wait ends (hold_serial last), and against a seek
+			std::lock_guard<std::mutex> hl(hold_mu);
+			if (ser < 0 || hold_serial.load() != ser)
+				return false;
+			if (pic > -1e17)
+			{
+				clock.Set(pic);
+				// a first picture before the target (let go at (c)), or well past it (the decoder went on from a later
+				// keyframe: the console's gave up and FFmpeg took over there): the sound starts with it
+				if (pic + 0.1 < skip_until.load() || pic > skip_until.load() + 0.1)
+				{
+					skip_until = pic - 0.001;
+					v_seek_target = pic;
+				}
+			}
+			else
+				hold_gaveup_serial = ser;
+			av_frame_free(&hold_last.f);
+			clock.SetHeld(false);
+			hold_serial = -1;
+		}
+		if (pic > -1e17)
+			OrbisLog("[player] exact seek: its first picture (%.2f s) after %.2f s; sound and picture go on from it together",
+				pic, HoldElapsed());
+		else
+			OrbisLog("[player] exact seek: %s after %.2f s; the sound goes on without it", why, HoldElapsed());
+		return true;
+	}
 	// 1.5.3 (second and third reviews): what the demuxer has read since the last seek, for SeekShown to tell a seek whose
 	// picture can never come (it counts as done) from one still being worked on (never dropped):
 	// - failing: since when av_read_frame has failed without the end flag (a demuxer error; the disc taken out) with
@@ -597,10 +809,58 @@ struct Player::Impl
 	std::condition_variable fcv;
 	std::deque<VFrame> frames;
 	static constexpr size_t kMaxFrames = 6;
+	size_t max_frames = kMaxFrames; // (1.6: 3 for a video too big for the memory otherwise)
+	// 1.6: a message for the OSD (TakeNotice), and FFmpeg's faster decoding when it can't keep up (0 none, 1 no loop
+	// filter, 2 no non-reference pictures either)
+	std::string notice;
+	int fast_level = 0;
+	std::atomic<int> decode_mode{0}; // (test12) 0 Auto (faster when it can't keep up, back when it does), 1 Fast, 2 Full
+	bool net_source = false;         // (test12) http(s) / smb: Auto doesn't decode faster for late pictures
+	bool pictures_direct = false;    // (test12) the pictures come from direct memory (bigmem), not the heap
+	uint64_t fast_seen = 0, fast_late = 0, fast_dropped = 0;
+	int fast_serial = -1, fast_calm = 0;
+	double fast_notice_at = -1e9;
+	bool fast_skip_window = true;
+	bool beyond_said = false;
+	std::atomic<double> v_behind{0}; // (test4) how far the last decoded picture was behind the clock, seconds
+	bool vskip_to_key = false;       // the video thread leaves packets out up to a keyframe
+	unsigned vskipped = 0;
+	std::atomic<double> v_last_pts{0};       // the last decoded picture's time
+	std::atomic<double> v_seek_target{-1e18}; // the last seek's target: pictures before it aren't late
+	double a_read = -1e18, v_read = -1e18;   // (demuxer) how far each stream has been read, seconds
+	std::atomic<int> a_pushed_serial{-1};    // the serial the sound was last given to the console for (past skip_until)
+	bool demux_over = false;                 // (demuxer) reading past the queues' normal limit for the sound
+	int demux_said_serial = -1;              // (demuxer) the serial it last said so for
+	size_t demux_peak = 0;                   // (demuxer) the most packet bytes queued at once
+	double pic_estimate = 0;                 // (test7) the bytes FFmpeg's pictures may take (BigVideoFits), kept
+	                                         // free of packets by the demuxer
+	int cpu_fallback_threads = 8;
+	bool cpu_reopen_fallback = false;        // FFmpeg's decoder with the heap's threads couldn't be opened for a
+	                                         // fall-back: it is tried again if the console's decoder gives up
+	std::vector<AVCodecContext*> vdec_retired; // decoders swapped out mid-film (freed at the close: others may read)
+	bool cpu_lean_fallback = false;          // FFmpeg's decoder, opened for a fall-back from the console's, needs
+	                                         // the short picture queue too
 	AVFrame* cur = nullptr;
 	double cur_pts = 0;
 	int cur_serial = -1;
 	uint64_t cur_id = 0;
+	uint64_t pic_serial = 0; // 1.6: unique across files (Player::Picture)
+	// 1.6: the current picture in the CPU's layout when it is the console decoder's own 10-bit one, in place (mpc_vdec.h)
+	AVFrame* cur_cpu = nullptr;
+	uint64_t cur_cpu_id = 0;
+	AVFrame* CpuPicture()
+	{
+		const hwdec::ZeroCopyInfo* z = hwdec::ZeroCopyOf(cur);
+		if (!z || !z->lsb10)
+			return cur;
+		if (!cur_cpu || cur_cpu_id != cur_id)
+		{
+			av_frame_free(&cur_cpu);
+			cur_cpu = hwdec::CpuCopy(cur);
+			cur_cpu_id = cur_id;
+		}
+		return cur_cpu;
+	}
 	// conversion
 	SwsContext* sws = nullptr;
 	uint64_t rendered_id = 0;
@@ -651,11 +911,30 @@ struct Player::Impl
 		AVCodecContext* c = nullptr;
 		std::vector<AVPacket*> pkts;
 		int ref_w = 0, ref_h = 0;
+		// PGS: each line's pictures from a decoder of its own (NewDecoder), its epoch replayed first -- c is left
+		// wherever the last line decoded put it (at first the file's end: the last epoch's palettes and objects)
+		bool pgs = false;
+		const AVCodec* codec = nullptr;
+		AVCodecParameters* par = nullptr;
+		AVRational tb = {1, 90000};
+		AVCodecContext* NewDecoder() const
+		{
+			AVCodecContext* n = codec && par ? avcodec_alloc_context3(codec) : nullptr;
+			if (n && avcodec_parameters_to_context(n, par) >= 0)
+			{
+				n->pkt_timebase = tb;
+				if (avcodec_open2(n, codec, nullptr) >= 0)
+					return n;
+			}
+			avcodec_free_context(&n);
+			return nullptr;
+		}
 		~ExtBitmap()
 		{
 			for (AVPacket*& p : pkts)
 				av_packet_free(&p);
 			avcodec_free_context(&c);
+			avcodec_parameters_free(&par);
 		}
 	};
 	std::map<int, std::unique_ptr<ExtBitmap>> ext_bitmaps;
@@ -674,7 +953,11 @@ struct Player::Impl
 	double shown_t0 = 0;
 	uint64_t seek_pictures = 0; // 1.5.3: seeks whose first picture was shown (under fmu)
 
-	~Impl() { Shutdown(); }
+	~Impl()
+	{
+		Shutdown();
+		av_frame_free(&cur_cpu);
+	}
 
 	// ---------------------------------------------------------------------------------------------
 	// libass: the renderer (made when first asked for), the file's attached fonts given to it once
@@ -723,7 +1006,88 @@ struct Player::Impl
 		OrbisLog("[player] failed: %s", e.c_str());
 	}
 
-	AVCodecContext* OpenDecoder(int idx, bool threads)
+	// (the demuxer's thread) after a seek, every PGS track's decoder made again, and given nothing until a display set
+	// that begins an epoch (an epoch start or acquisition point), as a Blu-ray player does after a jump (1.6, the
+	// audit). FFmpeg's decoder keeps its epoch's palettes and objects and has no flush: up to 1.5.4 a normal display set
+	// read after a seek back (a fade's palette update, a new object on the epoch's palette) was drawn with what the
+	// read-ahead had left -- a later epoch's palette or another line's picture -- and replaced the line decoded in
+	// order. A new decoder alone isn't enough: a palette update read first leaves a palette of a colour or two, and the
+	// next normal set's object came out see-through. Until the epoch begins, a line decoded in order stays as it was.
+	void NewPgsDecoders()
+	{
+		for (auto& s : sdecs)
+		{
+			if (ic->streams[s.first]->codecpar->codec_id != AV_CODEC_ID_HDMV_PGS_SUBTITLE)
+				continue;
+			pgs_wait.insert(s.first);
+			pgs_clearing.erase(s.first);
+			if (AVCodecContext* c = OpenDecoder(s.first, false))
+			{
+				avcodec_free_context(&s.second);
+				s.second = c;
+			}
+		}
+	}
+
+	// (the demuxer's thread) a subtitle packet decoded? A PGS track waiting after a seek (NewPgsDecoders) takes the
+	// display set that begins an epoch, and meanwhile those that clear the screen (no object: they draw nothing, so need
+	// no palette, and end the line shown -- review: a seek forward inside a line kept it on screen until the next one);
+	// a normal set that draws is passed over. With one segment a packet (M2TS) a clearing set's other segments, up to
+	// its end, go through with it.
+	bool PgsPasses(int idx, const AVPacket* pkt)
+	{
+		if (!pgs_wait.count(idx))
+			return true;
+		const PgsInfo g = PgsScan(pkt);
+		if (g.epoch)
+		{
+			pgs_wait.erase(idx); // the epoch the seek waited for
+			pgs_clearing.erase(idx);
+			return true;
+		}
+		if (g.presentation)
+		{
+			if (g.clears && !g.end)
+				pgs_clearing.insert(idx);
+			else
+				pgs_clearing.erase(idx);
+			return g.clears;
+		}
+		if (!pgs_clearing.count(idx))
+			return false;
+		if (g.end)
+			pgs_clearing.erase(idx);
+		return true;
+	}
+
+	void SetNotice(const std::string& n)
+	{
+		std::lock_guard<std::mutex> l(mu);
+		notice = n;
+	}
+
+	// host tests: MPCPS5_HOST_NO_VSKIP=1 keeps the video thread from leaving packets out (the demuxer's way tested alone)
+	static bool NoVideoSkip()
+	{
+#ifndef __PROSPERO__
+		static const bool no = getenv("MPCPS5_HOST_NO_VSKIP") != nullptr;
+		return no;
+#else
+		return false;
+#endif
+	}
+
+	// 1.6: the heap the app has left (the console's malloc takes flexible memory)
+	static size_t HeapLeft()
+	{
+		size_t s = 0;
+		if (sceKernelAvailableFlexibleMemorySize(&s) != 0 || s == 0)
+			return SIZE_MAX;
+		return s;
+	}
+
+	// frame_threads: FFmpeg's frame threads (0: its slice threads only, for a video too big for the memory otherwise)
+	AVCodecContext* OpenDecoder(int idx, bool threads, bool lean = false, int frame_threads = 8)
 	{
 		AVStream* st = ic->streams[idx];
 		const AVCodec* codec = avcodec_find_decoder(st->codecpar->codec_id);
@@ -740,8 +1104,21 @@ struct Player::Impl
 		c->pkt_timebase = st->time_base;
 		if (threads)
 		{
-			c->thread_count = 8; // the console's game cores
-			c->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+			c->thread_count = lean ? 8 : frame_threads; // the console's game cores (fewer when the memory is short)
+			// (lean: no frame threads, each of which holds pictures of its own)
+			c->thread_type = lean ? FF_THREAD_SLICE : FF_THREAD_FRAME | FF_THREAD_SLICE;
+		}
+		if (c->codec_type == AVMEDIA_TYPE_VIDEO && threads)
+		{
+			// (test12, VLC for PS5's way) big pictures from the console's direct memory, not the small heap
+			if (codec->capabilities & AV_CODEC_CAP_DR1)
+				c->get_buffer2 = bigmem::GetBuffer2;
+			// Options > Playback > Decoding: Fast starts fast (no loop filter, FFmpeg's fast flag) and stays at least so
+			if (decode_mode.load() == 1)
+			{
+				c->skip_loop_filter = AVDISCARD_ALL;
+				c->flags2 |= AV_CODEC_FLAG2_FAST;
+			}
 		}
 		AVDictionary* opts = nullptr;
 		if (c->codec_type == AVMEDIA_TYPE_SUBTITLE)
@@ -757,6 +1134,102 @@ struct Player::Impl
 		return c;
 	}
 
+	// 1.6 (test2: an 8K HEVC 10-bit film froze the app on FFmpeg): a picture over 4K on the CPU needs its decoder's
+	// reference pictures, its frame threads' and the queue's, each up to 100 MB at 8K, from a heap the console keeps
+	// small (360 MiB free at one start). When that doesn't fit the decoder runs without frame threads and with a
+	// shorter queue; when even that doesn't fit, the film isn't opened, and the message says why. False: failed.
+	// (test6 review) on_hw: the console's decoder plays it, FFmpeg's (vdec) is there for a fall-back mid-film; it gets
+	// the threads the memory takes now, and the short queue is kept for the fall-back (cpu_lean_fallback)
+	bool BigVideoFits(int v, const std::string& hw_why, bool on_hw = false)
+	{
+		const AVCodecParameters* p = ic->streams[v]->codecpar;
+		const AVPixFmtDescriptor* d = av_pix_fmt_desc_get(AVPixelFormat(p->format));
+		const int bits = d ? d->comp[0].depth : (p->profile == AV_PROFILE_HEVC_MAIN_10 || p->profile == AV_PROFILE_VP9_2 ? 10 : 8);
+		const double chroma = d ? 1.0 + 2.0 / double((1 << d->log2_chroma_w) * (1 << d->log2_chroma_h)) : 1.5;
+		const double frame = double(p->width) * p->height * chroma * (bits > 8 ? 2 : 1);
+		// (test12, after VLC for PS5) pictures of 4 MiB and more come from the console's direct memory (some 12 GiB),
+		// not the small heap: the budget is the direct memory free (the largest run), the heap's for smaller pictures
+		pictures_direct = frame >= double(bigmem::kBigPicture);
+		const size_t left_sz = pictures_direct ? bigmem::DirectFree() : HeapLeft();
+		const double left = double(left_sz), budget = left * (pictures_direct ? 0.9 : 0.7);
+		const int left_mib = left_sz == SIZE_MAX ? -1 : int(left / 1048576);
+		const char* where = pictures_direct ? " of direct memory" : "";
+		// (test5 review) the pictures held at once: the decoder's references (6), one being decoded per frame thread,
+		// the queue and two for drawing
+		auto need = [&](int threads, size_t queue) { return frame * (6 + threads + double(queue) + 2); };
+		auto mib = [&](double b) { return int(b / 1048576 + 0.5); };
+		// "above 4K" by pixel count: UHD 3840x2160 and DCI 4096x2160 are 4K; more than 4096x2304's pixels is beyond
+		const bool big = int64_t(p->width) * p->height > int64_t(4096) * 2304;
+		const char* on = on_hw ? "on the CPU should the console's decoder give up" : "on the CPU";
+		pic_estimate = need(8, kMaxFrames);
+		if (big && !on_hw)
+		{
+			OrbisLog("[player] %dx%d %d-bit, beyond the console's decoder (4K): FFmpeg on the CPU, its pictures from %s "
+					 "(%d MiB free)",
+				p->width, p->height, bits, pictures_direct ? "direct memory" : "the heap", left_mib);
+			SetNotice(Fmt(T("%dx%d on the CPU (the console's decoder takes up to 4K): it may play slowly."), p->width, p->height));
+		}
+		if (need(8, kMaxFrames) <= budget)
+			return true; // (8 frame threads)
+		// fewer frame threads, as many as the memory takes; none (slice threads, 3 pictures queued) when not even 2
+		int threads = 7;
+		while (threads >= 2 && need(threads, kMaxFrames) > budget)
+			threads--;
+		if (threads < 2 && big && need(1, 3) > left)
+		{
+			// not even the lean decoder's pictures fit (direct memory full: another app holding it): the honest message
+			// (test11) with about how fast the CPU would show it (the host's rate scaled to the console's cores)
+			const int est_fps = std::max(1, int(30.0 * (7680.0 * 4320.0) / (double(p->width) * p->height) + 0.5));
+			SetFailed(Fmt(T("This %dx%d %d-bit video can't be played here: the console's decoder takes up to 4K, and "
+							"decoding it on the CPU needs about %d MiB of memory, more than the PS5 leaves the app (%d MiB). "
+							"Even with the memory, the CPU would show it at about %d pictures a second."),
+				p->width, p->height, bits, mib(need(1, 3)), left_mib, est_fps));
+			OrbisLog("[player] (the console's decoder: %s)", hw_why.c_str());
+			return false;
+		}
+		// (test7 review) the new one opened before the old is let go: on the console's decoder a failure here only
+		// means no fall-back with these threads yet (tried again if it gives up), not the end of the film
+		AVCodecContext* n = threads >= 2 ? OpenDecoder(v, true, false, threads) : OpenDecoder(v, true, true);
+		pic_estimate = threads >= 2 ? need(threads, kMaxFrames) : need(1, 3);
+		if (!n && on_hw)
+		{
+			OrbisLog("[player] FFmpeg's decoder for a fall-back (%s) couldn't be opened: the console's decoder plays "
+					 "on, FFmpeg's is opened again should it give up",
+				threads >= 2 ? "fewer frame threads" : "no frame threads");
+			cpu_reopen_fallback = true;
+			cpu_lean_fallback = threads < 2;
+			cpu_fallback_threads = threads;
+			return true;
+		}
+		avcodec_free_context(&vdec);
+		vdec = n;
+		if (threads >= 2)
+		{
+			OrbisLog("[player] %dx%d %d-bit %s: %d frame threads (about %d MiB of %d MiB free%s)", p->width, p->height,
+				bits, on, threads, mib(need(threads, kMaxFrames)), left_mib, where);
+		}
+		else
+		{
+			// (test6 review) this opens even past the budget: the estimate counts every reference HEVC may keep and a
+			// share of the memory is held back; only past all of it (above 4K) is it refused, above
+			if (on_hw)
+				cpu_lean_fallback = true;
+			else
+				max_frames = 3;
+			OrbisLog("[player] %dx%d %d-bit %s: about %d MiB of %d MiB free%s; no frame threads, 3 pictures queued%s",
+				p->width, p->height, bits, on, mib(need(1, 3)), left_mib, where,
+				need(1, 3) > left ? " (warning: more than the memory left; it may run out of memory)"
+				: need(1, 3) > budget ? " (warning: past the share kept for pictures; it may run short of memory)"
+									  : "");
+		}
+		if (!vdec)
+		{
+			SetFailed(T("The video decoder couldn't be opened."));
+			return false;
+		}
+		return true;
+	}
+
 	// ---------------------------------------------------------------------------------------------
 	void OpenThread()
 	{
@@ -770,6 +1243,7 @@ struct Player::Impl
 		const bool net = low.compare(0, 7, "http://") == 0 || low.compare(0, 8, "https://") == 0 ||
 						 low.compare(0, 7, "rtmp://") == 0 || low.compare(0, 7, "rtsp://") == 0 ||
 						 low.compare(0, 6, "udp://") == 0 || low.compare(0, 6, "rtp://") == 0;
+		net_source = net || low.compare(0, 6, "smb://") == 0;
 		if (net)
 		{
 			av_dict_set(&opts, "reconnect", "1", 0);
@@ -847,6 +1321,60 @@ struct Player::Impl
 			ic->pb = custom_io;
 			ic->flags |= AVFMT_FLAG_CUSTOM_IO;
 		}
+		// 1.6: a raw .yuv file holds no size or format: opened as raw video only when its name says its size ("3840x2160",
+		// and "p010" / "10bit" / "nv12" for the format, "NNfps"); otherwise a message says what to do
+		const bool raw_yuv = !force_fmt && !ic->pb && low.size() > 4 && low.compare(low.size() - 4, 4, ".yuv") == 0;
+		if (raw_yuv)
+		{
+			const std::string name = low.substr(low.find_last_of('/') + 1);
+			int rw = 0, rh = 0;
+			for (size_t i = 0; i < name.size() && !rw; i++)
+				if (isdigit((unsigned char)name[i]) && (i == 0 || !isdigit((unsigned char)name[i - 1])))
+					if (sscanf(name.c_str() + i, "%dx%d", &rw, &rh) != 2 || rw < 16 || rh < 16 || rw > 8192 || rh > 8192)
+						rw = rh = 0;
+			if (!rw)
+			{
+				av_dict_free(&opts);
+				avformat_free_context(ic);
+				ic = nullptr;
+				SetFailed(T("Raw .yuv files have no picture size or format inside; convert it to .mp4 or .mkv (or .y4m), or "
+							"put its size in its name (e.g. clip_3840x2160_p010_24fps.yuv)."));
+				return;
+			}
+			const char* pf = name.find("p010") != std::string::npos || name.find("10bit") != std::string::npos ||
+									 name.find("10le") != std::string::npos
+								 ? "yuv420p10le"
+							 : name.find("nv12") != std::string::npos ? "nv12"
+																	  : "yuv420p";
+			std::string fps = "25";
+			const size_t f = name.find("fps");
+			if (f != std::string::npos)
+			{
+				// "24fps", "23.976fps", "29.97fps": the digits before it, and one point with digits before that
+				// ("clip.60fps": 60; "x_1.5.24fps": 5.24)
+				size_t b = f;
+				while (b > 0 && isdigit((unsigned char)name[b - 1]))
+					b--;
+				if (b >= 2 && b < f && name[b - 1] == '.' && isdigit((unsigned char)name[b - 2]))
+				{
+					size_t c = b - 1;
+					while (c > 0 && isdigit((unsigned char)name[c - 1]))
+						c--;
+					if (c == 0 || name[c - 1] != 'x') // ("..._320x180.60fps": 180 is the size's, the rate 60)
+						b = c;
+				}
+				const std::string tok = name.substr(b, f - b);
+				char* end = nullptr;
+				const double v = tok.empty() ? 0 : strtod(tok.c_str(), &end);
+				if (v >= 1 && v <= 240 && end)
+					fps = tok.substr(0, size_t(end - tok.c_str()));
+			}
+			force_fmt = av_find_input_format("rawvideo");
+			av_dict_set(&opts, "video_size", (std::to_string(rw) + "x" + std::to_string(rh)).c_str(), 0);
+			av_dict_set(&opts, "pixel_format", pf, 0);
+			av_dict_set(&opts, "framerate", fps.c_str(), 0);
+			OrbisLog("[player] raw .yuv: %dx%d %s at %s fps, from its name", rw, rh, pf, fps.c_str());
+		}
 		int r = avformat_open_input(&ic, open_url.c_str(), force_fmt, &opts);
 		av_dict_free(&opts);
 		if (r < 0)
@@ -910,7 +1438,27 @@ struct Player::Impl
 			std::string why;
 			hw = hwdec::Open(ic->streams[v]->codecpar, &why);
 			hw_active = hw != nullptr;
+			if (hw)
+			{
+				// (review L-b) a wait for a picture buffer ends when the player quits or seeks; pictures copied while paused
+				hwdec::Hooks hk;
+				hk.ctx = this;
+				hk.stop = [](void* c) {
+					Impl* s = static_cast<Impl*>(c);
+					return s->quit.load() || s->serial.load() != s->hw_serial.load();
+				};
+				hk.paused = [](void* c) { return static_cast<Impl*>(c)->paused.load(); };
+				hwdec::SetHooks(hw, hk);
+			}
 			OrbisLog("[player] video decoder: %s", hw ? hwdec::Describe(hw).c_str() : ("FFmpeg (" + why + ")").c_str());
+			// (test6 review) with the console's decoder too: FFmpeg's takes over if it gives up mid-film
+			if (!BigVideoFits(v, why, hw != nullptr))
+				return;
+			if (decode_mode.load() == 1)
+			{
+				fast_level = 1; // (test12) Decoding: Fast -- opened so (OpenDecoder)
+				OrbisLog("[player] decoding: fast (Options > Playback): no loop filter, FFmpeg's fast flag, from the start");
+			}
 		}
 		if (a >= 0)
 			adec = OpenDecoder(a, false);
@@ -992,6 +1540,7 @@ struct Player::Impl
 		show_after_seek = true;
 		paused = start_paused;
 		clock.SetPaused(start_paused);
+		hold_clock.SetPaused(start_paused);
 		ps5audio::SetPaused(start_paused);
 		state = start_paused ? PlayState::Paused : PlayState::Playing;
 
@@ -1085,13 +1634,36 @@ struct Player::Impl
 				const int r = avformat_seek_file(ic, -1, INT64_MIN, ts, ts, 0);
 				if (r < 0)
 					OrbisLog("[player] seek to %.2f failed: %s", target, AvErr(r).c_str());
+				NewPgsDecoders();
 				vq.Flush();
 				aq.Flush();
 				serial_start = target;
+				a_read = v_read = -1e18;
 				serial++;
-				skip_until = exact ? target - 0.001 : -1e18;
 				ps5audio::Clear();
-				clock.Set(target);
+				{
+					// (test10 review) against a release of the hold before this seek (ReleaseHold)
+					std::lock_guard<std::mutex> hl(hold_mu);
+					v_seek_target = target;
+					skip_until = exact ? target - 0.001 : -1e18;
+					clock.Set(target);
+					// (test8 review) an exact one waits for its first picture (only with a picture to wait for); a
+					// keyframe seek doesn't: its first picture is the keyframe it lands on, the first one decoded, and
+					// the held jumps and the seek bar's drag go by them
+					if (exact && vstream >= 0)
+					{
+						hold_clock.Set(0);
+						hold_gaveup_serial = -1;
+						clock.SetHeld(true);
+						ps5audio::HoldUntilPush();
+						hold_serial = serial.load();
+					}
+					else
+					{
+						hold_serial = -1;
+						clock.SetHeld(false);
+					}
+				}
 				ProgressReset();
 #ifndef __PROSPERO__
 				fault_step = 0;
@@ -1105,12 +1677,65 @@ struct Player::Impl
 					for (auto& f : frames)
 						av_frame_free(&f.f);
 					frames.clear();
+					if (hold_last.serial != serial.load())
+						av_frame_free(&hold_last.f);
 					fcv.notify_all();
 				}
 			}
 			// enough queued? (10 s or 64 MiB)
-			const bool full = (vq.bytes + aq.bytes) > (64u << 20) ||
-							  ((vstream < 0 || vq.Count() > 300) && (astream < 0 || aq.Count() > 500));
+			// (test6 review) the demuxer never leaves packets out (two rounds showed it can't tell a starving sound from
+			// a decoder still working toward a seek's target). When the sound is short -- what the audio side really holds
+			// (not yet played, plus its packets) under a second, once a seek has settled (its first picture shown, and
+			// sound of this serial given to the console past skip_until) and while the sound is still coming (the video
+			// read isn't more than 2 s past it: a track that ended or a gap isn't short) -- it reads on past the normal
+			// limit, up to a hard cap of 1.5 times it (96 MiB), and waits there. Video lateness is the video thread's
+			// (its keyframe skip, as VLC and mpv do).
+#ifndef __PROSPERO__
+			// host tests: MPCPS5_HOST_DEMUX_MB=n: n MiB of queued packets is "full" (64 normally; the cap 1.5 times it)
+			static const size_t limit = getenv("MPCPS5_HOST_DEMUX_MB") ? size_t(atoi(getenv("MPCPS5_HOST_DEMUX_MB"))) << 20
+																	   : size_t(64) << 20;
+#else
+			constexpr size_t limit = size_t(64) << 20;
+#endif
+			size_t cap = limit * 3 / 2;
+			const size_t queued = vq.bytes + aq.bytes;
+			demux_peak = std::max(demux_peak, queued);
+			bool audio_short = false;
+			if (astream >= 0 && vstream >= 0 && !eof && !paused.load() && !SeekPending() && !show_after_seek.load() &&
+				a_pushed_serial.load() == serial.load() && a_read > -1e17 && v_read - a_read < 2.0)
+			{
+				const double held = ps5audio::Queued() / double(ps5audio::kRate) * rate.load() +
+									aq.Seconds(ic->streams[astream]->time_base);
+				audio_short = held < 1.0;
+			}
+			const bool normal_full = (vq.bytes + aq.bytes) > limit ||
+									 ((vstream < 0 || vq.Count() > 300) && (astream < 0 || aq.Count() > 500));
+			if (audio_short && normal_full)
+			{
+				// (test7 review) never into the heap the pictures need: the cap is also what the heap leaves (measured now)
+				// past FFmpeg's pictures' estimate and a margin, and never under the normal limit
+				const size_t left = HeapLeft();
+				const size_t keep = (pictures_direct ? 0 : size_t(pic_estimate)) + (size_t(32) << 20);
+				if (left != SIZE_MAX)
+					cap = std::max(limit, std::min(cap, left > keep ? left - keep : 0));
+			}
+			const bool full = audio_short ? queued > cap : normal_full;
+			if (audio_short && normal_full)
+				demux_over = true;
+			else if (demux_over && !normal_full)
+				demux_over = false;
+			// (test8 review) said once per seek (and file), not at every toggle
+			if (demux_over && demux_said_serial != serial.load())
+			{
+				demux_said_serial = serial.load();
+				if (cap > limit)
+					OrbisLog("[player] the sound is short behind a full video queue: reading on (up to %zu MiB queued)",
+						cap >> 20);
+				else
+					OrbisLog("[player] the sound is short behind a full video queue: the heap leaves no room past %zu MiB "
+							 "(%zu MiB free, about %zu MiB kept for pictures)",
+						limit >> 20, HeapLeft() >> 20, size_t(pic_estimate) >> 20);
+			}
 			if (full || eof)
 			{
 				// (third review: neither counts as failing -- the end drains the decoders to vdone_serial, and full
@@ -1182,19 +1807,32 @@ struct Player::Impl
 			}
 			const int idx = pkt->stream_index;
 			ProgressRead(idx, pkt);
+			const int64_t pt = pkt->pts != AV_NOPTS_VALUE ? pkt->pts : pkt->dts;
+			const double pts_s = pt != AV_NOPTS_VALUE && idx >= 0 && idx < int(ic->nb_streams)
+									 ? pt * av_q2d(ic->streams[idx]->time_base) - StreamStart()
+									 : -1e18;
+			if (idx == astream && pts_s > -1e17)
+				a_read = std::max(a_read, pts_s);
 			if (idx == vstream)
+			{
+				if (pts_s > -1e17)
+					v_read = std::max(v_read, pts_s);
 				vq.Put(av_packet_clone(pkt), serial);
+			}
 			else if (idx == astream)
 				aq.Put(av_packet_clone(pkt), serial);
 			else
 			{
 				auto it = sdecs.find(idx);
-				if (it != sdecs.end())
+				if (it != sdecs.end() && PgsPasses(idx, pkt))
 					DecodeSubtitle(idx, it->second, pkt);
 			}
+			demux_peak = std::max(demux_peak, vq.bytes + aq.bytes);
 			av_packet_unref(pkt);
 		}
 		av_packet_free(&pkt);
+		if (demux_peak)
+			OrbisLog("[player] demuxer: at most %zu KiB of packets queued at once", demux_peak >> 10);
 	}
 
 	static SubItem ItemTimes(const AVSubtitle& sub, double pts, int ref_w, int ref_h)
@@ -1216,7 +1854,8 @@ struct Player::Impl
 	}
 
 	// an external bitmap file's line: its times now, its pictures when it shows (DecodeShown)
-	void StoreExternalBitmap(int track, const AVSubtitle& sub, double pts, int ref_w, int ref_h, int first_pkt, int last_pkt)
+	void StoreExternalBitmap(int track, const AVSubtitle& sub, double pts, int ref_w, int ref_h, int first_pkt,
+		int last_pkt, int epoch_pkt)
 	{
 		SubItem item = ItemTimes(sub, pts, ref_w, ref_h);
 		for (unsigned i = 0; i < sub.num_rects; i++)
@@ -1224,6 +1863,7 @@ struct Player::Impl
 				item.need_pics = true;
 		item.first_pkt = first_pkt;
 		item.last_pkt = last_pkt;
+		item.epoch_pkt = epoch_pkt;
 		InsertSubtitle(track, std::move(item));
 	}
 
@@ -1385,6 +2025,50 @@ struct Player::Impl
 		}
 	}
 
+	// (smu held) a PGS line's epoch before it, packets [from, to), into the line's decoder: the epoch's start (its
+	// presentation segment: the screen's size), every palette segment (a palette is built entry by entry, a fade's
+	// updates on top), and each object's latest definition (its first fragment and those after it: an older one is
+	// replaced anyway). Windows, display ends (they would make pictures) and other presentations are passed over. Every
+	// palette, whatever the epoch's length (review: 1.6's first build replayed the last 4,096 packets, and a line far
+	// into a long epoch lost its palette and was never drawn); objects at most one per id (the decoder holds 64).
+	static void ReplayEpoch(const ExtBitmap& x, AVCodecContext* c, int from, int to)
+	{
+		std::map<int, int> latest; // object id -> the packet of its latest first fragment before the line
+		for (int k = to - 1; k >= from; k--)
+		{
+			const PgsInfo g = PgsScan(x.pkts[size_t(k)]);
+			if (g.segments == 1 && g.object && g.object_first && !latest.count(g.object_id))
+				latest[g.object_id] = k;
+		}
+		bool presentation = false;
+		for (int k = from; k < to; k++)
+		{
+			const AVPacket* q = x.pkts[size_t(k)];
+			const PgsInfo g = PgsScan(q);
+			bool replay = false;
+			if (g.segments > 1)
+				replay = true; // not one segment a packet (not the sup reader's): as it is
+			else if (g.palette)
+				replay = true;
+			else if (g.object)
+			{
+				auto l = latest.find(g.object_id);
+				replay = l != latest.end() && k >= l->second;
+			}
+			else if (g.presentation)
+			{
+				replay = !presentation;
+				presentation = true;
+			}
+			if (!replay || !q)
+				continue;
+			AVSubtitle one = {};
+			int got = 0;
+			if (avcodec_decode_subtitle2(c, &one, &got, q) >= 0 && got)
+				avsubtitle_free(&one);
+		}
+	}
+
 	// (smu held) an external bitmap file's lines showing at t whose pictures aren't in memory: decoded from their
 	// packets, then the budget kept
 	void DecodeShown(int track, double t)
@@ -1405,13 +2089,21 @@ struct Player::Impl
 			{
 				i->need_pics = false; // tried once, whatever comes of it
 				ExtBitmap& x = *e->second;
+				// PGS (1.6, the audit): a decoder of its own, the line's epoch replayed into it first -- up to 1.5.4 the line's
+				// own packets went to the file's one decoder, left at the file's end (or the line decoded last): a normal
+				// display set took another epoch's palette or object (a fade in another colour, another line's picture)
+				AVCodecContext* own = x.pgs ? x.NewDecoder() : nullptr;
+				AVCodecContext* c = own ? own : x.c;
+				const int npk = int(x.pkts.size());
+				if (x.pgs && i->first_pkt >= 0 && i->epoch_pkt < i->first_pkt)
+					ReplayEpoch(x, c, std::max(0, i->epoch_pkt), std::min(i->first_pkt, npk));
 				AVSubtitle sub = {};
 				bool have = false;
-				for (int k = i->first_pkt; k >= 0 && k <= i->last_pkt && k < int(x.pkts.size()); k++)
+				for (int k = i->first_pkt; k >= 0 && k <= i->last_pkt && k < npk; k++)
 				{
 					AVSubtitle one = {};
 					int got = 0;
-					if (avcodec_decode_subtitle2(x.c, &one, &got, x.pkts[size_t(k)]) >= 0 && got)
+					if (x.pkts[size_t(k)] && avcodec_decode_subtitle2(c, &one, &got, x.pkts[size_t(k)]) >= 0 && got)
 					{
 						if (have)
 							avsubtitle_free(&sub);
@@ -1419,6 +2111,7 @@ struct Player::Impl
 						have = true;
 					}
 				}
+				avcodec_free_context(&own);
 				if (!have)
 					continue;
 				SubtitleShow show;
@@ -1525,13 +2218,44 @@ struct Player::Impl
 		if (std::isnan(pts))
 			pts = last_pts + dur;
 		last_pts = pts;
+		const bool gave_up = hold_gaveup_serial.load() == my_serial;
 		if (pts + dur < skip_until.load())
 		{
+			if (gave_up)
+			{
+				// (test9 review) an exact seek's hold let go with no picture: these are late now, the skip can help
+				v_behind = clock.Get() + display_delay.load() * rate.load() - (pts + dur);
+				v_last_pts = pts;
+			}
+			else if (hold_serial.load() == my_serial)
+			{
+				// (test10 review) the latest picture before an exact seek's target, for a let-go at the hold's bound
+				std::lock_guard<std::mutex> l(fmu);
+				if (hold_serial.load() == my_serial && serial == my_serial)
+				{
+					av_frame_free(&hold_last.f);
+					hold_last = {f, pts, dur, my_serial};
+					return;
+				}
+			}
 			av_frame_free(&f);
 			return;
 		}
+		// (test7 review) how far behind, for the keyframe skip, with either decoder; faster decoding is FFmpeg's
+		{
+			const double now = clock.Get() + display_delay.load() * rate.load();
+			// (until a seek's first picture is shown the clock is still the old position's: nothing is behind yet)
+			// and the pictures before a seek's target (a keyframe seek shows from the keyframe before it) aren't late;
+			// (test9) after an exact seek's hold let go with no picture they are
+			v_behind = gave_up ? now - (pts + dur)
+					   : show_after_seek.load() || SeekPending() || pts < v_seek_target.load() - 0.001 ? 0.0
+																									   : now - (pts + dur);
+			v_last_pts = pts;
+		}
+		if (!hw)
+			KeepUp(pts, dur, my_serial);
 		std::unique_lock<std::mutex> l(fmu);
-		fcv.wait(l, [&] { return quit || frames.size() < kMaxFrames || serial != my_serial; });
+		fcv.wait(l, [&] { return quit || frames.size() < max_frames || serial != my_serial; });
 		if (quit || serial != my_serial)
 		{
 			av_frame_free(&f);
@@ -1583,6 +2307,58 @@ struct Player::Impl
 				if (vgraph)
 					avfilter_graph_free(&vgraph), vg_fmt = -1;
 				dec_serial = qp.serial;
+				hw_serial = dec_serial;
+				vskip_to_key = false;
+				v_behind = 0;
+			}
+			// (test4 review) FFmpeg far behind the clock (more than a second): the packets up to the next keyframe are
+			// left out, so the video catches up instead of falling further behind (ffplay's way), the sound untouched.
+			// (test5 review) The decoder flushed where it goes on (open-GOP leading pictures).
+			// (test7 review) Whenever a keyframe is queued at all (a long GOP too: AV1 at 60 fps with 5 s between
+			// keyframes), as long as it isn't more than 2 s past the clock (the picture would stand still longer than
+			// it is behind; further behind, the next one is close enough); bounded by time, not packets: past 2.5 s
+			// beyond the clock with no keyframe (an unmarked one), it goes on there. The console's decoder too: it is
+			// reset there as after a seek (sceVideodec2Reset, then nothing but a keyframe), the calls every seek makes.
+			// (test8 review) paused only keeps a skip from starting: one under way goes on (a frame step mustn't let the
+			// packets it was leaving out through to a decoder that lost their references)
+			if (qp.pkt)
+			{
+				const bool key = (qp.pkt->flags & AV_PKT_FLAG_KEY) != 0;
+				const AVRational tb = ic->streams[vstream]->time_base;
+				const int64_t pt = PacketQueue::Ts(qp.pkt);
+				const double pts_s = pt != AV_NOPTS_VALUE ? pt * av_q2d(tb) - StreamStart() : -1e18;
+				int64_t kt = AV_NOPTS_VALUE;
+				if (!vskip_to_key && !paused.load() && v_behind.load() > 1.0 && !key && !NoVideoSkip() && vq.NextKey(&kt))
+				{
+					const double kts = kt != AV_NOPTS_VALUE ? kt * av_q2d(tb) - StreamStart() : -1e18;
+					const double now = clock.Get();
+					// (test8 review) and only for a keyframe at least half a second on: one right behind this packet
+					// gains nothing for the reset it costs
+					if (kts <= now + 2.0 && (kts < -1e17 || pts_s < -1e17 || kts - pts_s >= 0.5))
+					{
+						vskip_to_key = true;
+						vskipped = 0;
+						OrbisLog("[player] the video is %.1f s behind: left out up to the next keyframe (%s)", v_behind.load(),
+							kts > -1e17 ? Fmt("%.1f s from here", kts - std::max(pts_s, 0.0)).c_str() : "its time unknown");
+					}
+				}
+				if (vskip_to_key && !key && !(pts_s > -1e17 && pts_s > clock.Get() + 2.5))
+				{
+					vskipped++;
+					av_packet_free(&qp.pkt);
+					continue;
+				}
+				if (vskip_to_key)
+				{
+					OrbisLog("[player] ... %u packets left out; decoding on from %s", vskipped,
+						key ? (hw ? "a keyframe (the console's decoder reset)" : "a keyframe (the decoder flushed)")
+							: "here (2.5 s past the clock without a keyframe: the decoder flushed)");
+					vskip_to_key = false;
+					flush();
+					if (vgraph) // (test6 review) the deinterlacer's buffered pictures are from before the skip
+						avfilter_graph_free(&vgraph), vg_fmt = -1;
+					v_behind = 0;
+				}
 			}
 			const double t0 = NowS();
 			int sr = send(qp.pkt); // nullptr: drain
@@ -1601,6 +2377,31 @@ struct Player::Impl
 				hwdec::Close(hw);
 				hw = nullptr;
 				hw_active = false;
+				if (cpu_reopen_fallback)
+				{
+					// (test7 review) the decoder for it couldn't be opened at the start: again now (the console's
+					// decoder's memory is free); the one there stays alive until the close (others may read it)
+					AVCodecContext* n = cpu_lean_fallback ? OpenDecoder(vstream, true, true)
+													  : OpenDecoder(vstream, true, false, cpu_fallback_threads);
+					if (!n)
+					{
+						OrbisLog("[player] ... FFmpeg's decoder couldn't be opened either: the video stops here");
+						SetFailed(T("The video decoder couldn't be opened."));
+						av_packet_free(&qp.pkt);
+						break;
+					}
+					vdec_retired.push_back(vdec);
+					vdec = n;
+					cpu_reopen_fallback = false;
+				}
+				if (cpu_lean_fallback)
+				{
+					std::lock_guard<std::mutex> l(fmu);
+					max_frames = 3;
+				}
+				OrbisLog("[player] ... FFmpeg with %d %s threads%s", vdec->thread_count,
+					(vdec->active_thread_type & FF_THREAD_FRAME) ? "frame" : "slice",
+					cpu_lean_fallback ? ", 3 pictures queued" : "");
 				avcodec_flush_buffers(vdec);
 				sw_wait_key = true;
 				sr = send(qp.pkt);
@@ -1619,6 +2420,21 @@ struct Player::Impl
 				}
 				if (rr < 0)
 					break;
+#ifndef __PROSPERO__
+				// host tests: MPCPS5_HOST_SLOW_DECODE=ms,until: FFmpeg's pictures take ms more each (a decoder slower
+				// than real time) while their time is before `until` seconds (test7: the console decoder's stand-in's too)
+				{
+					static const char* slow = getenv("MPCPS5_HOST_SLOW_DECODE");
+					double ms = 0, until = 0, from = -1e18; // (test11: an optional third value: only from that time on)
+					if (slow && sscanf(slow, "%lf,%lf,%lf", &ms, &until, &from) >= 2)
+					{
+						const int64_t ts = frame->best_effort_timestamp != AV_NOPTS_VALUE ? frame->best_effort_timestamp : frame->pts;
+						const double t = ts != AV_NOPTS_VALUE ? ts * av_q2d(ic->streams[vstream]->time_base) - StreamStart() : -1e18;
+						if (ts != AV_NOPTS_VALUE && t < until && t >= from)
+							av_usleep(unsigned(ms * 1000));
+					}
+				}
+#endif
 				decode_ms = decode_ms * 0.95 + (NowS() - t0) * 1000 * 0.05;
 				const bool interlaced = (frame->flags & AV_FRAME_FLAG_INTERLACED) != 0;
 				if (interlaced && vg_fmt != -2 && SetupDeinterlace(frame))
@@ -1642,6 +2458,105 @@ struct Player::Impl
 			}
 		}
 		av_frame_free(&frame);
+	}
+
+	// 1.6: FFmpeg on the CPU that can't keep up (8K, AV1 at 4K...). (test4 review) Measured where it happens: each
+	// decoded picture whose time has already passed when it comes out of the decoder (as well as the presenter's
+	// drops), counted over windows of 30 pictures while playing; the first window after a seek, a resume or a new
+	// file isn't counted (its catch-up). A third of a window late: faster decoding, a step at a time (no loop filter,
+	// then no non-reference pictures, as VLC's "fast decoding" does); six calm windows in a row (at most one late):
+	// a step back. Pictures are dropped, never the sound.
+	void KeepUp(double pts, double dur, int ser)
+	{
+		if (!vdec)
+			return;
+		if (paused.load() || ser != fast_serial)
+		{
+			fast_serial = paused.load() ? -1 : ser;
+			fast_seen = fast_late = 0;
+			fast_dropped = dropped.load();
+			fast_skip_window = true;
+			return;
+		}
+		fast_seen++;
+		if (v_behind.load() > 0.010)
+			fast_late++;
+		if (fast_seen < 30)
+			return;
+		const uint64_t d = dropped.load();
+		// (test5 review) a picture late at the decoder is mostly the one the presenter then drops: the larger of the
+		// two counts, not their sum
+		const uint64_t late = std::max<uint64_t>(fast_late, d - fast_dropped);
+		fast_seen = fast_late = 0;
+		fast_dropped = d;
+#ifndef __PROSPERO__
+		if (getenv("MPCPS5_HOST_KEEPUP_LOG"))
+			OrbisLog("[player] (test) window: %llu late or dropped in 30, level %d, calm %d%s", (unsigned long long)late, fast_level,
+				fast_calm, fast_skip_window ? " (not counted)" : "");
+#endif
+		if (fast_skip_window)
+		{
+			fast_skip_window = false;
+			return;
+		}
+		// (test12) Options > Playback > Decoding: Full never decodes faster; Auto doesn't on a network source (late
+		// pictures there are the network's, as VLC for PS5 judges it); Fast starts at level 1 and never steps below it
+		const int mode = decode_mode.load();
+		const bool may_step_up = mode != 2 && !net_source;
+		if (late >= 10)
+		{
+			fast_calm = 0;
+			if (fast_level < 2 && may_step_up)
+			{
+				fast_level++;
+				if (fast_level == 1)
+				{
+					vdec->skip_loop_filter = AVDISCARD_ALL;
+					vdec->flags2 |= AV_CODEC_FLAG2_FAST; // (read per picture by the H.264 / HEVC decoders)
+				}
+				else
+					vdec->skip_frame = AVDISCARD_NONREF;
+				OrbisLog("[player] FFmpeg can't keep up (%llu late or dropped in 30 pictures): faster decoding, level %d (%s)",
+					(unsigned long long)late, fast_level,
+					fast_level == 1 ? "no loop filter" : "no loop filter, no non-reference pictures");
+				if (NowS() - fast_notice_at > 30) // (at most one notice in 30 s)
+				{
+					fast_notice_at = NowS();
+					SetNotice(T("Fast decoding: softer picture so this video keeps up."));
+				}
+			}
+			else if (!beyond_said && late >= 20 && (fast_level == 2 || !may_step_up))
+			{
+				beyond_said = true;
+				OrbisLog("[player] beyond real time on the CPU even with faster decoding (%llu late or dropped in 30 pictures)",
+					(unsigned long long)late);
+				SetNotice(T("This video is beyond what the PS5 can decode in real time: pictures are dropped, the sound plays on."));
+			}
+		}
+		else if (late <= 1 && fast_level > (mode == 1 ? 1 : 0))
+		{
+			// six calm windows (about 7 s at 25 fps) before a step back: no back and forth between the levels
+			if (++fast_calm >= 6)
+			{
+				fast_calm = 0;
+				if (fast_level == 2)
+					vdec->skip_frame = AVDISCARD_DEFAULT;
+				else
+				{
+					vdec->skip_loop_filter = AVDISCARD_DEFAULT;
+					vdec->flags2 &= ~AV_CODEC_FLAG2_FAST;
+				}
+				fast_level--;
+				if (fast_level == 0)
+					beyond_said = false;
+				OrbisLog("[player] FFmpeg keeps up again: faster decoding, level %d%s", fast_level,
+					fast_level == 0 ? " (full quality)" : "");
+				if (fast_level == 0)
+					SetNotice(T("Decoding at full quality again."));
+			}
+		}
+		else
+			fast_calm = 0;
 	}
 
 	// ---------------------------------------------------------------------------------------------
@@ -1781,6 +2696,9 @@ struct Player::Impl
 	// dur: the block's length in the stream's time (Normalize's regain step)
 	bool PushAudio(const int16_t* s, int n, int my_serial, double end_pts, double dur)
 	{
+		// (test9 review) a start moved past this block (the first picture after the target): not played
+		if (end_pts <= skip_until.load())
+			return true;
 		int ch = ag_out_ch;
 		s = Normalize(s, n, ch, dur, end_pts);
 		if (ch == 8)
@@ -1808,6 +2726,8 @@ struct Player::Impl
 		const double queued = ps5audio::Queued() / double(ps5audio::kRate) * rate;
 		if (serial == my_serial && !SeekPending())
 			clock.Set(end_pts - queued - audio_delay);
+		if (serial == my_serial)
+			a_pushed_serial = my_serial;
 		return true;
 	}
 
@@ -1822,6 +2742,17 @@ struct Player::Impl
 		norm_factor = -1; // Normalize starts again at the max (a file, another track)
 		while (!quit && !a_stop)
 		{
+			// (test8 / test10 reviews) an exact seek's sound waits for its first picture, not decoded yet: where it
+			// starts (skip_until) is known when the hold lets go (paused or not; a new seek ends the wait)
+			{
+				const int ser = serial.load();
+				if (hold_serial.load() == ser)
+				{
+					HoldCheck(ser);
+					av_usleep(2000);
+					continue;
+				}
+			}
 			QPacket qp;
 			const int r = aq.Get(qp, 100);
 			if (r < 0)
@@ -1914,6 +2845,14 @@ struct Player::Impl
 		quit = true;
 		vq.Abort();
 		aq.Abort();
+		{
+			// (review L-b) the queued pictures let go before the decoding thread is joined: pictures out in place hold
+			// the console decoder's buffers, which it may be waiting for
+			std::lock_guard<std::mutex> l(fmu);
+			for (auto& f : frames)
+				av_frame_free(&f.f);
+			frames.clear();
+		}
 		fcv.notify_all();
 		if (opener.joinable())
 			opener.join();
@@ -1928,15 +2867,36 @@ struct Player::Impl
 		for (auto& f : frames)
 			av_frame_free(&f.f);
 		frames.clear();
+		av_frame_free(&hold_last.f);
 		av_frame_free(&cur);
 		hwdec::Close(hw);
 		hw = nullptr;
 		hw_active = false;
 		avcodec_free_context(&vdec);
+		for (auto& c : vdec_retired)
+			avcodec_free_context(&c);
+		{
+			// (test13) once per file: the teardown runs again from the destructor with nothing new to say
+			static uint64_t said_allocs = 0, said_reuses = 0;
+			const bigmem::Stats bs = bigmem::GetStats();
+			if ((bs.allocs || bs.fallbacks) && (bs.allocs != said_allocs || bs.reuses != said_reuses))
+				OrbisLog("[bigmem] pictures: %llu blocks mapped, %llu taken from the free list, %llu left to FFmpeg's own "
+						 "allocation; in use now %llu direct (%llu MiB), %llu flexible",
+					(unsigned long long)bs.allocs, (unsigned long long)bs.reuses, (unsigned long long)bs.fallbacks,
+					(unsigned long long)bs.direct_blocks, (unsigned long long)(bs.direct_bytes >> 20),
+					(unsigned long long)bs.flexible_blocks);
+			said_allocs = bs.allocs;
+			said_reuses = bs.reuses;
+		}
+		bigmem::Trim();
+		vdec_retired.clear();
+		cpu_reopen_fallback = cpu_lean_fallback = false;
 		avcodec_free_context(&adec);
 		for (auto& s : sdecs)
 			avcodec_free_context(&s.second);
 		sdecs.clear();
+		pgs_wait.clear();
+		pgs_clearing.clear();
 		avfilter_graph_free(&agraph);
 		avfilter_graph_free(&vgraph);
 		av_channel_layout_uninit(&ag_layout);
@@ -1955,7 +2915,8 @@ struct Player::Impl
 		}
 		disc::CloseTitle(title_open);
 		ps5audio::Clear();
-		ps5audio::SetPaused(false);
+		// (test10 review) silence between files, not underruns (the next file's open sets it as it starts)
+		ps5audio::SetPaused(true);
 	}
 
 	static bool AnyExists(const std::string& p)
@@ -2013,6 +2974,11 @@ struct Player::Impl
 			{
 				AVStream* st = sc->streams[si];
 				x->c->pkt_timebase = st->time_base;
+				x->pgs = codec->id == AV_CODEC_ID_HDMV_PGS_SUBTITLE;
+				x->codec = codec;
+				x->tb = st->time_base;
+				if (x->pgs && (x->par = avcodec_parameters_alloc()) && avcodec_parameters_copy(x->par, st->codecpar) < 0)
+					avcodec_parameters_free(&x->par); // no decoder of a line's own: the file's one, as before
 				if (avcodec_open2(x->c, codec, nullptr) >= 0)
 				{
 					x->ref_w = x->c->width;
@@ -2025,7 +2991,7 @@ struct Player::Impl
 						external_names.push_back({track, path.substr(slash == std::string::npos ? 0 : slash + 1)});
 					}
 					AVPacket* pkt = av_packet_alloc();
-					int first = 0;
+					int first = 0, epoch = -1;
 					while (av_read_frame(sc, pkt) >= 0)
 					{
 						if (pkt->stream_index != si)
@@ -2049,6 +3015,8 @@ struct Player::Impl
 						kept += size_t(pkt->size) + kExtPacketOverhead;
 						x->pkts.push_back(av_packet_clone(pkt));
 						const int k = int(x->pkts.size()) - 1;
+						if (x->pgs && PgsScan(pkt).epoch)
+							epoch = k;
 						AVSubtitle sub = {};
 						int got = 0;
 						if (avcodec_decode_subtitle2(x->c, &sub, &got, pkt) >= 0 && got)
@@ -2064,7 +3032,7 @@ struct Player::Impl
 									lines++; // a line with a picture (not the empty one that ends the last)
 									break;
 								}
-							StoreExternalBitmap(track, sub, pts, x->ref_w, x->ref_h, first, k);
+							StoreExternalBitmap(track, sub, pts, x->ref_w, x->ref_h, first, k, epoch);
 							avsubtitle_free(&sub);
 							first = k + 1;
 							last = pts;
@@ -2309,6 +3277,8 @@ void Player::Renew()
 	n->volume = m->volume.load();
 	n->mute = m->mute.load();
 	n->amplify = m->amplify.load();
+	n->display_delay = m->display_delay.load();
+	n->decode_mode = m->decode_mode.load();
 	m = std::move(n);
 }
 
@@ -2321,6 +3291,7 @@ void Player::Open(const std::string& url, double start_s, bool start_paused)
 	m->start_paused = start_paused;
 	m->state = PlayState::Opening;
 	m->clock.SetPaused(true);
+	m->hold_clock.SetPaused(true);
 	Impl* impl = m.get();
 	try
 	{
@@ -2370,6 +3341,7 @@ void Player::Play()
 		Seek(0);
 	m->paused = false;
 	m->clock.SetPaused(false);
+	m->hold_clock.SetPaused(false);
 	ps5audio::SetPaused(false);
 	m->state = PlayState::Playing;
 }
@@ -2381,6 +3353,7 @@ void Player::Pause()
 		return;
 	m->paused = true;
 	m->clock.SetPaused(true);
+	m->hold_clock.SetPaused(true);
 	ps5audio::SetPaused(true);
 	m->state = PlayState::Paused;
 }
@@ -2400,6 +3373,7 @@ void Player::Stop()
 		return;
 	m->paused = true;
 	m->clock.SetPaused(true);
+	m->hold_clock.SetPaused(true);
 	ps5audio::SetPaused(true);
 	Seek(0);
 	m->state = PlayState::Stopped;
@@ -2471,6 +3445,11 @@ void Player::SetToneMapping(int mode, int white_nits)
 	m->tm_mode = std::max(0, std::min(3, mode));
 	m->tm_white = std::max(100, std::min(400, white_nits));
 	m->rendered_id = 0; // drawn again
+}
+
+void Player::SetDecodeMode(int mode)
+{
+	m->decode_mode = std::max(0, std::min(2, mode));
 }
 
 int Player::HdrKind() const
@@ -2760,6 +3739,18 @@ bool Player::UpdateVideo()
 		s.frames.pop_front();
 		s.fcv.notify_all();
 	}
+	// (test8 review) an exact seek's hold ends without a picture when the video ended there (a seek past its last
+	// picture), (test9 review) or none can come (SeekShown's rule: the video track ended before the target), or by its
+	// bounds
+	if (s.hold_serial.load() == ser && s.frames.empty())
+	{
+		if (s.vdone_serial == ser)
+			s.ReleaseHold(ser, -1e18, "the video ended before the target");
+		else if (s.NoPictureCanCome(ser))
+			s.ReleaseHold(ser, -1e18, "no picture can come (the video track ended before the target)");
+		else
+			s.HoldBoundLocked(ser); // (c): the latest picture decoded put up front, or let go without one
+	}
 	if (s.frames.empty())
 		return false;
 	bool take = false;
@@ -2767,6 +3758,7 @@ bool Player::UpdateVideo()
 	{
 		take = true;
 		s.show_after_seek = false;
+		s.ReleaseHold(ser, s.frames.front().pts, "");
 		s.seek_pictures++;
 		if (s.paused && !s.SeekPending())
 			s.clock.Set(s.frames.front().pts);
@@ -2780,7 +3772,8 @@ bool Player::UpdateVideo()
 	}
 	else if (!s.paused)
 	{
-		const double clock = s.clock.Get();
+		// (review L-d) the display delay is wall time: in the film's time it scales with the playback speed
+		const double clock = s.clock.Get() + s.display_delay.load() * s.rate.load();
 		// drop pictures that are late (their successor is already due)
 		while (s.frames.size() >= 2 && s.frames[1].pts <= clock)
 		{
@@ -2797,6 +3790,10 @@ bool Player::UpdateVideo()
 	s.cur_pts = s.frames.front().pts;
 	s.cur_serial = s.frames.front().serial;
 	s.cur_id++;
+	{
+		static std::atomic<uint64_t> serials{0};
+		s.pic_serial = ++serials;
+	}
 	s.frames.pop_front();
 	s.fcv.notify_all();
 	// pictures per second, measured
@@ -2832,14 +3829,7 @@ bool Player::SeekShown() const
 	// picture waiting): its reads have failed for a second with no read in progress (a read that blocks, however long,
 	// never counts), or the sound read has run 10 s past both its first packet and the last video packet (the video
 	// track ended there), paused or playing
-	if (!s.frames.empty() || s.vq.Count() != 0 || s.vbusy)
-		return false;
-	std::lock_guard<std::mutex> pl(s.prog_mu);
-	if (s.prog_serial != ser)
-		return false;
-	if (s.fail_since > 0 && !s.in_read && NowS() - s.fail_since >= 1.0)
-		return true;
-	return s.apkt_max >= std::max(s.vpkt_max, s.apkt_first) + 10;
+	return s.NoPictureCanCome(ser);
 }
 
 bool Player::SeekTaken() const
@@ -2853,10 +3843,47 @@ bool Player::HasPicture() const
 	return m->cur != nullptr;
 }
 
-bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
+const AVFrame* Player::Picture(uint64_t* id) const
 {
 	Impl& s = *m;
 	AVFrame* f = s.cur;
+	if (f)
+	{
+		const tonemap::Transfer tr = tonemap::TransferOf(f);
+		s.hdr_shown = tr == tonemap::Transfer::Pq ? 1 : tr == tonemap::Transfer::Hlg ? 2 : 0;
+	}
+	if (id)
+		*id = s.pic_serial;
+	return f;
+}
+
+std::string Player::TakeNotice()
+{
+	std::lock_guard<std::mutex> l(m->mu);
+	std::string n;
+	n.swap(m->notice);
+	return n;
+}
+
+void Player::SetDisplayDelay(double seconds)
+{
+	m->display_delay = std::max(0.0, std::min(seconds, 0.1));
+}
+
+int Player::ToneMapMode() const
+{
+	return m->tm_mode;
+}
+
+int Player::ToneMapWhite() const
+{
+	return m->tm_white;
+}
+
+bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
+{
+	Impl& s = *m;
+	AVFrame* f = s.CpuPicture();
 	if (!f || w <= 0 || h <= 0)
 		return false;
 	if (!force && s.rendered_id == s.cur_id && s.rendered_dst == dst && s.rendered_w == w && s.rendered_h == h)
@@ -2869,7 +3896,7 @@ bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
 	const bool hdr = tr != tonemap::Transfer::Sdr && s.tm_mode != tonemap::Off;
 	s.hdr_shown = tr == tonemap::Transfer::Pq ? 1 : tr == tonemap::Transfer::Hlg ? 2 : 0;
 	if (!c || ctx_w != w || ctx_h != h || ctx_sw != f->width || ctx_sh != f->height || ctx_fmt != f->format ||
-		s.ctx_hdr != hdr)
+		s.ctx_hdr != hdr || s.ctx_chroma != int(f->chroma_location))
 	{
 		sws_freeContext(c);
 		c = sws_alloc_context();
@@ -2881,6 +3908,17 @@ bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
 		av_opt_set_int(c, "dst_format", hdr ? AV_PIX_FMT_RGBA64LE : AV_PIX_FMT_RGBA, 0);
 		av_opt_set_int(c, "sws_flags", SWS_BICUBIC | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT, 0);
 		av_opt_set_int(c, "threads", 6, 0);
+		// 1.6 (review L6): the chroma where the stream sites it (MPEG-2 / H.264 / HEVC: "left"), as the GPU path does;
+		// a stream that doesn't say keeps libswscale's default (centred), as up to 1.5.4
+		if (f->chroma_location != AVCHROMA_LOC_UNSPECIFIED)
+		{
+			int cx = 128, cy = 128;
+			if (av_chroma_location_enum_to_pos(&cx, &cy, f->chroma_location) == 0)
+			{
+				av_opt_set_int(c, "src_h_chr_pos", cx, 0);
+				av_opt_set_int(c, "src_v_chr_pos", cy, 0);
+			}
+		}
 		if (sws_init_context(c, nullptr, nullptr) < 0)
 		{
 			sws_freeContext(c);
@@ -2907,6 +3945,7 @@ bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
 		ctx_sh = f->height;
 		ctx_fmt = f->format;
 		s.ctx_hdr = hdr;
+		s.ctx_chroma = int(f->chroma_location);
 		if (hdr)
 			OrbisLog("[player] %s picture: tone mapped to SDR (%s, white %d nits, film peak %.0f nits)",
 				tr == tonemap::Transfer::Pq ? "HDR10 (PQ)" : "HLG",
@@ -2954,7 +3993,7 @@ bool Player::RenderVideo(uint32_t* dst, int pitch, int w, int h, bool force)
 
 bool Player::SavePicture(const std::string& path, std::string* error)
 {
-	AVFrame* f = m->cur;
+	AVFrame* f = m->CpuPicture();
 	if (!f)
 	{
 		if (error)
@@ -3160,6 +4199,10 @@ PlayerStats Player::Stats() const
 		st.fps = fr.den ? av_q2d(fr) : 0;
 	}
 	st.shown_fps = m->shown_fps;
+	{
+		std::lock_guard<std::mutex> l(m->fmu);
+		st.picture_s = m->cur ? m->cur_pts : -1;
+	}
 	st.dropped = m->dropped;
 	st.decode_ms = m->decode_ms;
 	st.hw_decoding = m->hw_active;

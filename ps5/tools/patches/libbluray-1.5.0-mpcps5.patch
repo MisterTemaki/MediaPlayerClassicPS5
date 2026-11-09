@@ -142,3 +142,23 @@ diff -ruN a/src/file/dl_posix.c b/src/file/dl_posix.c
          Dl_info dl_info;
          int ret = dladdr((void *)(uintptr_t)dl_get_path, &dl_info);
          if (ret != 0) {
+diff -ruN a/src/meson.build b/src/meson.build
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -86,11 +86,11 @@
+         'file/dl_posix.c',
+         'file/file_posix.c',
+     )
+-    if cdata.has('HAVE_GETFSSTAT') or cdata.has('HAVE_GETVFSSTAT')
+-        libbluray_src += files('file/mount_getfsstat.c')
+-    else
+-        libbluray_src += files('file/mount.c')
+-    endif
++    # Media Player Classic PS5: never file/mount_getfsstat.c. getfsstat(2) is in the SDK's libkernel_sys only, which an
++    # app can't load, so the eboot would take libc.a's raw system call for it (tools/check_syscalls.py). The player
++    # opens a Blu-ray folder (a directory: mount_get_mountpoint() returns it as it is) or a disc through its own reader
++    # (bd_open_stream: no path), so the mount table is never needed; file/mount.c with no <mntent.h> returns the path.
++    libbluray_src += files('file/mount.c')
+ endif
+ 
+ #

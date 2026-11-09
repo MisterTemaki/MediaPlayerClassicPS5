@@ -16,6 +16,26 @@ constexpr int kHeight = 1080;
 bool Init();
 void Shutdown();
 
+// 1.6: the GPU (ps5-slang-gpu: Vulkan through RADV on the console, lavapipe in the host tests with MPCPS5_HOST_GPU=1)
+// shows the surface, and draws the video under it (ps5gpu::SetVideo) at the display's resolution. Off with
+// VideoRenderer=1 in mpc-hc.ini, after a start that died setting it up (the next start uses the CPU), or when it can't
+// be set up (logged); the surface then goes to the scan-out buffers as before.
+bool GpuActive();
+// A Present through the GPU failed: from now on the CPU draws the pictures and, if the GPU can't show the surface
+// either, the scan-out buffers are tried (logged). Also called by the player's side when a picture can't be drawn.
+void GpuFailed(const char* why);
+// Called (once) when the GPU is given up while running, before it is shut down (the player releases what the GPU holds)
+void SetGpuLostHook(void (*hook)());
+// How many frames the GPU has presented (review M-B: the in-place start guard waits for one after its picture)
+uint64_t GpuPresents();
+// "GPU: <device>, 3840x2160" or "CPU (<why>)", for the statistics and the log
+const char* RendererName();
+// (test13) the GPU start's variant this run uses (0: the GPU isn't started); 3 and 4 turn the console's decoder off
+// for the run (its compute queues released before the GPU start), which the player tells the user
+int GpuStartVariant();
+// Explicit retry after a startup failure; preserves the current renderer until the next launch.
+bool RetryGpuNextStart();
+
 uint32_t* Surface(); // kWidth * kHeight pixels, pitch kWidth
 
 // Copies the rectangle (x, y, w, h) of the surface (everything when w or h is 0) to the back buffer and

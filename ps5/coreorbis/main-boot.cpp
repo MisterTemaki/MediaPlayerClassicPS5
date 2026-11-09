@@ -165,12 +165,15 @@ int Run(int argc, char** argv)
 	setvbuf(stdout, nullptr, _IOLBF, 0);
 	crashlog::Install();
 	MPCPS5_STAGE(Boot, "start");
+	crashlog::NoteModules(); // 1.6: where the system's modules are, for a crash's addresses
 	OrbisLog("[boot] Media Player Classic PS5 %s, %s (built %s %s), pid %d", MPCPS5_PS5_VERSION,
 		mpc::EngineVersion().c_str(), __DATE__, __TIME__, int(getpid()));
 
 	// the console's video decoder: its library and compute queue only come before the jailbreak (mpc_vdec.h)
 	MPCPS5_STAGE(Boot, "video decoder");
 	mpc::hwdec::Prepare();
+	// 1.6: what the console bound, per module (after the decoder's library is loaded: its functions are bound then)
+	crashlog::ReportImports();
 
 	// out of the sandbox, like PS5SX2: before it the app sees no /data and no USB drives
 	MPCPS5_STAGE(Boot, "jailbreak");
@@ -179,6 +182,7 @@ int Run(int argc, char** argv)
 	OrbisLog("[boot] jailbreak: %s", freed ? how.c_str() : "nobody answered");
 	const bool have_data = OrbisPathsInit();
 	OrbisLogOpen(); // also writes the lines above
+	crashlog::SelfTest(); // (host tests only; test6: once the log is open, for the handler's own copy of its fd)
 	ExceptionSelfTest();
 	if (!have_data)
 		OrbisLog("[boot] can't create %s: no access to /data", OrbisRoot().c_str());

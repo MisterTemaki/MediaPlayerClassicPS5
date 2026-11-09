@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Media Player Classic PS5 1.5.1 (1.5.2: the C++ runtime too): checks the app's PIE (build/app/mpc-pie.elf) before it becomes eboot.bin.
 #
-#   check_imports.py <mpc-pie.elf> <sdk-lib-dir> [extra stub .so ...]
+#   check_imports.py <mpc-pie.elf> <sdk-lib-dir> [extra stub .so ...]   (1.6: each extra stub's module is allowed too)
 #
 # 1.5 crashed at launch on the console (#3, SIGSYS): statfs / getfsstat are only in the SDK's libkernel_sys, so the
 # eboot gained NEEDED libkernel_sys.sprx -- a system process's library, not a title's. This fails (exit 1) when:
@@ -74,7 +74,11 @@ def main():
     elf, sdk = sys.argv[1], sys.argv[2]
     stubs = {}  # soname -> stub file
     for extra in sys.argv[3:]:
-        stubs[os.path.basename(extra)[:-3] + ".sprx"] = extra
+        # 1.6: a stub named here is a module the app may load (the GPU build: libSceAgc, libSceAgcDriver, RADV's)
+        name = os.path.basename(extra)[:-3] + ".sprx"
+        stubs[name] = extra
+        if name not in ALLOWED and name not in ("libkernel_sys.sprx", "libkernel_web.sprx"):
+            ALLOWED.append(name)
     for name in ALLOWED:
         stubs.setdefault(name, os.path.join(sdk, name[:-5] + ".so"))
     errors = []

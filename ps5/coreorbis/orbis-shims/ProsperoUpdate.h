@@ -60,7 +60,7 @@ enum class Phase
 	Downloading, // done/total in bytes
 	Installing,  // done/total in files
 	Done,        // installed: the app must be opened again
-	Failed,      // error says why; nothing was changed
+	Failed,      // error says why, including whether recovery is still pending
 };
 
 struct Status
@@ -76,7 +76,8 @@ struct Status
 void Init(const Config& config, Fetch fetch);
 // An install interrupted while its files were going into place (update.journal still there): the old files back
 // (<name>.old), the new ones removed. The journal is removed only when every file is back; what couldn't be put
-// back stays in it for the next start. Returns the files put back; 0 when there was nothing to do.
+// back stays in it for the next start. Returns the files put back; 0 when nothing was restored (including a recovery
+// that could not proceed).
 int RecoverInterrupted(const std::string& app_dir);
 // Set when RecoverInterrupted couldn't put everything back (a sentence for the user); "" otherwise.
 std::string StartupProblem();
@@ -113,7 +114,8 @@ bool ParseRelease(const std::string& json, const std::string& title_id, Release&
 // "1.10" > "1.9"; a leading "v" is ignored. <0, 0, >0.
 int CompareVersions(const std::string& a, const std::string& b);
 std::string Sha256Hex(const uint8_t* data, size_t size);
-// Checks and installs the zip into config.app_dir (see above). "" when done, else why not (nothing changed then).
+// Checks and installs the zip into config.app_dir (see above). "" when committed, else why not; an error also says
+// whether rollback completed or recovery/repair is still needed.
 // expect_sha256 is required: without GitHub's SHA-256 of the zip nothing is installed. files_done follows the files.
 // signature: the zip's Ed25519 signature (64 bytes), required when config.release_key is set.
 std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expect_sha256, const Config& config,

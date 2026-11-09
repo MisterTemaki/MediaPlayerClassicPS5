@@ -8,7 +8,8 @@
 #                                                    libdvdnav), then FFmpeg again (its DVD-Video demuxer needs them)
 #
 # Sources:
-#   FFmpeg n7.1.1        https://github.com/FFmpeg/FFmpeg (GPLv3 build: --enable-gpl --enable-version3)
+#   FFmpeg n7.1.5        https://github.com/FFmpeg/FFmpeg (GPLv3 build: --enable-gpl --enable-version3)
+#                        (was n7.1.1; n7.1.5 has the fixes for CVE-2025-7700 and CVE-2025-9951, with the 7.1 branch's)
 #   dav1d 1.5.1          https://github.com/videolan/dav1d (AV1, BSD-2-Clause)
 #   libsmb2              https://github.com/sahlberg/libsmb2 (SMB2/3, LGPL-2.1), commit below
 #   Mbed TLS 3.6.7       third_party/mbedtls (Apache-2.0), with mpc_mbedtls_config.h (FFmpeg's https://)
@@ -24,7 +25,9 @@
 #                        most 256 allocation extent descriptors followed for a file (one pointing at itself looped)
 #   libbluray 1.5.0      Blu-ray (LGPL-2.1-or-later): no BD-J (no Java), no libxml2 / fontconfig / FreeType;
 #                        tools/patches/libbluray-1.5.0-mpcps5.patch: it loads nothing at run time (no libaacs,
-#                        libbdplus, libmmbd, Java VM: dl_dlopen() finds nothing)
+#                        libbdplus, libmmbd, Java VM: dl_dlopen() finds nothing), and no mount-table lookup
+#                        (file/mount.c, never mount_getfsstat.c: getfsstat(2) would be libc.a's raw system call in
+#                        the eboot; the player gives it a folder or its own reader, tools/check_syscalls.py checks)
 #   libdvdread 7.1.1     DVD-Video structures (GPL-2.0-or-later): built without libdvdcss;
 #                        tools/patches/libdvdread-7.1.1-mpcps5.patch: no decryption of any kind (no libdvdcss, linked
 #                        or loaded), a folder read as files (no device looked up behind a mount point: that was for CSS),
@@ -32,7 +35,7 @@
 #   libdvdnav 7.0.0      DVD navigation (GPL-2.0-or-later), for FFmpeg's dvdvideo demuxer;
 #                        tools/patches/libdvdnav-7.0.0-mpcps5.patch: a PGC libdvdread couldn't read (left NULL) is
 #                        never played, and a VM that can't start fails the title's open (a damaged disc, not a crash)
-#   FFmpeg's dvdvideo demuxer: tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch (a seek after the title's end
+#   FFmpeg's dvdvideo demuxer: tools/patches/ffmpeg-n7.1.5-dvdvideo-seek-after-end.patch (a seek after the title's end
 #   was read goes back into the title first)
 # Fetched into build/deps/src at the pinned versions; built with the ps5-payload-dev SDK's prospero-* tools
 # (clang, meson, cmake) for the console and with clang for the host. Needs git, nasm, meson, ninja, cmake.
@@ -47,7 +50,7 @@ WHAT=${1:-all}
 DEPS=$PWD/build/deps
 SRC=$DEPS/src
 JOBS=${JOBS:-$(nproc)}
-FFMPEG_TAG=n7.1.1
+FFMPEG_TAG=n7.1.5
 DAV1D_TAG=1.5.1
 LIBSMB2_COMMIT=fc710a3ebd58a3c15d0ef24322f748e38a3d3a90
 FREETYPE_TAG=VER-2-14-3
@@ -93,7 +96,10 @@ fetch_subs() {
 fetch_tarball() { # name version sha256
 	local t="$SRC/$1-$2.tar.xz"
 	if [ ! -f "$t" ]; then
-		curl -fL -o "$t.part" "https://download.videolan.org/pub/videolan/$1/$2/$1-$2.tar.xz"
+		# libudfread publishes releases directly in its project directory, unlike the other disc libraries.
+		local release_dir="$1/$2"
+		[ "$1" = libudfread ] && release_dir="$1"
+		curl -fL --retry 2 -o "$t.part" "https://download.videolan.org/pub/videolan/$release_dir/$1-$2.tar.xz"
 		mv "$t.part" "$t"
 	fi
 	echo "$3  $t" | sha256sum --check --quiet
@@ -109,13 +115,14 @@ fetch_disc() {
 	fetch_tarball libdvdread "$DVDREAD_VER" "$DVDREAD_SHA"
 	fetch_tarball libdvdnav "$DVDNAV_VER" "$DVDNAV_SHA"
 }
+# FFmpeg: the release tag, shallow; a checkout of another tag (n7.1.1, with the dvdvideo patch applied) is cloned again
 case "$WHAT" in
 	*subs) ;;
 	*disc)
-		fetch ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
+		fetch_tag ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
 		;;
 	*)
-		fetch ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
+		fetch_tag ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_TAG"
 		fetch dav1d https://github.com/videolan/dav1d.git "$DAV1D_TAG"
 		fetch libsmb2 https://github.com/sahlberg/libsmb2.git "$LIBSMB2_COMMIT"
 		;;
@@ -125,8 +132,8 @@ case "$WHAT" in
 	*disc) fetch_disc ;;
 	*) fetch_subs && fetch_disc ;;
 esac
-# FFmpeg's DVD-Video demuxer: a seek after the end (tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch)
-ff_patch=$PWD/tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch
+# FFmpeg's DVD-Video demuxer: a seek after the end (tools/patches/ffmpeg-n7.1.5-dvdvideo-seek-after-end.patch)
+ff_patch=$PWD/tools/patches/ffmpeg-n7.1.5-dvdvideo-seek-after-end.patch
 if [ -d "$SRC/ffmpeg" ] && ! git -C "$SRC/ffmpeg" apply --reverse --check "$ff_patch" 2>/dev/null; then
 	git -C "$SRC/ffmpeg" apply "$ff_patch"
 fi
@@ -201,7 +208,7 @@ build_ffmpeg() { # ps5|host
 	else
 		cross="--cc=clang --cxx=clang++"
 	fi
-	(cd "$B/ffmpeg" && PKG_CONFIG_LIBDIR=$P/lib/pkgconfig "$SRC/ffmpeg/configure" --prefix="$P" $cross --x86asmexe=nasm \
+	(cd "$B/ffmpeg" && PKG_CONFIG_LIBDIR="$P/lib/pkgconfig:$P/libdata/pkgconfig" "$SRC/ffmpeg/configure" --prefix="$P" $cross --x86asmexe=nasm \
 		--pkg-config=pkg-config --pkg-config-flags=--static --enable-pic --enable-static --disable-shared $FF_OPTS \
 		--extra-cflags="$CFLAGS -I$P/include" --extra-ldflags="-L$P/lib" >"$B/ffmpeg.log")
 	make -C "$B/ffmpeg" -j"$JOBS" >>"$B/ffmpeg.log" 2>&1
@@ -216,12 +223,12 @@ build_disc() { # ps5|host
 	if [ "$t" = ps5 ]; then
 		CFLAGS="-O2 -fPIC -march=znver2"
 		MESON=$PS5_PAYLOAD_SDK/bin/prospero-meson
-		printf "[binaries]\npkg-config = 'pkg-config'\n[properties]\npkg_config_libdir = ['%s']\n" "$P/lib/pkgconfig" >"$B/prefix.ini"
+		printf "[binaries]\npkg-config = 'pkg-config'\n[properties]\npkg_config_libdir = ['%s/lib/pkgconfig', '%s/libdata/pkgconfig']\n" "$P" "$P" >"$B/prefix.ini"
 		cross=(--cross-file="$B/prefix.ini")
-		export PKG_CONFIG_LIBDIR=$P/lib/pkgconfig
+		export PKG_CONFIG_LIBDIR="$P/lib/pkgconfig:$P/libdata/pkgconfig"
 	else
 		CFLAGS="-O2 -fPIC" MESON=meson
-		export PKG_CONFIG_LIBDIR=$P/lib/pkgconfig CC=clang CXX=clang++
+		export PKG_CONFIG_LIBDIR="$P/lib/pkgconfig:$P/libdata/pkgconfig" CC=clang CXX=clang++
 	fi
 	local common=(--default-library=static --buildtype=release -Db_pie=true --prefix="$P" --libdir=lib --wrap-mode=nofallback)
 	disc() { # name src extra-cflags options...
@@ -253,12 +260,12 @@ build_subs() { # ps5|host
 		CFLAGS="-O2 -fPIC -march=znver2"
 		MESON=$PS5_PAYLOAD_SDK/bin/prospero-meson
 		# the SDK's pkg-config looks in its own sysroot: ours looks in the prefix
-		printf "[binaries]\npkg-config = 'pkg-config'\n[properties]\npkg_config_libdir = ['%s']\n" "$P/lib/pkgconfig" >"$B/prefix.ini"
+		printf "[binaries]\npkg-config = 'pkg-config'\n[properties]\npkg_config_libdir = ['%s/lib/pkgconfig', '%s/libdata/pkgconfig']\n" "$P" "$P" >"$B/prefix.ini"
 		cross=(--cross-file="$B/prefix.ini")
-		export PKG_CONFIG_LIBDIR=$P/lib/pkgconfig
+		export PKG_CONFIG_LIBDIR="$P/lib/pkgconfig:$P/libdata/pkgconfig"
 	else
 		CFLAGS="-O2 -fPIC" MESON=meson
-		export PKG_CONFIG_LIBDIR=$P/lib/pkgconfig CC=clang CXX=clang++
+		export PKG_CONFIG_LIBDIR="$P/lib/pkgconfig:$P/libdata/pkgconfig" CC=clang CXX=clang++
 	fi
 	local common=(--default-library=static --buildtype=release -Db_pie=true --prefix="$P" --libdir=lib --wrap-mode=nofallback)
 	sub() { # name src options...

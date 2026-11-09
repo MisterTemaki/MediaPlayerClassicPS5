@@ -14,9 +14,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "ProsperoVideo.h"
+#include "ProsperoCrash.h"
+#include "ProsperoHdr.h"
 
 #include "OrbisPaths.h"
 #include "ProsperoSce.h"
+#include "ps5gpu/gpu.h"
+#include "mpc_vdec.h"
+
+#include <atomic>
+#include <cstdio>
+#include <string>
 
 #include <immintrin.h>
 #include <sys/mman.h>
@@ -109,6 +117,15 @@ struct State
 	bool full[2] = {true, true};
 	uint32_t frame = 0;
 	int flips_in_flight = 0;
+	// 1.6: the GPU shows the surface
+	bool gpu = false;
+	bool gpu_guard = false; // the start guard's marker is there until the first frame is on screen
+	int gpu_fails = 0;
+	uint64_t gpu_presents = 0;
+	bool gpu_lost = false;      // the GPU failed while running: the scan-out buffers are tried, quickly, now and then
+	int scanout_retry = 0;
+	void (*gpu_lost_hook)() = nullptr;
+	std::string renderer = "CPU";
 };
 State g;
 
@@ -334,7 +351,308 @@ void SetOutputSize(int w, int h)
 	}
 	g.full[0] = g.full[1] = true;
 }
+bool InitScanout(bool quick = false);
+
+// ---- 1.6: the GPU ----------------------------------------------------------------------------------------------------
+std::string GpuMarker()
+{
+	return OrbisRoot() + "/logs/gpu-starting";
+}
+
+// A GPU start that fails must not require several relaunches. Before entering the driver we persist a disabled
+// state, cleared only once a frame reaches the screen. A later launch uses the software renderer until an explicit
+// retry. A driver revision can allow one new attempt when its startup code has actually changed.
+std::string GpuAttemptsFile()
+{
+#ifndef __PROSPERO__
+	if (const char* e = getenv("MPCPS5_HOST_GPU_ATTEMPTS"))
+		return e;
+#endif
+	return OrbisRoot() + "/logs/gpu-attempts";
+}
+// A compatibility revision, not a compile timestamp: rebuilding must not silently undo crash recovery.
+const char* GpuBuildId()
+{
+#ifndef __PROSPERO__
+	if (const char* e = getenv("MPCPS5_HOST_GPU_BUILD_ID")) // (the tests write the file themselves)
+		return e;
+#endif
+	return "radv-whole-v1";
+}
+bool ReadGpuAttempts(int* attempts, int* works)
+{
+	*attempts = *works = 0;
+	std::string build;
+	if (FILE* f = fopen(GpuAttemptsFile().c_str(), "r"))
+	{
+		char line[128];
+		while (fgets(line, sizeof(line), f))
+		{
+			if (!strncmp(line, "attempts ", 9))
+				*attempts = std::max(0, std::min(9, atoi(line + 9)));
+			else if (!strncmp(line, "works ", 6))
+				*works = std::max(0, std::min(4, atoi(line + 6)));
+			else if (!strncmp(line, "build ", 6))
+			{
+				build = line + 6;
+				while (!build.empty() && (build.back() == '\n' || build.back() == '\r'))
+					build.pop_back();
+			}
+		}
+		fclose(f);
+	}
+	if (!build.empty() && build != GpuBuildId())
+	{
+		OrbisLog("[video] GPU start: driver revision changed (%s -> %s): one new GPU attempt",
+			build.empty() ? "none" : build.c_str(), GpuBuildId());
+		*attempts = *works = 0;
+		return true;
+	}
+	return false;
+}
+bool WriteGpuAttempts(int attempts, int works)
+{
+	const std::string path = GpuAttemptsFile(), temp = path + ".tmp";
+	FILE* f = fopen(temp.c_str(), "w");
+	if (!f)
+		return false;
+	bool ok = fprintf(f, "attempts %d\nworks %d\nbuild %s\n", attempts, works, GpuBuildId()) >= 0;
+	if (fflush(f) != 0 || fsync(fileno(f)) != 0)
+		ok = false;
+	if (fclose(f) != 0)
+		ok = false;
+	if (ok && rename(temp.c_str(), path.c_str()) == 0)
+		return true;
+	unlink(temp.c_str());
+	OrbisLog("[video] GPU recovery state could not be saved");
+	return false;
+}
+int g_gpu_variant = 0, g_gpu_works = 0;
+const char* GpuVariantName(int v)
+{
+	switch (v)
+	{
+	case 1: return "as before";
+	case 2: return "no instance extension (pictures copied)";
+	case 3: return "the console decoder's compute queues released first";
+	case 4: return "no instance extension, the compute queues released first";
+	default: return "?";
+	}
+}
+// the first frame is on the screen with the GPU: remembered
+void GpuReachedScreen()
+{
+	ps5gpu::GuardEnd();
+	if (g_gpu_variant && g_gpu_works != g_gpu_variant)
+	{
+		WriteGpuAttempts(0, g_gpu_variant);
+		OrbisLog("[video] GPU start: variant %d works (%s): kept for the next starts", g_gpu_variant, GpuVariantName(g_gpu_variant));
+		g_gpu_works = g_gpu_variant;
+	}
+	else if (g_gpu_variant)
+		WriteGpuAttempts(0, g_gpu_works);
+}
+
+#ifndef __PROSPERO__
+extern "C" void MpcHostGpuFlip(const uint8_t* bgra, int w, int h, bool wait_vsync); // host/sce_host.cpp
+#endif
+
+// VideoRenderer= in mpc-hc.ini (read here: the video comes up before the settings are): 0 the GPU (the default), 1 the
+// CPU. Host builds: the GPU only with MPCPS5_HOST_GPU=1 (the other tests keep the CPU path they were written for).
+bool WantGpu(std::string& why)
+{
+#ifndef __PROSPERO__
+	const char* e = getenv("MPCPS5_HOST_GPU");
+	if (!e || *e != '1')
+	{
+		why = "MPCPS5_HOST_GPU is not 1";
+		return false;
+	}
+#endif
+	if (FILE* f = fopen((OrbisRoot() + "/mpc-hc.ini").c_str(), "r"))
+	{
+		char line[256];
+		int renderer = 0;
+		int gpu_start = 0;
+		while (fgets(line, sizeof(line), f))
+		{
+			if (!strncmp(line, "VideoRenderer=", 14))
+				renderer = atoi(line + 14);
+			else if (!strncmp(line, "GpuStart=", 9))
+				gpu_start = atoi(line + 9);
+		}
+		fclose(f);
+		if (renderer == 1)
+		{
+			why = "the setting (Options > Output: software renderer)";
+			return false;
+		}
+		if (gpu_start == 1) // (test13) Options > Output > GPU start: CPU only
+		{
+			why = "the setting (Options > Output: GPU start: CPU only)";
+			return false;
+		}
+	}
+	return true;
+}
+
+bool InitGpu()
+{
+	std::string why;
+	if (!WantGpu(why))
+	{
+		g.renderer = "CPU (" + why + ")";
+		OrbisLog("[video] renderer: %s", g.renderer.c_str());
+		return false;
+	}
+	// (test2's console run: the GPU start crashed before the device was up) RADV's modules must all be bound
+	for (const char* m : {"libSceAgc.sprx", "libSceAgcDriver.sprx"})
+	{
+		const char* missing = nullptr;
+		if (!crashlog::ImportsBound(m, &missing))
+		{
+			g.renderer = std::string("CPU (") + m + "'s " + (missing ? missing : "?") + " isn't bound in this eboot)";
+			OrbisLog("[video] renderer: %s", g.renderer.c_str());
+			return false;
+		}
+	}
+	ps5gpu::Config c;
+	static std::atomic<bool> setting_up{false};
+	c.log = [](const char* line) {
+		OrbisLog("%s", line);
+		if (setting_up.load())
+		{
+			crashlog::StageText(crashlog::Area::Boot, line); // a crash while the GPU is set up names its last step
+			OrbisLogSync(); // (test10's console run died in Init with nothing more written: each line on the storage)
+		}
+	};
+	c.app_name = "Media Player Classic PS5";
+	c.cache_file = OrbisRoot() + "/cache/gpu-pipelines.bin";
+	c.ui_format = ps5gpu::UiFormat::RGBA8; // the surface: 0xAABBGGRR, premultiplied (transparent where the video shows)
+	c.ui_premultiplied = true;
+	c.video = true;
+	c.hdr_output = true;
+	if (FILE* f = fopen((OrbisRoot() + "/mpc-hc.ini").c_str(), "r"))
+	{
+		char line[256];
+		while (fgets(line, sizeof(line), f))
+			if (!strncmp(line, "HdrOutput=", 10)) c.hdr_output = atoi(line + 10) != 0;
+		fclose(f);
+	}
+#ifdef __PROSPERO__
+	const char* hdr_missing = nullptr;
+	if (crashlog::ImportsBound("libSceVideoOut.sprx", &hdr_missing))
+	{
+		c.set_hdr_output = SetConsoleHdr;
+		c.hdr_output_range = ConsoleOutputRange;
+	}
+	else
+	{
+		c.hdr_output = false;
+		OrbisLog("[hdr] native output unavailable: VideoOut import %s is not bound; SDR tone mapping retained",
+			hdr_missing ? hdr_missing : "?");
+	}
+#endif
+	c.shipped_dir = ""; // no slang presets in this app: only the video pass and the surface's
+#ifndef __PROSPERO__
+	c.host_present = MpcHostGpuFlip;
+#endif
+	int attempts = 0, works = 0;
+	const bool new_driver = ReadGpuAttempts(&attempts, &works);
+	const bool died = access(GpuMarker().c_str(), F_OK) == 0;
+	if (died)
+	{
+		unlink(GpuMarker().c_str());
+		if (!new_driver)
+		{
+			attempts = 4;
+			works = 0;
+		}
+	}
+	if (attempts > 0)
+	{
+		WriteGpuAttempts(4, 0);
+		g.renderer = "CPU (a previous GPU start failed; Options > Output > Retry GPU next start)";
+		OrbisLog("[video] renderer: %s", g.renderer.c_str());
+		return false;
+	}
+	// Arm recovery on disk before calling into the driver, including failures before its marker is written.
+	if (!WriteGpuAttempts(4, 0))
+	{
+		g.renderer = "CPU (the GPU recovery state could not be saved)";
+		OrbisLog("[video] renderer: %s", g.renderer.c_str());
+		return false;
+	}
+	const int variant = works ? works : 1;
+	g_gpu_variant = variant;
+	g_gpu_works = works;
+	c.host_import = variant == 1 || variant == 3;
+	ps5gpu::Configure(c);
+	OrbisLog("[video] GPU start: %s %d (%s); the console decoder's compute queues: %s", works ? "the kept variant" : "attempt",
+		variant, GpuVariantName(variant), mpc::hwdec::QueuesExist() ? "there" : "none");
+	if (variant >= 3)
+		mpc::hwdec::ReleaseQueues("GPU start variant 3 / 4");
+	// The recovery state above also covers an unwritable or missing marker.
+	if (!ps5gpu::GuardBegin(GpuMarker()))
+	{
+		g.renderer = "CPU (a previous GPU start failed)";
+		OrbisLog("[video] renderer: %s", g.renderer.c_str());
+		return false;
+	}
+	g.gpu_guard = true;
+	setting_up = true;
+#ifdef __PROSPERO__
+	const bool ok = ps5gpu::Init(kWidth, kHeight, false, 0, 0);
+#else
+	int ow = kWidth, oh = kHeight;
+	if (const char* o = getenv("MPCPS5_HOST_GPU_OUT"))
+		sscanf(o, "%dx%d", &ow, &oh);
+	const bool ok = ps5gpu::Init(kWidth, kHeight, true, ow, oh);
+#endif
+	setting_up = false;
+	MPCPS5_STAGE(Boot, "video"); // (the boot stage again, not the GPU's last line)
+	if (!ok)
+	{
+		ps5gpu::GuardEnd();
+		g.gpu_guard = false;
+		g.renderer = "CPU (the GPU couldn't be set up: see the [gpu] lines)";
+		OrbisLog("[video] renderer: %s", g.renderer.c_str());
+		return false;
+	}
+	char b[256];
+	snprintf(b, sizeof(b), "GPU: %s, %dx%d%s", ps5gpu::DeviceName(), ps5gpu::OutWidth(), ps5gpu::OutHeight(),
+		ps5gpu::VideoAvailable() ? "" : " (video pictures on the CPU)");
+	g.renderer = b;
+	OrbisLog("[video] renderer: %s", g.renderer.c_str());
+	g.gpu = true;
+	return true;
+}
 } // namespace
+
+bool GpuActive()
+{
+	return g.gpu;
+}
+
+uint64_t GpuPresents()
+{
+	return g.gpu_presents;
+}
+
+const char* RendererName()
+{
+	return g.renderer.c_str();
+}
+
+void GpuFailed(const char* why)
+{
+	OrbisLog("[video] GPU: %s", why);
+}
+
+void SetGpuLostHook(void (*hook)())
+{
+	g.gpu_lost_hook = hook;
+}
 
 bool Init()
 {
@@ -350,6 +668,36 @@ bool Init()
 	std::fill(g.surface, g.surface + size_t(kWidth) * kHeight, Rgb(0, 0, 0));
 	for (uint32_t y = 0; y < kTileH; y++)
 		g.yoff[y] = TileOffset(0, y);
+	if (InitGpu())
+	{
+		g.ok = true;
+		Present(0, 0, 0, 0, true); // black screen over the home screen
+		return true;
+	}
+	return InitScanout();
+}
+
+namespace
+{
+// the scan-out buffers (the CPU path): sceVideoOut opened, two buffers registered
+// quick: one try of each step (the GPU was lost while running: the main loop mustn't stop for seconds; tried again
+// every 300 presents)
+bool InitScanout(bool quick)
+{
+	// what a quick try that failed half-way left
+	if (g.handle >= 0)
+	{
+		if (g.flip_queue)
+			sceVideoOutDeleteFlipEvent(g.flip_queue, g.handle);
+		sceVideoOutClose(g.handle);
+		g.handle = -1;
+	}
+	if (g.flip_queue)
+	{
+		sceKernelDeleteEqueue(g.flip_queue);
+		g.flip_queue = nullptr;
+	}
+	FreeScanout();
 
 	// 0x80290009: the screen is still held by another process (the 1.5 console log: a second copy started
 	// while the first still ran). Give it a few seconds to let go.
@@ -357,7 +705,7 @@ bool Init()
 	{
 		g.handle = sceVideoOutOpen(SCE_USER_SERVICE_USER_ID_SYSTEM, 0, 0, nullptr);
 		OrbisLog("[video] sceVideoOutOpen -> %d (%x)", g.handle, unsigned(g.handle));
-		if (g.handle >= 0 || unsigned(g.handle) != 0x80290009u || attempt >= 10)
+		if (g.handle >= 0 || unsigned(g.handle) != 0x80290009u || attempt >= (quick ? 0 : 10))
 			break;
 		usleep(500 * 1000);
 	}
@@ -381,7 +729,7 @@ bool Init()
 	// When started from the dashboard icon, the launcher app still holds the game memory for a moment
 	// after it hands us over: keep trying for a few seconds before giving up.
 	bool ok = false;
-	for (int attempt = 0; attempt < 12 && !ok; attempt++)
+	for (int attempt = 0; attempt < (quick ? 1 : 12) && !ok; attempt++)
 	{
 		if (attempt > 0)
 		{
@@ -411,9 +759,39 @@ bool Init()
 	Present(0, 0, 0, 0, true); // black screen over the home screen
 	return true;
 }
+} // namespace
+
+bool RetryGpuNextStart()
+{
+	if (!WriteGpuAttempts(0, 0))
+		return false;
+	if (unlink(GpuMarker().c_str()) != 0 && errno != ENOENT)
+		return false;
+	OrbisLog("[video] GPU retry requested for the next start");
+	return true;
+}
+
+int GpuStartVariant()
+{
+	return g.gpu ? g_gpu_variant : 0;
+}
 
 void Shutdown()
 {
+	// (test13) an orderly exit before the first frame was on the screen (the user quit at once) isn't a start that died:
+	// the marker goes, the count stays
+	if (g.gpu_guard)
+	{
+		ps5gpu::GuardEnd();
+		g.gpu_guard = false;
+		WriteGpuAttempts(0, g_gpu_works);
+		OrbisLog("[video] GPU start: the app exits before its first frame: not counted as a start that died");
+	}
+	if (g.gpu)
+	{
+		ps5gpu::Shutdown();
+		g.gpu = false;
+	}
 	if (g.handle >= 0)
 	{
 		while (g.flips_in_flight > 0)
@@ -442,7 +820,57 @@ uint32_t* Surface()
 void Present(int x, int y, int w, int h, bool wait_vsync)
 {
 	if (!g.ok)
+	{
+		// the GPU lost and the scan-out buffers not set up yet: one quick try every 300 presents
+		if (g.gpu_lost && ++g.scanout_retry % 300 == 0 && InitScanout(true))
+			OrbisLog("[video] the scan-out buffers set up after the GPU was lost");
+		else if (g.gpu_lost)
+			usleep(16000); // (the main loop's pace without a display to wait for)
 		return;
+	}
+	if (g.gpu)
+	{
+		const ps5gpu::Rect d = (w <= 0 || h <= 0) ? ps5gpu::Rect{0, 0, kWidth, kHeight} : ps5gpu::Rect{x, y, w, h};
+		bool presented = ps5gpu::Present(g.surface, d, wait_vsync);
+#ifndef __PROSPERO__
+		// host tests: MPCPS5_HOST_GPU_FAIL_AT=n: from the n-th present on the GPU's presents fail (the GPU lost)
+		static int presents = 0;
+		if (const char* e = getenv("MPCPS5_HOST_GPU_FAIL_AT"))
+			if (++presents >= atoi(e))
+				presented = false;
+#endif
+		if (presented)
+		{
+			g.gpu_fails = 0;
+			g.gpu_presents++;
+			if (g.gpu_guard)
+			{
+				GpuReachedScreen(); // the first frame is on screen
+				g.gpu_guard = false;
+			}
+			return;
+		}
+		// a present that fails three times in a row: the GPU is given up for this run (the log says why)
+		if (++g.gpu_fails < 3)
+			return;
+		OrbisLog("[video] GPU: three presents failed in a row: back to the CPU and the scan-out buffers");
+		WriteGpuAttempts(4, 0);
+		if (g.gpu_lost_hook)
+			g.gpu_lost_hook(); // the player's side: pictures copied again, the decoder's imports let go
+		ps5gpu::Shutdown();
+		g.gpu = false;
+		if (g.gpu_guard)
+		{
+			ps5gpu::GuardEnd();
+			g.gpu_guard = false;
+		}
+		g.renderer = "CPU (the GPU failed while running)";
+		g.ok = false;
+		g.gpu_lost = true;
+		if (!InitScanout(true))
+			OrbisLog("[video] the scan-out buffers couldn't be set up at once: tried again every 300 frames");
+		return;
+	}
 	// The buffer about to be written may still be on screen until its last flip completes.
 	while (g.flips_in_flight > 0)
 		WaitOneFlip();

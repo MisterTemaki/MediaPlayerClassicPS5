@@ -1,3 +1,12 @@
 ps5/build/
 ps5/proto/native/build/
 *.o
+
+# Local diagnostics and distribution artifacts
+/audit/
+/releases/
+__pycache__/
+*.pyc
+*.elf
+*.mp4
+*.mkv

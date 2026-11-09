@@ -21,13 +21,13 @@
 #   3. build/ps5/MediaPlayerClassicPS5.elf          installer + helper, with the app folder from step 2 built in
 #
 # Dependencies: the ps5-payload-dev SDK (v0.42 or newer, https://github.com/ps5-payload-dev/sdk) in
-# $(PS5_PAYLOAD_SDK), with clang/lld 18 on the host, nasm, git (tools/build-deps.sh fetches FFmpeg n7.1.1 and
+# $(PS5_PAYLOAD_SDK), with clang/lld 18 on the host, nasm, git (tools/build-deps.sh fetches FFmpeg n7.1.5 and
 # libsmb2).
 
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.5.4
+VERSION ?= 1.6
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -39,12 +39,13 @@ DEPS_HOST ?= build/deps/prefix-host
 EMU_SRC := coreorbis/main-boot.cpp \
 	coreorbis/orbis-shims/orbis_paths.cpp coreorbis/orbis-shims/ProsperoNotify.cpp \
 	coreorbis/orbis-shims/ProsperoVideo.cpp coreorbis/orbis-shims/ProsperoAudio.cpp \
+	coreorbis/orbis-shims/ProsperoHdr.cpp \
 	coreorbis/orbis-shims/ProsperoInput.cpp coreorbis/orbis-shims/ProsperoJailbreak.cpp \
 	coreorbis/orbis-shims/ProsperoCrash.cpp \
 	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
 	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
 	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp player/mpc_i18n.cpp \
-	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp \
+	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp player/mpc_gpu.cpp player/mpc_bigmem.cpp \
 	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlaceApp.cpp
 # the payloads: the helper, and the installer (= helper + install). ProsperoAppPlace.cpp reads the mount table there
 # (statfs / getfsstat, libkernel_sys); the app has its own build of it without (ProsperoAppPlaceApp.cpp, #3)
@@ -60,7 +61,19 @@ MONO_SRC := third_party/monocypher/monocypher.c third_party/monocypher/monocyphe
 # build checks no signature (and says so in the log)
 RELEASE_KEY ?= $(shell tr -d ' \n' < keys/release-ed25519.pub 2>/dev/null)
 
-INCS := -Icoreorbis/include-orbis -Icoreorbis/orbis-shims -Iplayer -isystem third_party/stb -isystem third_party/nanosvg
+# 1.6: the GPU renderer (ps5-slang-gpu, MIT, vendored as ps5-slang-gpu/: tools/vendor.sh of that repository; checked
+# against its VENDOR.txt before anything of it is built). The video is drawn by its SetVideo pass (mpc_gpu.cpp), the
+# window over it as the UI surface. The PS5 build links RADV (Mesa's AMD Vulkan driver, MIT, built against mitrt's MIT
+# ps5platform headers: ../../rsdeps/radv-mit) and the platform layer RADV needs (mitrt/platform, MIT: open_memstream,
+# the C locale's *_l functions, fstatat & co, emulated TLS). GPU=0: the CPU-only player of 1.5.4 (the library's stub).
+GPU ?= 1
+SLANG_GPU := ps5-slang-gpu
+SLANG_GPU_GEN := build/gen/slang-gpu
+SLANG_GPU_MITRT := mitrt
+include $(SLANG_GPU)/mk/slang-gpu.mk
+
+INCS := -Icoreorbis/include-orbis -Icoreorbis/orbis-shims -Iplayer -isystem third_party/stb -isystem third_party/nanosvg \
+	$(SLANG_GPU_INC)
 DEFS := -DMPCPS5_PS5_VERSION='"$(VERSION)"' -DMPCPS5_TITLE_ID='"$(TITLE_ID)"' -DMPCPS5_UPDATE_REPO='"$(UPDATE_REPO)"' -DMPC_ASSET_DIR='"$(abspath assets)"' \
 	-DORBIS_ROOT_DEFAULT='"/data/mpcps5"' -DMPCPS5_RELEASE_KEY='"$(RELEASE_KEY)"' -Ithird_party/monocypher
 PORT_WARN := -Wall -Wextra -Werror -Wno-unused-parameter -Wno-missing-field-initializers
@@ -102,7 +115,7 @@ PS5_OUT := build/ps5
 PS5_OPT := -O3 -fPIC -march=znver2 -fno-strict-aliasing
 PS5_PAYLOAD_LIBS := -lkernel_sys -lSceNet -lSceNetCtl -lSceSsl -lSceHttp2 -lpthread
 PS5_DEP_INCS := -isystem $(DEPS_PS5)/include
-PS5_FLAGS_TEXT = $(strip $(PS5_CXX) $(PS5_CC) $(PS5_OPT) $(DEFS) $(INCS) $(PS5_DEP_INCS) $(PORT_WARN))
+PS5_FLAGS_TEXT = $(strip GPU=$(GPU) $(PS5_CXX) $(PS5_CC) $(PS5_OPT) $(DEFS) $(INCS) $(PS5_DEP_INCS) $(PORT_WARN))
 $(eval $(call FLAGS_STAMP,build/ps5,PS5_FLAGS_TEXT))
 
 PS5_EMU_OBJ := $(patsubst %.cpp,$(PS5_OUT)/port/%.o,$(EMU_SRC)) $(patsubst %.c,$(PS5_OUT)/port/%.o,$(MONO_SRC))
@@ -233,6 +246,53 @@ build/app/app_crt.o build/app/app_cpp_runtime.o: build/app/%.o: $(NATIVE)/toolin
 	$(NATIVE_CLANG) -std=c++20 -O2 -Wall -Wextra $(APP_CRT_EH_$*) -fno-rtti -ffunction-sections -fdata-sections \
 		-c -o $@ $<
 
+# 1.6: the GPU renderer's objects (the library, glslang, the tables), or its stub (GPU=0)
+PS5_GPU_OBJ := $(call SLANG_GPU_OBJECTS,$(PS5_OUT)/slang-gpu,$(PS5_CXX),-O3 -fPIC -march=znver2 -fno-strict-aliasing $(SLANG_GPU_PS5_FLAGS),-O2 -fPIC -march=znver2)
+PS5_GPU_STUB_OBJ := $(call SLANG_GPU_STUB_OBJECTS,$(PS5_OUT)/slang-gpu,$(PS5_CXX),-O2 -fPIC -march=znver2)
+# mitrt's platform layer, without its thread wrapper (the player has its own __wrap_pthread_create: mpc_console.cpp,
+# the same 2 MiB floor): open_memstream with its fclose / fflush wrappers, the C locale's *_l functions (libc++'s
+# iostreams in glslang), qsort_r, fstatat & co, localtime_r & co, compiler-rt's emutls.c and x86.c (RADV's TLS)
+PS5RT_PLATFORM_SRC := memstream stdio_wrap locale fs qsort_r misc
+PS5RT_PLATFORM_OBJ := $(PS5RT_PLATFORM_SRC:%=build/app/ps5rt_platform/ps5rt_%.o) \
+	build/app/ps5rt_platform/crt_emutls.o build/app/ps5rt_platform/crt_x86.o
+build/app/ps5rt_platform/ps5rt_%.o: mitrt/platform/src/ps5rt_%.c mitrt/platform/include/ps5rt/platform.h
+	@mkdir -p $(dir $@)
+	$(PS5_CC) -std=gnu11 -O2 -Wall -Wextra -ffunction-sections -fdata-sections -Imitrt/platform/include -c -o $@ $<
+build/app/ps5rt_platform/crt_%.o: mitrt/platform/third_party/compiler-rt-18.1.8/%.c
+	@mkdir -p $(dir $@)
+	$(PS5_CC) -std=gnu11 -O2 -ffunction-sections -fdata-sections -c -o $@ $<
+build/app/libps5rt_platform.a: $(PS5RT_PLATFORM_OBJ)
+	rm -f $@
+	$(PS5_PAYLOAD_SDK)/bin/llvm-ar rcsD $@ $(PS5RT_PLATFORM_OBJ)
+# the C locale's plain entry points on the platform layer's table (ProsperoCtype.c): libc.a's no-locale.o, which has
+# them, also has the *_l functions the platform layer gives, and both can't be linked
+build/app/ProsperoCtype.o: coreorbis/orbis-shims/ProsperoCtype.c
+	@mkdir -p $(dir $@)
+	$(PS5_CC) -std=gnu11 -O2 -Wall -Wextra -Werror -c -o $@ $<
+# libbluray and Mesa (RADV's ralloc) both export gc_free: the GPU build links a copy of libbluray with its own renamed
+# (bd_gc_free, the definition and libbluray's calls alike); the deps build is left as it is
+build/app/libbluray-gpu.a: $(DEPS_PS5)/lib/libbluray.a
+	@mkdir -p $(dir $@)
+	$(PS5_PAYLOAD_SDK)/bin/llvm-objcopy --redefine-sym gc_free=bd_gc_free $< $@
+ifeq ($(GPU),1)
+# RADV already embeds zlib; using a second archive would define its public symbols twice with --whole-archive.
+FF_PS5_LINK_ARCHIVES = $(patsubst $(DEPS_PS5)/lib/libbluray.a,build/app/libbluray-gpu.a,$(filter-out $(DEPS_PS5)/lib/libz.a,$(FF_PS5_ARCHIVES)))
+# Mesa's dispatch tables use weak references: an ordinary archive link leaves implemented Vulkan functions null.
+# Keep every RADV member, as PS5_Vulkan/VLC's radv_link_recipe does.
+GPU_LINK_INPUTS = $(PS5_GPU_OBJ) build/app/ProsperoCtype.o --whole-archive $(SLANG_GPU_RADV_ARCHIVE) --no-whole-archive build/app/libps5rt_platform.a
+GPU_LINK_FLAGS := --wrap=fclose --wrap=fflush
+GPU_IMPORT_ALLOW = $(SDK_LIB)/libSceAgc.so $(SDK_LIB)/libSceAgcDriver.so
+else
+FF_PS5_LINK_ARCHIVES = $(FF_PS5_ARCHIVES)
+GPU_LINK_INPUTS = $(PS5_GPU_STUB_OBJ)
+GPU_LINK_FLAGS :=
+GPU_IMPORT_ALLOW :=
+endif
+$(SLANG_GPU_RADV_ARCHIVE):
+	@echo "RADV built against the MIT ps5platform headers is needed: $(SLANG_GPU_RADV_ARCHIVE)"
+	@echo "  (mitrt/platform/radv-shim/build-radv-mit.sh; or SLANG_GPU_RADV_MIT=<its folder>, or GPU=0 for the CPU only)"
+	@exit 1
+
 FF_PS5_ARCHIVES = $(addprefix $(DEPS_PS5)/lib/,libavformat.a libavcodec.a libavfilter.a libswscale.a libswresample.a \
 	libavutil.a libdav1d.a libsmb2.a libmbedtls.a libmbedx509.a libmbedcrypto.a libz.a \
 	libass.a libharfbuzz.a libfribidi.a libfreetype.a libdvdnav.a libdvdread.a libbluray.a libudfread.a)
@@ -250,17 +310,32 @@ $(VDEC_STUB): stubs/videodec2_stub.c
 # __gxx_personality_v0, __cxa_get_globals and the type_info / std exception vtables while __cxa_throw and libunwind were
 # static: a throw would run the system's personality routine on the static unwinder's context (Stella PS5 1.0 crashed
 # that way at its first throw, starting any game). tools/check_imports.py refuses any imported C++ runtime symbol.
-build/app/mpc-pie.elf: $(EBOOT_OBJS) $(FF_PS5_ARCHIVES) $(VDEC_STUB) $(NATIVE)/tooling/native/ps5-pie.ld $(NATIVE)/tooling/native/ehframe.ld \
-		$(NATIVE)/tooling/native/app-symbols.map $(NATIVE)/tooling/native/localize.map tools/check_imports.py
+# 1.6: RADV, the GPU renderer and mitrt's platform layer after the player's archives (GPU=1, the default); check_imports
+# takes AGC's two modules, RADV's.
+# tools/check_syscalls.py (as FBNeo PS5 / Snes9x PS5): the link traces (-y) every function of the SDK's
+# libc.a(syscalls.o), the payload SDK's bare system calls, and fails when any of them is linked into the app (1.5.4's
+# took getfsstat from it for libbluray's mount table: a raw system call in a title, which the console may refuse);
+# mitrt's check_link.py syscalls checks the same trace its own way (syscalls.o not loaded at all).
+build/app/mpc-pie.elf: $(EBOOT_OBJS) $(filter-out --whole-archive --no-whole-archive,$(GPU_LINK_INPUTS)) $(FF_PS5_LINK_ARCHIVES) $(VDEC_STUB) $(NATIVE)/tooling/native/ps5-pie.ld \
+		$(NATIVE)/tooling/native/ehframe.ld $(NATIVE)/tooling/native/app-symbols.map $(NATIVE)/tooling/native/localize.map \
+		tools/check_imports.py tools/check_syscalls.py tools/embed_imports.py tools/check_radv_link.py
+	python3 tools/check_syscalls.py rsp $(SDK_LIB)/libc.a build/app/syscalls-y.rsp
 	$(LLD) -m elf_x86_64 -pie -z max-page-size=0x4000 --hash-style=gnu \
 		-T $(NATIVE)/tooling/native/ps5-pie.ld -T $(NATIVE)/tooling/native/ehframe.ld --eh-frame-hdr \
 		--version-script $(NATIVE)/tooling/native/app-symbols.map --version-script $(NATIVE)/tooling/native/localize.map \
-		-e _start --no-dynamic-linker --wrap=getaddrinfo --wrap=pthread_create -o $@ $(EBOOT_OBJS) \
-		--start-group $(FF_PS5_ARCHIVES) --end-group \
+		-e _start --no-dynamic-linker --wrap=getaddrinfo --wrap=pthread_create --wrap=sceVideoOutOpen --wrap=sceVideoOutClose $(GPU_LINK_FLAGS) -o $@ $(EBOOT_OBJS) \
+		--start-group $(FF_PS5_LINK_ARCHIVES) --end-group $(GPU_LINK_INPUTS) \
 		$(SDK_LIB)/libc++.a $(SDK_LIB)/libc++abi.a $(SDK_LIB)/libunwind.a \
 		$(VDEC_STUB) $(SDK_LIB)/libSceSysmodule.so --as-needed $(filter-out %/libSceSysmodule.so,$(APP_STUBS)) -L $(SDK_LIB) \
-		$(SDK_LIB)/libc.a -lpthread
-	python3 tools/check_imports.py $@ $(SDK_LIB) $(VDEC_STUB) || { rm -f $@; exit 1; }
+		$(SDK_LIB)/libc.a -lpthread @build/app/syscalls-y.rsp --trace >build/app/mpc-pie.trace
+	python3 tools/check_imports.py $@ $(SDK_LIB) $(VDEC_STUB) $(GPU_IMPORT_ALLOW) || { rm -f $@; exit 1; }
+	python3 tools/check_syscalls.py check build/app/mpc-pie.trace || { rm -f $@; exit 1; }
+	python3 tools/embed_imports.py $@ $(SDK_LIB) $(VDEC_STUB) || { rm -f $@; exit 1; }
+	python3 mitrt/platform/tools/check_link.py syscalls build/app/mpc-pie.trace || { rm -f $@; exit 1; }
+	@if [ "$(GPU)" = 1 ]; then python3 tools/check_radv_link.py $@ $(SLANG_GPU_RADV_ARCHIVE) || { rm -f $@; exit 1; }; fi
+	@if [ "$(GPU)" = 1 ]; then grep -q '/slang-gpu/lib/gpu\.o$$' build/app/mpc-pie.trace && \
+		grep -q 'libvulkan_radeon\.ps5\.a(' build/app/mpc-pie.trace || { echo "$@: the GPU renderer or RADV isn't linked"; rm -f $@; exit 1; }; \
+		grep -q "MIT ps5platform headers" $(SLANG_GPU_RADV_MIT)/PROVENANCE.txt || { echo "$(SLANG_GPU_RADV_ARCHIVE): not the MIT-headers build"; rm -f $@; exit 1; }; fi
 
 build/app/eboot.elf: build/app/mpc-pie.elf $(NATIVE_TOOL)
 	$(NATIVE_TOOL) link --in $< --out $@ --stub-dir $(SDK_LIB) --stub $(VDEC_STUB) --module-sdk 0x02000009 \
@@ -272,9 +347,10 @@ $(APP_OUT)/eboot.bin: build/app/eboot.elf $(NATIVE_TOOL)
 	$(NATIVE_TOOL) self --sign --in $< --out $@ --magic 0x1D3D154F
 	$(NATIVE_TOOL) self --inspect --file $@
 
-$(APP_OUT)/sce_sys/param.json: app/sce_sys/param.json
+$(APP_OUT)/sce_sys/param.json: app/sce_sys/param.json tools/check_app_profile.py
 	@mkdir -p $(dir $@)
 	sed 's/PPSA99015/$(TITLE_ID)/g' $< > $@
+	python3 tools/check_app_profile.py $@
 
 $(APP_OUT)/sce_sys/%.png: app/sce_sys/%.png
 	@mkdir -p $(dir $@)
@@ -302,6 +378,8 @@ $(eval $(call FLAGS_STAMP,build/host,HOST_FLAGS_TEXT))
 
 HOST_EMU_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(EMU_SRC) host/sce_host.cpp host/sce_host_vdec.cpp) \
 	$(patsubst %.c,$(HOST_OUT)/port/%.o,$(MONO_SRC))
+# 1.6: the GPU renderer on the host's Vulkan driver (lavapipe), ASan / UBSan on the library as on the player
+HOST_GPU_OBJ := $(call SLANG_GPU_OBJECTS,$(HOST_OUT)/slang-gpu,$(HOST_CXX),$(HOST_OPT) $(HOST_SAN),-O2 -g1)
 HOST_HELPER_OBJ := $(HOST_OUT)/port/installer/helper_main.o $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(HELPER_SRC) host/sce_host.cpp)
 HOST_INSTALLER_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(INSTALLER_SRC) host/sce_host.cpp) \
 	$(patsubst %.c,$(HOST_OUT)/port/%.o,$(MONO_SRC))
@@ -350,8 +428,8 @@ $(HOST_OUT)/mpc-ps5-helper: $(HOST_HELPER_OBJ)
 $(HOST_OUT)/mpc-ps5-installer: $(HOST_INSTALLER_OBJ) $(HOST_OUT)/install_data.o
 	$(HOST_CXX) $(HOST_SAN) -o $@ $^ $(DEPS_HOST)/lib/libz.a -lpthread
 
-$(HOST_OUT)/mpc-ps5-host: $(HOST_EMU_OBJ) $(HOST_OUT)/helper_data.o
-	$(HOST_CXX) $(HOST_SAN) -o $@ $^ -L$(DEPS_HOST)/lib $(FF_LIBS) -lpthread -lm -ldl
+$(HOST_OUT)/mpc-ps5-host: $(HOST_EMU_OBJ) $(HOST_OUT)/helper_data.o $(HOST_GPU_OBJ)
+	$(HOST_CXX) $(HOST_SAN) -o $@ $^ -L$(DEPS_HOST)/lib $(FF_LIBS) -lvulkan -lpthread -lm -ldl
 
 # player/mpc_disc.cpp on its own, with faults put into the drive (tests/disc_test.cpp)
 $(HOST_OUT)/mpc-disc-test: tests/disc_test.cpp player/mpc_disc.cpp player/mpc_disc.h player/mpc_i18n.h $(HOST_OUT)/flags.txt
@@ -359,11 +437,35 @@ $(HOST_OUT)/mpc-disc-test: tests/disc_test.cpp player/mpc_disc.cpp player/mpc_di
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) -o $@ $< \
 		-L$(DEPS_HOST)/lib $(FF_LIBS) -lpthread -lm -ldl
 
-test: host
+test-audit:
+	sh tests/run-update-transaction-tests.sh
+	sh tests/run-log-password-tests.sh
+	sh tests/run-install-content-tests.sh
+	sh tests/run-gpu-startup-tests.sh
+	sh tests/run-vdec-memory-tests.sh
+	sh tests/run-console-hdr-tests.sh
+
+$(HOST_OUT)/mpc-hdr-test: tests/hdr_output_test.cpp $(HOST_GPU_OBJ)
+	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(SLANG_GPU_INC) -o $@ $< $(HOST_GPU_OBJ) -lvulkan -lpthread
+
+$(HOST_OUT)/mpc-gpu-library-test: $(SLANG_GPU)/tests/gpu_test.cpp $(HOST_GPU_OBJ)
+	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(SLANG_GPU_WARN) $(SLANG_GPU_INC) -o $@ $< $(HOST_GPU_OBJ) -lvulkan -lpthread
+
+test: host test-audit
 	bash tests/run-tests.sh
 
-clean:
-	rm -rf build/ps5 build/host build/app build/dist
+# 1.6: the CPU's work per picture, 1.5.4's path against the GPU's (tests/gpu_bench.cpp; optimised, no sanitizers):
+#   make bench && build/bench/mpc-gpu-bench <clip> [pictures] [out WxH]
+BENCH_OUT := build/bench
+BENCH_GPU_OBJ := $(call SLANG_GPU_OBJECTS,$(BENCH_OUT)/slang-gpu,$(HOST_CXX),-O2 -g1 -mavx2,-O2 -g1)
+$(BENCH_OUT)/mpc-gpu-bench: tests/gpu_bench.cpp player/mpc_tonemap.cpp player/mpc_tonemap.h $(BENCH_GPU_OBJ)
+	@mkdir -p $(dir $@)
+	$(HOST_CXX) -std=c++17 -O2 -mavx2 $(DEFS) $(INCS) $(HOST_DEP_INCS) -o $@ tests/gpu_bench.cpp player/mpc_tonemap.cpp \
+		$(BENCH_GPU_OBJ) -L$(DEPS_HOST)/lib $(FF_LIBS) -lvulkan -lpthread -lm -ldl
+bench: $(BENCH_OUT)/mpc-gpu-bench
 
-.PHONY: ps5 host test send app dist clean deps deps-subs deps-disc
+clean:
+	rm -rf build/ps5 build/host build/app build/dist build/bench build/gen
+
+.PHONY: ps5 host test test-audit send app dist clean deps deps-subs deps-disc bench
 .SECONDARY:

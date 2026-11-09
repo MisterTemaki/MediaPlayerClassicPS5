@@ -7,7 +7,7 @@ USB drives: data discs, unencrypted DVD-Video and Blu-ray), Windows/Samba networ
 (HTTP/HTTPS, HLS)**.
 
 On Windows MPC-HC plays through DirectShow and LAV Filters, which are FFmpeg inside; here the playback engine
-is **FFmpeg 7.1.1** itself (with **dav1d** for AV1), built for the console, and SMB shares are read with
+is **FFmpeg 7.1.5** itself (with **dav1d** for AV1), built for the console, and SMB shares are read with
 **libsmb2**, the library VLC's SMB module uses.
 
 PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the PS5 layer of
@@ -15,6 +15,14 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
+> **Status (1.6-gpu-hdr2):** the shared player was run on PS5 13.60 with kstuff: RADV opened on the first attempt,
+> and H.264 and 4K HEVC Main10 used the console decoder. The 4K test decoded 1,797 frames with no decoder errors,
+> with seven displayed frames dropped; it included pauses and controls, so it was not a continuous benchmark.
+> **hdr2 corrects the app's HDR profile and still needs a console retest. Native HDR10 output has not been
+> confirmed on an HDR10 TV.** SDR tone mapping remained available on the test TV, which does not support HDR10.
+> See [changes](docs/GPU-HDR-CHANGES.md), [test results](docs/PS5-VALIDATION-v1.6-gpu-hdr2.md)
+> and [build notes](docs/BUILD-GPU-HDR.md). Historical 1.5.4 status follows.
+>
 > **Status (1.5.4):** builds with the ps5-payload-dev SDK into a signed native app and passes 613 host tests
 > (the same code on Linux, the PS5 calls faked: playback, subtitles, chapters, tracks, HTTP, SMB, the pointer,
 > the dialogs, the on-screen keyboard, the installer and the helper; the PS5's video decoder through a stand-in,
@@ -31,6 +39,26 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 tone mapping** to the SDR picture, and **5.1 / 7.1 output** on the console's 8-channel port. See
 [Hardware decoding, HDR and surround](#hardware-decoding-hdr-and-surround). And **Help > Check for updates**
 works: the app updates itself from its GitHub releases, as Porpoise does (see [Updates](#updates)).
+
+**1.6:** **the video is drawn by the GPU** (Vulkan, through Mesa's RADV driver built into the app), for 4K HDR films
+that dropped pictures on the CPU:
+- **Up to 1.5.4 every picture went through the CPU**: the decoder's picture copied into an FFmpeg frame, scaled and
+  converted to RGB by libswscale (bicubic, six threads; for HDR to 16-bit RGB, then tone mapped on six more), copied
+  into the window, then into the screen's buffer. Now the GPU takes the picture as the decoder gave it (NV12, P010 and
+  the console decoder's own 10-bit, yuv420p to yuv444p in 8 to 16 bits, gray, RGB) and, in one pass, scales it to the
+  window, converts it with the stream's colour matrix and range, and tone maps HDR10 / HLG with **the same curves and
+  settings as before** (BT.2390, Hable, Reinhard, Off; the white) -- at the TV's resolution (4K on a 4K TV).
+- **Zero-copy path for compatible console decoder pictures**: the GPU reads them where the decoder wrote them (its buffers
+  are shared with the GPU); FFmpeg's own pictures are copied once. The decoder always keeps buffers of its own free.
+- **The window, menus, subtitles and the OSD look exactly as before**: they are drawn as before and laid over the
+  picture by the GPU (the PC tests compare the screens with 1.5.4's renderer: the same pixels).
+- **Options > Output**: "GPU renderer" (the default) or "Software renderer" (1.5.4's, from the next start), and the
+  GPU's **Resizer**: Bilinear (the default) or Bicubic (sharper). R3 + Square (and View > Statistics) show the GPU's
+  times ("GPU 1.2 ms, in place" -- or "copy 0.4 ms").
+- **If the GPU can't be used** (it fails to start, a start died while setting it up, a picture it can't take, it fails
+  while running), the app uses 1.5.4's renderer by itself and says why in `boot.log` (`[video]`, `[gpu]`).
+- The refresh rate stays 60 Hz: the console's video output, as the app drives it, offers 59.94 Hz (and 119.88 Hz for
+  titles that declare it); no 24 / 25 / 50 Hz mode is known.
 
 **1.5.4:** a fix for **Restart after an in-app update**, reported on
 [#3](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/3) (PS5 13.60, ShadowMount+): Restart went back to
@@ -273,8 +301,8 @@ default: `debug_logs=1` in `mpc-hc.ini` turns them on.
 
 ## Install
 
-1. Send `MediaPlayerClassicPS5-v1.5.4.elf` to the console's payload loader (port 9021, as with the other ports:
-   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.5.4.elf`).
+1. Send `MediaPlayerClassicPS5-v1.6.elf` to the console's payload loader (port 9021, as with the other ports:
+   the PS5 Payload Manager, or `nc <ps5-ip> 9021 < MediaPlayerClassicPS5-v1.6.elf`).
 2. It installs the app (`/data/homebrew/PPSA99015`, with its icon -- or, 1.5, updates the folder ShadowMount+
    already runs it from, see [Updates](#updates)) and a notification says so. Open
    **Media Player Classic PS5** from the home screen.
@@ -288,7 +316,7 @@ FBNeo, Mesen2, NES FCEUmm) is touched.
 
 1.5 doesn't open on the console (#3: "Error in game PPSA99015: signal: 12 (SIGSYS)"); 1.5.1 fixes that. To get a
 working app:
-- **Send the newest payload** (`MediaPlayerClassicPS5-v1.5.4.elf`) and put it in your autoload instead of 1.5's. It is
+- **Send the newest payload** (`MediaPlayerClassicPS5-v1.6.elf`) and put it in your autoload instead of 1.5's. It is
   newer than the installed 1.5, so it writes itself over it -- into the folder ShadowMount+ runs the app from (found
   as described in [Updates](#updates)); then close the app if it is open and open it again. A 1.4 app updates to the newest
   from **Help > Check for updates** as well (1.4's updater writes `/data/homebrew/PPSA99015`: if ShadowMount+ runs
@@ -390,7 +418,12 @@ stick (its four directions) repeat their action when it is a jump, the volume, a
 don't repeat, as before; as subtitle delay - / + they do); Circle, Triangle, Square, L3 and R3 never repeat. A jump
 held down (1.5.3) goes by keyframes, one picture at a time, so the picture follows while the time counts the jumps; let
 go, playback goes on exactly where they added up to. Dragging the seek bar goes one keyframe at a time too, exact
-where it is let go.
+where it is let go. An exact seek (1.6 test8) holds the time and the sound until the target's picture is decoded,
+then both start from it together, as mpv and VLC do; keyframe seeks start at once, as before. The hold is short:
+after 3 s (keyframes far apart, a slow decoder or source) playback starts where the decoder has got to -- the latest
+picture decoded before the target when it is within a second of it, with the sound from its time (a little early,
+never late), or else the sound at the target while the picture catches up; at once when no picture can come (the
+video track ended before the target). A pause stops its timer.
 
 The menus work as Windows' keyboard menus: Up/Down choose, Right opens a submenu (or the next menu bar menu),
 Left goes back, Cross runs the command. The playlist, when it has the focus (a click on it): Up/Down, Cross
@@ -545,25 +578,50 @@ All three are in **Options > Output**, on by default except surround.
 
 ![Options > Output](docs/screenshots/output.png)
 
-**Hardware decoding.** H.264 (8-bit 4:2:0) and HEVC (Main and Main 10, up to 3840x2176) go to the PS5's own
-video decoder (libSceVideodec2) instead of the CPU, so 4K HEVC 10-bit films play in real time. This follows VLC
+**Hardware decoding.** H.264 (8-bit 4:2:0), HEVC (Main and Main 10) and, from 1.6, VP9 (profile 0 and 2: 8 and
+10-bit 4:2:0), up to 3840x2176, go to the PS5's own video decoder (libSceVideodec2) instead of the CPU, so 4K HEVC 10-bit films play in real time. This follows VLC
 for PS5's `ps5vdec` module, which found on the console how to drive it: the library (sysmodule 207) and the
 decoder's compute queue are made when the app starts, before it leaves its sandbox (after that both are
 refused); the packets go in as Annex B with the parameter sets in front; after a seek decoding goes on from the
 next keyframe (HEVC's RASL pictures left out); Dolby Vision's own layers are dropped, so a Dolby Vision film
-plays as its HDR10 base layer. Everything else -- AV1, VP9, MPEG-2, VC-1, H.264 High 10 / 4:2:2, interlaced
+plays as its HDR10 base layer. VP9 (1.6, from what VLC for PS5's console runs found): its own compute queue, made at
+the start too; the blocks go in as they are, one picture out of each (a block that shows no frame gives one that is
+dropped); the decoder made again for the profile the first frame has; a frame it refuses sends the video to FFmpeg at
+once. The start's log says in one line whether the console decoder is on, and why not (`[hwdec] console decoder:`);
+its functions are ordinary imports, each checked before use (test2's weak import of sceSysmoduleLoadModule was left
+unbound on a console, and the build now refuses a weak one), and `[imports]` lists, per system module, how many of the
+eboot's imports the console bound. Everything else -- AV1, MPEG-2, VC-1, H.264 High 10 / 4:2:2, interlaced
 video (deinterlaced with bwdif) -- stays with FFmpeg, and so does a video the decoder refuses or keeps failing
 on (from the next keyframe, without stopping). View > Statistics says which decoder is working ("Decoder:
 PS5 video decoder (hardware)" or "FFmpeg (software)"); `boot.log` has the details (`[hwdec]`).
 
-**HDR.** The screen is SDR (the window, the menus and the video in it), so HDR10 (PQ) and HLG pictures are tone
-mapped: scaled to the window as 16-bit R'G'B', then turned to linear light (PQ's curve, or HLG's with its
-1000-nit OOTF), from BT.2020 to BT.709 colours, the highlights compressed from the film's peak (its MaxCLL or
-mastering metadata, 1000 nits when it has neither) to the picture's white, and encoded for the screen
-(gamma 2.4). Curves: **BT.2390** (the default), Hable and Reinhard, or Off (the signal as it comes: washed out).
-"White" sets how bright the picture is: the nits shown as the screen's white (250 by default, 100-400).
-This is done by the CPU on the scaled picture (1080p at most), in six threads (five workers made at the first HDR
-picture and kept).
+**HDR.** On a compatible display the local GPU/HDR build switches VideoOut to 10-bit HDR10 (PQ/BT.2020) while HDR video is visible. PQ is preserved; HLG is converted to PQ. Menus and subtitles are converted from SDR to a 203-nit graphics white. HDR output is optional in Options > Output (takes effect next start). A refused or unconfirmed HDR output keeps SDR tone mapping. Native HDR10 HDMI output remains unverified on an HDR10-capable TV. The SDR-TV test refused HDR and retained SDR tone mapping; host Vulkan tests do not establish HDR display compatibility.
+
+**The GPU renderer (1.6).** Options > Output > GPU renderer (the default) draws the video with Vulkan: Mesa's RADV
+driver is built into the app (as PS5-ECAM and VLC for PS5 do). The decoder's pictures go to the GPU as they are: the
+console decoder's are read where it wrote them (its picture buffers are imported, no CPU copy; it gets 16 of them for
+4K, 4 always its own), FFmpeg's are copied once into one of three staging buffers. One shader samples and scales the
+planes (Resizer: Bilinear, or Bicubic -- both widen their filter when the picture is made smaller), converts them with
+the stream's matrix (BT.601 / 709 / 2020) and range, tone maps HDR as above, and draws straight into the TV's
+resolution; the window is drawn on the CPU as before and laid over it, transparent where the picture shows. The app
+uses the software renderer instead, and logs why, when the GPU can't be set up, after one interrupted GPU start (recovery is persisted before entering the driver, and retained until Options > Output > Retry GPU next start). A deliberate driver compatibility revision permits one new attempt; ordinary recompilation does not reset recovery. The diagnostic four-variant restart loop is no longer automatic. The software renderer is also used for a picture format the shader doesn't read (rgb24, yuyv422, paletted...: that picture),
+for a picture whose GPU images can't be made (that picture), and after three failed frames in a row (the scan-out
+buffers are then set up without stopping the window). A start that died importing the decoder's buffers or at its
+first picture read in place makes the next start copy them (`logs/gpu-inplace-starting`, written before the import,
+removed once the GPU has finished the frame that read the first one, or at an orderly exit).
+The console decoder lends a picture in place only while it keeps the most buffers it has held, one for its next
+picture and two more; the others are copied once, into the same two planes, so the GPU's images are made once per film
+(on the host stand-in, of 150 4K pictures: 147 in place when it holds 3 buffers, 132 with 6, 75 with 10). While paused
+and at a stream's end the pictures are copied; a wait for a free buffer gives way to a seek or the app's exit (and
+doesn't time out while paused); at the exit, and when the GPU is lost, every import is released before the GPU shuts
+down. Its pictures now carry the
+film's HDR10 metadata (from the container, else from the stream's SEI), so a 4000-nit master is tone mapped from 4000
+nits as FFmpeg's pictures are; chroma is placed where the stream sites it (MPEG-2 / H.264 / HEVC: left), on both
+renderers. On the console the GPU's swapchain shows a picture one refresh later than 1.5.4's direct flip, so the clock
+picks pictures one refresh ahead (scaled with the playback speed; none once the CPU flips again after a GPU loss) to
+keep sound and picture together (to be confirmed on a console). `boot.log` has
+`[gpu]` lines (the device, the output size, the self-test at start) and, with debug logs on, `[pacing]` lines: how
+many screen refreshes each picture stayed on (a 24 fps film on 60 Hz: 2 and 3 in turn).
 
 **Surround.** With Audio Renderer on surround, 5.1 and 7.1 tracks go to the console's 8-channel output
 (L R C LFE Ls Rs Lb Rb); the console mixes it down itself for a stereo TV. 5.1 fills the first six, 7.1's side
@@ -571,18 +629,35 @@ channels go to Ls/Rs and its back channels to Lb/Rb. Stereo tracks stay on the s
 
 ## What plays, and the limits
 
-Every format FFmpeg 7.1.1 decodes: MKV, MP4/MOV, AVI, TS/M2TS, WebM, FLV, OGG, MPEG-PS, WMV/ASF...; H.264,
+Every format FFmpeg 7.1.5 decodes: MKV, MP4/MOV, AVI, TS/M2TS, WebM, FLV, OGG, MPEG-PS, WMV/ASF...; H.264,
 HEVC (8 and 10 bit), AV1 (dav1d), VP9, VP8, MPEG-2, MPEG-4 ASP (DivX/Xvid), VC-1, ...; AAC, AC-3, E-AC-3,
 DTS, TrueHD, FLAC, Opus, Vorbis, MP3, PCM, ...; interlaced video is deinterlaced (bwdif).
 
 Honest limits:
 
-- **The hardware decoder hasn't been tried on a console with this player yet** (it follows VLC for PS5, which
-  plays 4K HEVC with it). Without it -- other codecs, or Hardware decoding off -- decoding is done by the CPU
+- **The console decoder has been observed working with H.264 and 4K HEVC Main10** on PS5 13.60 with kstuff. VP9 hardware playback remains unconfirmed in this test. Without hardware decoding -- other codecs, unsupported profiles, or Hardware decoding off -- decoding is done by the CPU
   (FFmpeg's frame threads, AVX2): 1080p plays at full speed, 4K HEVC 10-bit at high bit rates may drop frames
   (View > Statistics shows the decode and scale times; R3 + Square shows them over the video).
-- **HDR is tone mapped to SDR**, not sent to the TV as HDR (the screen is drawn in SDR). Dolby Vision profile
-  5 (no HDR10 base layer) has wrong colours.
+- **Native HDR10 output needs validation on the PS5.** The local build enables PQ/10-bit VideoOut on compatible displays and retains SDR tone mapping otherwise. Dolby Vision profile 5 without an HDR10 base is still unsupported.
+- **Beyond 4K** the console's decoder doesn't go: an 8K film is decoded by the CPU (1.6 test12, the approach after VLC
+  for PS5 by ZiZc3). Pictures of 4 MiB and more -- a 4K 10-bit one is 25 MiB, an 8K one 100 MiB -- are allocated in
+  the console's direct memory (some 12 GiB, while the app's own heap is about 360 MiB), FFmpeg's decoder frames and the
+  copies of the console decoder's pictures alike, so FFmpeg keeps its 8 frame threads at any size; fewer, or none with a
+  short queue, only when even direct memory is short, and a refusal with the honest message (how many pictures a
+  second the CPU would show) only when not even that fits. When the CPU can't keep up -- measured at the decoder:
+  pictures that come out after their time -- FFmpeg decodes faster a step at a time (no loop filter and its fast flag,
+  then no non-reference pictures, as VLC's "fast decoding"), and steps back to full quality after 6 calm windows of
+  30 pictures; Options > Playback > Decoding chooses Auto (that), Fast (so from the start) or Full (never faster); Auto
+  doesn't decode faster on a network source. 8K on a PS5 is expected around real time for 24/30 fps films at best (an
+  estimate from the host's rate; not measured on a console) -- late pictures are dropped, never the sound.
+  More than a second behind, with either decoder, the video goes on from the next queued keyframe once it
+  is no more than 2 s past the clock (FFmpeg flushed, the console's decoder reset there as after a seek), long GOPs
+  included. The demuxer never leaves packets out: when the sound holds less than a second (once a seek has settled),
+  it reads on past the video queue's limit, up to 96 MiB but never into the heap FFmpeg's pictures need (what is
+  free, measured then, less their estimate and 32 MiB), as VLC and mpv do. Pictures are dropped, never the sound,
+  and the OSD says so.
+- A raw `.yuv` file has no size or format inside: it opens only when its name says them (`clip_3840x2160_p010_24fps.yuv`);
+  otherwise the message says to convert it (`.y4m` opens as it is).
 - The output is 1920x1080 at 60 Hz: 24 fps films have the usual 3:2 cadence.
 - Discs: unencrypted DVD-Video, Blu-ray and data discs only, no disc menus, no audio CDs (see [Discs](#discs)); no
   DRM (Netflix, Prime...), no Chromecast/DLNA server.
@@ -735,15 +810,25 @@ On Linux (Ubuntu 24.04 tested), with the [ps5-payload-dev SDK](https://github.co
 
 ```
 cd ps5
-make deps          # FFmpeg n7.1.1, dav1d 1.5.1, libsmb2, Mbed TLS, zlib, the subtitle and the disc libraries,
+make deps          # FFmpeg n7.1.5, dav1d 1.5.1, libsmb2, Mbed TLS, zlib, the subtitle and the disc libraries,
                    # for the PS5 and the host (once); make deps-disc: only the disc libraries, then FFmpeg again
 make ps5           # build/ps5/MediaPlayerClassicPS5.elf (1.5.1: fails if the eboot would load a library or import a
                    # symbol a title can't -- libkernel_sys, libkernel_web: tools/check_imports.py, #3; 1.5.2: or take
-                   # any of the C++ runtime from the console)
+                   # any of the C++ runtime from the console; or link any of the SDK's raw system calls,
+                   # libc.a(syscalls.o): tools/check_syscalls.py); GPU=0: without the GPU renderer (1.5.4's player)
 make test          # host builds (ASan/UBSan) + tests/run-tests.sh (needs ffmpeg and python3-impacket)
-make dist          # build/dist/MediaPlayerClassicPS5-v1.5.4.elf, the release zip, mpc-ps5-v1.5.4-src.zip
+make dist          # build/dist/MediaPlayerClassicPS5-v1.6.elf, the release zip, mpc-ps5-v1.6-src.zip
+make bench         # 1.6: build/bench/mpc-gpu-bench <clip>: the CPU's time per picture, 1.5.4's renderer against the GPU's
 make send PS5_HOST=192.168.0.20
 ```
+
+1.6's GPU renderer needs, for the PS5 build, RADV built against ps5-native-runtime-mit's MIT headers in
+`../../rsdeps/radv-mit` (`SLANG_GPU_RADV_MIT=<dir>` for another place; `ps5/mitrt/platform/radv-shim/build-radv-mit.sh`
+builds it), and for the host build and its tests a Vulkan driver (Mesa's lavapipe: `mesa-vulkan-drivers`),
+`libvulkan-dev` and `glslang-tools` (glslangValidator 15.1, which also compiles the video shader for the PS5 build).
+`ps5/ps5-slang-gpu` is a vendored copy of the GPU library (its `tools/vendor.sh`; the build checks the copy against its
+`VENDOR.txt`), `ps5/mitrt` one of ps5-native-runtime-mit (only its platform layer is used). The host app uses the GPU
+in the tests only with `MPCPS5_HOST_GPU=1` (group 34; `tests/make_gpu_media.sh` makes its test patterns).
 
 The layout is the emulator ports': `eboot.bin` is the player, a native title (`player/` + the PS5 layer in
 `coreorbis/`, linked by `proto/native`'s tools); the payload is the installer and the helper, with the app
@@ -761,7 +846,9 @@ Source map:
 | `player/mpc_app.cpp` | the main window (CMainFrame): layout, painting, commands, input |
 | `player/mpc_player.cpp` | the playback engine: FFmpeg demux/decode threads, A/V clock, subtitles |
 | `player/mpc_vdec.cpp` | the PS5's video decoder (libSceVideodec2), after VLC for PS5's ps5vdec; `stubs/videodec2_stub.c` is its link stub |
-| `player/mpc_tonemap.cpp` | HDR10 / HLG tone mapping (BT.2390, Hable, Reinhard) |
+| `player/mpc_tonemap.cpp` | HDR10 / HLG tone mapping (BT.2390, Hable, Reinhard) on the CPU (the software renderer) |
+| `player/mpc_gpu.cpp` | 1.6: the video on the GPU: FFmpeg's and the console decoder's pictures to ps5-slang-gpu's video pass |
+| `ps5-slang-gpu/` | 1.6: the GPU renderer (MIT, vendored): Vulkan set-up and presentation, the video pass (`shaders/video.frag`), the surface over it |
 | `player/mpc_ui.cpp` | the window system: Windows 10's controls, dialogs, message boxes, the on-screen keyboard, the pad as mouse and keyboard |
 | `player/mpc_menu.cpp` | themed menus and their tracking |
 | `player/mpc_dialogs.cpp` | MPC-HC's dialogs (from mpc-hc.rc's templates) and the Open dialog |
@@ -777,7 +864,7 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
 - **MPC-HC** 1.7.13 -- the interface, its painting code, menus, dialog templates and resources (toolbar.svg,
   the logo, the icon, the status pictures); GPLv3; (C) 2002-2017 the MPC-HC Team (Authors.txt), Gabest.
   <https://github.com/mpc-hc/mpc-hc>
-- **FFmpeg** 7.1.1 -- the playback engine (LAV Filters' engine on Windows); built as GPLv3.
+- **FFmpeg** 7.1.5 -- the playback engine (LAV Filters' engine on Windows); built as GPLv3.
   <https://ffmpeg.org>
 - **dav1d** 1.5.1 -- AV1; BSD-2-Clause; VideoLAN.
 - **libsmb2** -- SMB2/3; LGPL-2.1; Ronnie Sahlberg. VLC reads SMB shares with it too.
@@ -807,12 +894,13 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
   played (the title's open fails with *This disc can't be read* instead of a crash).
 - **libbluray** 1.5.0 -- Blu-ray; LGPL-2.1-or-later; VideoLAN and the libbluray authors. No BD-J (Java), libxml2,
   fontconfig or FreeType; `tools/patches/libbluray-1.5.0-mpcps5.patch`: nothing is loaded at run time (no libaacs,
-  libbdplus, libmmbd or Java VM). **libudfread** 1.2.0 -- UDF; LGPL-2.1-or-later; VideoLAN;
+  libbdplus, libmmbd or Java VM), and no mount table is read (its getfsstat(2) lookup is left out: the player gives
+  libbluray a folder or its own disc reader). **libudfread** 1.2.0 -- UDF; LGPL-2.1-or-later; VideoLAN;
   `tools/patches/libudfread-1.2.0-mpcps5.patch`: `udfread_file_extent()` (a file's extents listed, so a file in many
   pieces is mapped once), at most 256 allocation extent descriptors followed for a file (one pointing at itself
   looped forever). All four static, from
   VideoLAN's release tarballs (SHA-256 in `tools/build-deps.sh`); FFmpeg's DVD-Video demuxer with
-  `tools/patches/ffmpeg-n7.1.1-dvdvideo-seek-after-end.patch` (a seek once the title's end was read).
+  `tools/patches/ffmpeg-n7.1.5-dvdvideo-seek-after-end.patch` (a seek once the title's end was read).
 - **Mbed TLS** 3.6.7 (Apache-2.0), **zlib**, **Mozilla's CA list** (MPL-2.0, via certifi).
 - **Monocypher** 4.0.2 -- Ed25519 for the release signatures; BSD-2-Clause or CC0; Loup Vaillant and contributors.
   <https://github.com/LoupVaillant/Monocypher>
@@ -820,4 +908,11 @@ The port is **GPLv3** (`LICENSE`), as MPC-HC.
 - **NanoSVG** (zlib licence), **stb_truetype / stb_image** (public domain / MIT; stb_truetype with two small fixes for
   damaged fonts, marked "Media Player Classic PS5" in the file).
 - **PS5SX2** -- the PS5 layer (video out, sound, pad, crash log, installer, helper, native app tooling); MIT.
+- 1.6, the GPU renderer: **ps5-slang-gpu** 1.1 (`ps5/ps5-slang-gpu`, MIT; github.com/MisterTemaki) -- the Vulkan
+  renderer and its video pass; with **glslang** 15.1.0 (BSD-3-Clause and others: `ps5-slang-gpu/third_party/glslang/LICENSE.txt`)
+  and **stb_image** 2.30 (public domain or MIT). **RADV** -- Mesa's Vulkan driver for AMD GPUs, as ported to the PS5
+  (PS5_Mesa by Mihawk, with PS5-ECAM 5.1.0's patches), built against MIT headers; MIT and the licences listed in
+  `ps5/third_party/radv/NOTICES.txt` (none GPL). **ps5-native-runtime-mit**'s platform layer (`ps5/mitrt`, MIT), with
+  LLVM compiler-rt 18.1.8's emutls.c and x86.c (Apache-2.0 WITH LLVM-exception). The video shader is our own; its
+  arithmetic is this player's tone mapping (above). VLC for PS5 showed that RADV on VideoOut plays 4K HDR smoothly.
 - **ps5-payload-dev SDK** -- John Tornblom.

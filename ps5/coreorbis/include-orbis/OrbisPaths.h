@@ -53,3 +53,5 @@ bool OrbisLogEnabled();
 void OrbisLogSync();
 // The open log's file descriptor, for the crash handler's signal-safe write(); -1 before it is open.
 int OrbisLogFd();
+// The crash handler's own copy of it, made while logging (its number never closed); -1 while no log is open.
+int OrbisCrashLogFd();

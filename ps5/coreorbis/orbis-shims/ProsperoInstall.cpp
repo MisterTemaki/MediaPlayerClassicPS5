@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -46,14 +47,16 @@ bool SameContent(const std::string& path, const unsigned char* data, size_t size
 	bool same = true;
 	while (same && off < size)
 	{
-		const size_t n = fread(buf.data(), 1, buf.size(), f);
+		// The file can grow after stat(): never compare beyond the embedded data's end.
+		const size_t n = fread(buf.data(), 1, std::min(buf.size(), size - off), f);
 		if (n == 0)
 			break;
 		same = memcmp(buf.data(), data + off, n) == 0;
 		off += n;
 	}
-	fclose(f);
-	return same && off == size;
+	const bool complete = same && off == size && fgetc(f) == EOF && !ferror(f);
+	const bool closed = fclose(f) == 0;
+	return complete && closed;
 }
 
 bool WriteAtomically(const std::string& path, const unsigned char* data, size_t size)
