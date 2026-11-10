@@ -155,7 +155,8 @@ class Static : public Control
 public:
 	std::string text;
 	unsigned flags = DT_LEFT | DT_WORDBREAK;
-	COLORREF color = sys::WindowText;
+	static constexpr COLORREF AutomaticColor = 0xffffffffu;
+	COLORREF color = AutomaticColor; // resolve default text at paint time after a theme change
 	bool bold = false;
 	const Image* icon = nullptr;
 	Static() { tab_stop = false; }

@@ -3085,5 +3085,49 @@ nosan "$T"
 fi
 
 echo
+if want 36; then
+echo "== 36. Dark mode: controller selection, Apply/OK/Cancel, restart, menus, video and subtitles"
+T=$(newroot t36)
+# The theme is the last Player control; the existing controls keep their original tab order.
+TO_THEME=""
+for frame in 20 24 28 32 36 40 44 48 52; do TO_THEME="$TO_THEME;$frame:key r1"; done
+S="10:cmd options$TO_THEME;56:key right;60:key r1;64:key r1;68:key r1;72:key enter;90:key escape;110:key menu;120:key escape;130:quit"
+rc=$(run "$T" "0:0" "$S" "58,80,100,115")
+expect "[ $rc = 0 ]" "controller-driven Apply exits normally"
+expect "$CHECK $T/dump/flip00058.ppm 960 600 240 240 240 2 >/dev/null" "choosing Dark waits for Apply"
+expect "$CHECK $T/dump/flip00080.ppm 960 600 32 32 32 2 >/dev/null" "Apply repaints the open Options dialog"
+expect "$CHECK $T/dump/flip00100.ppm 900 10 28 28 28 2 >/dev/null && $CHECK $T/dump/flip00100.ppm 900 1025 32 32 32 2 >/dev/null" "caption and toolbar use Dark"
+expect "$CHECK $T/dump/flip00115.ppm 30 584 40 40 40 2 >/dev/null" "File menu uses Dark"
+expect "grep -q '^DarkMode=1$' $T/root/mpc-hc.ini" "Apply persists Dark"
+nosan "$T"
+rc=$(run "$T" "0:0" "20:quit" "15")
+expect "[ $rc = 0 ] && grep -q '\[ui\] theme: Dark' $T/root/logs/boot.log && $CHECK $T/dump/flip00015.ppm 900 10 28 28 28 2 >/dev/null" "a new process restores Dark"
+# Cancel a pending change to Light.
+rc=$(run "$T" "0:0" "10:cmd options$TO_THEME;56:key left;65:key escape;90:quit" "80")
+expect "[ $rc = 0 ] && grep -q '^DarkMode=1$' $T/root/mpc-hc.ini && $CHECK $T/dump/flip00080.ppm 900 10 28 28 28 2 >/dev/null" "Cancel leaves the applied theme and saved preference intact"
+# OK applies Light and closes the sheet (one tab from Theme to OK).
+rc=$(run "$T" "0:0" "10:cmd options$TO_THEME;56:key left;60:key r1;65:key enter;90:quit" "80")
+expect "[ $rc = 0 ] && grep -q '^DarkMode=0$' $T/root/mpc-hc.ini && $CHECK $T/dump/flip00080.ppm 900 10 255 255 255 2 >/dev/null" "OK restores Light and saves it"
+nosan "$T"
+# A malformed new setting must not affect old preferences or prevent startup.
+printf '[Settings]\nDarkMode=1junk\nVolume=73\n' >"$T/root/mpc-hc.ini"
+rc=$(run "$T" "0:0" "20:quit" "15")
+expect "[ $rc = 0 ] && grep -q '\[ui\] theme: Light' $T/root/logs/boot.log && grep -q '^Volume=73$' $T/root/mpc-hc.ini" "invalid theme falls back to Light and preserves volume"
+for renderer in 0 1; do
+	T=$(newroot t36video-$renderer)
+	cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
+	printf '1\n00:00:00,500 --> 00:00:05,000\nTheme-independent subtitles\n' >"$T/root/media/movie.srt"
+	printf '[Settings]\nDarkMode=1\n' >"$T/root/mpc-hc.ini"
+	rc=$(MPCPS5_HOST_GPU=$renderer run "$T" "0:0" "100:state;110:quit" "90" "$T/root/media/movie.mp4")
+	expect "[ $rc = 0 ] && $CHECK $T/dump/flip00090.ppm 960 400 red >/dev/null" "renderer $renderer: the video keeps its original red color"
+	expect "$REGION $T/dump/flip00090.ppm 500 700 1420 960 255 255 255 30 2000 >/dev/null" "renderer $renderer: subtitles keep their white text"
+	expect "$CHECK $T/dump/flip00090.ppm 900 1025 32 32 32 2 >/dev/null" "renderer $renderer: dark controls over video"
+	if [ "$renderer" = 1 ]; then
+		expect "grep -q '\[gpu\] video: drawn by the GPU' $T/root/logs/boot.log" "GPU renderer really initialized"
+	fi
+	nosan "$T"
+done
+fi
+
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]

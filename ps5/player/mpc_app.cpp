@@ -727,18 +727,18 @@ void MainFrame::PaintToolBar(CDC& dc, const CRect& r)
 		const bool pressed = en && tb_pressed_ == i;
 		if (pressed || (checked && hot))
 		{
-			dc.FillSolidRect(b, RGB(204, 228, 247));
-			dc.FrameRect(b, RGB(153, 209, 255));
+			dc.FillSolidRect(b, sys::ButtonPushedFace);
+			dc.FrameRect(b, sys::MenuBarPushedBorder);
 		}
 		else if (checked)
 		{
-			dc.FillSolidRect(b, RGB(204, 232, 255));
-			dc.FrameRect(b, RGB(153, 209, 255));
+			dc.FillSolidRect(b, sys::MenuBarPushed);
+			dc.FrameRect(b, sys::MenuBarPushedBorder);
 		}
 		else if (hot)
 		{
-			dc.FillSolidRect(b, RGB(229, 243, 255));
-			dc.FrameRect(b, RGB(204, 232, 255));
+			dc.FillSolidRect(b, sys::MenuBarHot);
+			dc.FrameRect(b, sys::MenuBarPushed);
 		}
 		const int image = i == 12 ? (s_.mute ? 13 : 12) : i;
 		const Image& sheet = en ? normal : disabled;
@@ -1010,10 +1010,10 @@ void MainFrame::PaintPlaylist(CDC& dc, const CRect& r)
 		CRect item(lr.left + 1, y, lr.right - 1, y + rh);
 		if (i == pl_sel_ && pl_focus_)
 		{
-			dc.FillSolidRect(item, RGB(204, 218, 241)); // 0xf1dacc
-			dc.FrameRect(item, RGB(49, 106, 197)); // 0xc56a31
+			dc.FillSolidRect(item, sys::PlaylistSelected); // 0xf1dacc
+			dc.FrameRect(item, sys::PlaylistSelectedBorder); // 0xc56a31
 		}
-		const COLORREF tc = i == pl_cur_ ? RGB(255, 0, 0) : RGB(0, 0, 0);
+		const COLORREF tc = i == pl_cur_ ? sys::PlaylistCurrent : sys::WindowText;
 		std::string time;
 		if (i < int(pl_durations_.size()) && pl_durations_[i] > 0)
 			time = FormatTime(pl_durations_[i]);
@@ -3398,6 +3398,8 @@ void MainFrame::OnEvent(const InputEvent& ev)
 int MainFrame::Run(const std::string& first)
 {
 	s_.Load();
+	sys::SetDarkTheme(s_.dark_mode);
+	OrbisLog("[ui] theme: %s", s_.dark_mode ? "Dark" : "Light");
 	g_dpi = s_.dpi;
 	input_.SetSpeed(s_.cursor_speed);
 	input_.SetTouchpad(s_.touchpad_pointer);

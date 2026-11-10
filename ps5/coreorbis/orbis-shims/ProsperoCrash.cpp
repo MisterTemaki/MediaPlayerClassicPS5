@@ -339,12 +339,12 @@ void Handler(int sig, siginfo_t* info, void* ctx)
 	EmitLine("");
 	End(sig);
 }
-constexpr size_t kAltStack = 64 * 1024;
 } // namespace
 
 void* ArmThread()
 {
 #if !defined(__linux__)
+	constexpr size_t kAltStack = 64 * 1024;
 	void* mem = malloc(kAltStack);
 	if (!mem)
 		return nullptr;

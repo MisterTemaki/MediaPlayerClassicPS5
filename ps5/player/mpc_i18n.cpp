@@ -29,6 +29,9 @@ struct Entry
 };
 
 const Entry kTable[] = {
+	{"Theme", "Tema", "Tema", "Thème", "Design"},
+	{"Light", "Claro", "Claro", "Clair", "Hell"},
+	{"Dark", "Oscuro", "Escuro", "Sombre", "Dunkel"},
 	{"Decoding at full quality again.",
 		"Decodificación de nuevo a calidad completa.",
 		"Decodificação de novo em qualidade total.",
@@ -794,6 +797,19 @@ const Entry kTable[] = {
 		"Carregar automaticamente as legendas ao lado do vídeo",
 		"Charger automatiquement les sous-titres à côté de la vidéo", "Untertitel neben dem Video automatisch laden"},
 	// Output
+	{"HDR output / SDR tone mapping", "Salida HDR / mapeo de tonos SDR", "Saída HDR / mapeamento de tons SDR",
+		"Sortie HDR / mappage des tons SDR", "HDR-Ausgabe / SDR-Tonemapping"},
+	{"HDR10 output on compatible TVs (next start)", "Salida HDR10 en televisores compatibles (próximo inicio)",
+		"Saída HDR10 em TVs compatíveis (próxima inicialização)",
+		"Sortie HDR10 sur les téléviseurs compatibles (au prochain démarrage)",
+		"HDR10-Ausgabe auf kompatiblen Fernsehern (nächster Start)"},
+	{"Retry GPU next start", "Reintentar GPU al iniciar", "Tentar GPU ao iniciar",
+		"Réessayer GPU au lancement", "GPU beim Start wiederholen"},
+	{"After a GPU failure, software rendering is kept until you request a retry.",
+		"Tras fallar la GPU, el modo por software sigue activo hasta que solicite reintentar.",
+		"Após falha da GPU, o modo software continua até você solicitar nova tentativa.",
+		"Après un échec du GPU, le rendu logiciel reste actif jusqu'à votre nouvel essai.",
+		"Nach einem GPU-Fehler bleibt Software aktiv, bis Sie einen neuen Versuch anfordern."},
 	{"DirectShow Video", "Vídeo DirectShow", "Vídeo DirectShow", "Vidéo DirectShow", "DirectShow-Video"},
 	{"GPU renderer (Vulkan: scaling, colour, HDR; at the next start)",
 		"Renderizador por GPU (Vulkan: escalado, color, HDR; al próximo inicio)",

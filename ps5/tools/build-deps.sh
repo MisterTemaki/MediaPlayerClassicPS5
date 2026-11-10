@@ -47,7 +47,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PS5_PAYLOAD_SDK=${PS5_PAYLOAD_SDK:-/opt/ps5-payload-sdk}
 WHAT=${1:-all}
-DEPS=$PWD/build/deps
+# FFmpeg's generated makefiles need a dependency directory without spaces. A separate cache also
+# lets checkouts share compiled dependencies without copying them into the source tree.
+DEPS=${MPCPS5_DEPS_DIR:-$PWD/build/deps}
 SRC=$DEPS/src
 JOBS=${JOBS:-$(nproc)}
 FFMPEG_TAG=n7.1.5
@@ -166,7 +168,11 @@ build() { # ps5|host
 	rm -f "$P"/lib/libmbed*.a
 	$AR rcs "$P/lib/libmbedtls.a" "$B"/m/ssl*.o
 	$AR rcs "$P/lib/libmbedx509.a" "$B"/m/x509*.o "$B"/m/pkcs7*.o
-	ls "$B"/m/*.o | grep -v "/ssl\|/x509\|/pkcs7" | xargs $AR rcs "$P/lib/libmbedcrypto.a"
+	local crypto=() object
+	for object in "$B"/m/*.o; do
+		case "$object" in */ssl*.o|*/x509*.o|*/pkcs7*.o) ;; *) crypto+=("$object") ;; esac
+	done
+	$AR rcs "$P/lib/libmbedcrypto.a" "${crypto[@]}"
 	rm -rf "$P/include/mbedtls" "$P/include/psa"
 	cp -r third_party/mbedtls/include/mbedtls third_party/mbedtls/include/psa "$P/include/"
 	# the user config, appended to the installed mbedtls_config.h (FFmpeg includes it without the define)

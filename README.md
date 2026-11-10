@@ -15,6 +15,12 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
+**1.6.1: dark mode.** Choose **View > Options > Player > Theme > Dark**, then **Apply** or **OK**.
+The interface changes immediately and remembers the selection after restart. **Light** remains the default for
+existing settings. The theme covers the window, toolbar, menus, playlist, file browser and dialogs; video,
+subtitles and custom subtitle colors keep their original colors. See [dark mode notes](docs/DARK-MODE.md)
+and the [1.6.1 release notes](docs/RELEASE-NOTES-v1.6.1.md).
+
 > **Status (1.6.0):** the shared player was run on PS5 13.60 with kstuff: RADV opened on the first attempt,
 > and H.264 and 4K HEVC Main10 used the console decoder. The 4K test decoded 1,797 frames with no decoder errors,
 > with seven displayed frames dropped; it included pauses and controls, so it was not a continuous benchmark.

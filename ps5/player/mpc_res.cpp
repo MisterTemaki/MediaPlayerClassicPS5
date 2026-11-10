@@ -66,15 +66,17 @@ Image Load(const unsigned char* b, const unsigned char* e)
 struct ToolbarCache
 {
 	int px = 0;
+	bool dark = false;
 	Image normal, disabled;
 };
 ToolbarCache g_toolbar;
 
 void MakeToolbar(int px)
 {
-	if (g_toolbar.px == px)
+	if (g_toolbar.px == px && g_toolbar.dark == sys::IsDarkTheme())
 		return;
 	g_toolbar.px = px;
+	g_toolbar.dark = sys::IsDarkTheme();
 	// SVGImage::Load: nsvgParse at 96 dpi, rasterized at scale
 	std::string text(reinterpret_cast<const char*>(mpc_res_toolbar_svg_begin),
 		size_t(mpc_res_toolbar_svg_end - mpc_res_toolbar_svg_begin));
@@ -93,8 +95,41 @@ void MakeToolbar(int px)
 		nsvgDelete(svg);
 		img.FromRGBA(rgba.data(), w, h);
 	}
+	if (g_toolbar.dark && !img.IsNull())
+	{
+		// Lift neutral dark glyphs while preserving colored icons and premultiplied alpha.
+		Bitmap bitmap = img.Bmp();
+		for (int y = 0; y < bitmap.h; ++y)
+			for (int x = 0; x < bitmap.w; ++x)
+			{
+				uint32_t& pixel = bitmap.px[size_t(y) * bitmap.pitch + x];
+				const unsigned alpha = pixel >> 24;
+				if (!alpha)
+					continue;
+				const unsigned r = (pixel & 255) * 255 / alpha;
+				const unsigned g = ((pixel >> 8) & 255) * 255 / alpha;
+				const unsigned b = ((pixel >> 16) & 255) * 255 / alpha;
+				const unsigned high = std::max({r, g, b}), low = std::min({r, g, b});
+				if (high - low < 16 && high < 150)
+				{
+					const unsigned value = (224 - high / 3) * alpha / 255;
+					pixel = (alpha << 24) | value | (value << 8) | (value << 16);
+				}
+			}
+	}
 	g_toolbar.normal = img;
 	g_toolbar.disabled = img.Grayed();
+	if (g_toolbar.dark)
+	{
+		Bitmap bitmap = g_toolbar.disabled.Bmp();
+		for (int y = 0; y < bitmap.h; ++y)
+			for (int x = 0; x < bitmap.w; ++x)
+			{
+				uint32_t& pixel = bitmap.px[size_t(y) * bitmap.pitch + x];
+				const unsigned alpha = pixel >> 24, value = 110 * alpha / 255;
+				pixel = (alpha << 24) | value | (value << 8) | (value << 16);
+			}
+	}
 }
 } // namespace
 

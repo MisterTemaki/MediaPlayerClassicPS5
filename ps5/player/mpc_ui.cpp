@@ -522,7 +522,7 @@ void DrawThemedButton(CDC& dc, const CRect& r, bool hot, bool pressed, bool focu
 
 void DrawCaptionButton(CDC& dc, const CRect& r, int glyph, bool hot, bool pressed, bool active)
 {
-	COLORREF bg = sys::Caption, fg = active ? RGB(0, 0, 0) : sys::CaptionInactiveText;
+	COLORREF bg = sys::Caption, fg = active ? sys::CaptionText : sys::CaptionInactiveText;
 	if (glyph == 3 && (hot || pressed))
 	{
 		bg = pressed ? sys::ClosePushed : sys::CloseHot;
@@ -584,9 +584,9 @@ void DrawCaptionButton(CDC& dc, const CRect& r, int glyph, bool hot, bool presse
 void DrawScrollBar(CDC& dc, const CRect& r, int total, int visible, int top)
 {
 	// Windows 10's scroll bar: a light track, a grey thumb, small arrows at the ends
-	dc.FillSolidRect(r, RGB(240, 240, 240));
+	dc.FillSolidRect(r, sys::BtnFace);
 	const int w = r.Width();
-	const COLORREF arrow = RGB(96, 96, 96);
+	const COLORREF arrow = sys::ScrollArrow;
 	DrawArrowGlyph(dc, r.CenterPoint().x, r.top + w / 2, std::max(3, w / 5), 1, arrow);
 	DrawArrowGlyph(dc, r.CenterPoint().x, r.bottom - w / 2, std::max(3, w / 5), 0, arrow);
 	if (total <= visible || total <= 0)
@@ -594,7 +594,7 @@ void DrawScrollBar(CDC& dc, const CRect& r, int total, int visible, int top)
 	const int track = r.Height() - 2 * w;
 	const int th = std::max(ScaleY(17), track * visible / total);
 	const int y = r.top + w + (track - th) * std::max(0, std::min(top, total - visible)) / std::max(1, total - visible);
-	dc.FillSolidRect(CRect(r.left + ScaleX(2), y, r.right - ScaleX(2), y + th), RGB(205, 205, 205));
+	dc.FillSolidRect(CRect(r.left + ScaleX(2), y, r.right - ScaleX(2), y + th), sys::ScrollThumb);
 }
 
 // ===========================================================================================================
@@ -607,7 +607,8 @@ void Static::Paint(CDC& dc, bool, bool)
 		dc.AlphaBlit(r.left, r.top, icon->Bmp());
 		return;
 	}
-	DrawText(dc, bold ? UiBoldFont() : UiFont(), text, r, flags, enabled ? color : sys::GrayText);
+	const COLORREF foreground = color == AutomaticColor ? COLORREF(sys::WindowText) : color;
+	DrawText(dc, bold ? UiBoldFont() : UiFont(), text, r, flags, enabled ? foreground : sys::GrayText);
 }
 
 void Button::Paint(CDC& dc, bool focused, bool hot)
@@ -624,8 +625,8 @@ void CheckBox::Paint(CDC& dc, bool focused, bool hot)
 	const bool multiline = rect.Height() > UiFont().Height() * 3 / 2;
 	const int y = multiline ? rect.top + (UiFont().Height() - bs) / 2 : rect.top + (rect.Height() - bs) / 2;
 	CRect box(rect.left, y, rect.left + bs, y + bs);
-	const COLORREF border = !enabled ? RGB(204, 204, 204) : hot ? sys::ButtonHotBorder : RGB(51, 51, 51);
-	const COLORREF mark = !enabled ? RGB(204, 204, 204) : hot ? sys::ButtonHotBorder : RGB(51, 51, 51);
+	const COLORREF border = !enabled ? sys::DisabledMark : hot ? sys::ButtonHotBorder : sys::ControlMark;
+	const COLORREF mark = !enabled ? sys::DisabledMark : hot ? sys::ButtonHotBorder : sys::ControlMark;
 	if (radio)
 	{
 		// a circle
@@ -635,7 +636,7 @@ void CheckBox::Paint(CDC& dc, bool focused, bool hot)
 			{
 				const double d = std::sqrt((xx - cx) * (xx - cx) + (yy - cy) * (yy - cy));
 				if (d <= rr - 1.0)
-					dc.SetPixel(xx, yy, RGB(255, 255, 255));
+					dc.SetPixel(xx, yy, sys::Window);
 				else if (d <= rr)
 					dc.SetPixel(xx, yy, border);
 				if (checked && d <= rr * 0.42)
@@ -644,7 +645,7 @@ void CheckBox::Paint(CDC& dc, bool focused, bool hot)
 	}
 	else
 	{
-		dc.FillSolidRect(box, RGB(255, 255, 255));
+		dc.FillSolidRect(box, sys::Window);
 		const int t = std::max(1, ScaleFloorX(1));
 		CRect b = box;
 		for (int i = 0; i < t; i++)
@@ -693,7 +694,7 @@ void GroupBox::Paint(CDC& dc, bool, bool)
 {
 	const Font& f = UiFont();
 	const int ty = rect.top + f.Height() / 2;
-	const COLORREF line = RGB(220, 220, 220);
+	const COLORREF line = sys::GroupLine;
 	int tw = text.empty() ? 0 : f.Measure(StripPrefix(text)) + ScaleX(4);
 	int tx = rect.left + ScaleX(6);
 	if (title_check)
@@ -711,14 +712,14 @@ void GroupBox::Paint(CDC& dc, bool, bool)
 	if (!text.empty())
 	{
 		CRect r(tx + ScaleX(2), rect.top, tx + tw, rect.top + f.Height());
-		DrawText(dc, f, text, r, DT_LEFT | DT_SINGLELINE | DT_HIDEPREFIX, RGB(0, 70, 213));
+		DrawText(dc, f, text, r, DT_LEFT | DT_SINGLELINE | DT_HIDEPREFIX, sys::GroupText);
 	}
 }
 
 void Edit::Paint(CDC& dc, bool focused, bool hot)
 {
-	const COLORREF border = !enabled ? RGB(204, 204, 204) : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder;
-	dc.FillSolidRect(rect, read_only || !enabled ? sys::BtnFace : RGB(255, 255, 255));
+	const COLORREF border = !enabled ? sys::DisabledMark : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder;
+	dc.FillSolidRect(rect, read_only || !enabled ? sys::BtnFace : sys::Window);
 	dc.FrameRect(rect, border);
 	CRect r = rect;
 	r.DeflateRect(ScaleX(4), 0);
@@ -746,7 +747,7 @@ void Edit::Paint(CDC& dc, bool focused, bool hot)
 		{
 			const int cx = r.left + f.Measure(shown) + 1;
 			if (int(NowSeconds() * 2) % 2 == 0)
-				dc.VLine(cx, r.top + ScaleY(4), r.bottom - ScaleY(4), RGB(0, 0, 0));
+				dc.VLine(cx, r.top + ScaleY(4), r.bottom - ScaleY(4), sys::WindowText);
 		}
 	}
 }
@@ -771,15 +772,15 @@ void ComboBox::Paint(CDC& dc, bool focused, bool hot)
 	const int bw = ScaleX(17);
 	if (editable)
 	{
-		dc.FillSolidRect(rect, RGB(255, 255, 255));
-		dc.FrameRect(rect, !enabled ? RGB(204, 204, 204) : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder);
+		dc.FillSolidRect(rect, sys::Window);
+		dc.FrameRect(rect, !enabled ? sys::DisabledMark : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder);
 		CRect r(rect.left + ScaleX(4), rect.top, rect.right - bw, rect.bottom);
 		DrawText(dc, UiFont(), text, r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
 			enabled ? sys::WindowText : sys::GrayText);
 		CRect b(rect.right - bw, rect.top + 1, rect.right - 1, rect.bottom - 1);
 		if (hot)
 			dc.FillSolidRect(b, sys::ButtonHotFace);
-		DrawChevron(dc, b.CenterPoint().x, b.CenterPoint().y, ScaleX(4), true, RGB(96, 96, 96));
+		DrawChevron(dc, b.CenterPoint().x, b.CenterPoint().y, ScaleX(4), true, sys::ScrollArrow);
 		return;
 	}
 	DrawThemedButton(dc, rect, hot, false, false, false, enabled);
@@ -794,7 +795,7 @@ void ComboBox::Paint(CDC& dc, bool focused, bool hot)
 	else
 		DrawText(dc, UiFont(), t, r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
 			enabled ? sys::WindowText : sys::GrayText);
-	DrawChevron(dc, rect.right - bw / 2 - ScaleX(2), rect.CenterPoint().y, ScaleX(4), true, RGB(96, 96, 96));
+	DrawChevron(dc, rect.right - bw / 2 - ScaleX(2), rect.CenterPoint().y, ScaleX(4), true, sys::ScrollArrow);
 }
 
 void ComboBox::Activate()
@@ -870,15 +871,15 @@ void Slider::Paint(CDC& dc, bool focused, bool hot)
 	const int cy = rect.CenterPoint().y;
 	const int pad = ScaleX(6);
 	CRect track(rect.left + pad, cy - ScaleY(2), rect.right - pad, cy + ScaleY(2));
-	dc.FillSolidRect(track, RGB(231, 234, 234));
-	dc.FrameRect(track, RGB(214, 214, 214));
+	dc.FillSolidRect(track, sys::SliderTrack);
+	dc.FrameRect(track, sys::SliderBorder);
 	const int span = std::max(1, max - min);
 	const int x = track.left + (track.Width() * (pos - min)) / span;
 	const int tw = ScaleX(11) / 2, th = ScaleY(21) / 2;
 	CRect thumb(x - tw / 1, cy - th, x + tw / 1 + 1, cy + th);
 	thumb.left = x - ScaleX(5);
 	thumb.right = x + ScaleX(6);
-	dc.FillSolidRect(thumb, !enabled ? RGB(204, 204, 204) : hot ? RGB(23, 23, 23) : sys::Highlight);
+	dc.FillSolidRect(thumb, !enabled ? sys::DisabledMark : hot ? sys::SliderHot : sys::Highlight);
 	if (focused)
 	{
 		CRect f = rect;
@@ -952,8 +953,8 @@ void ListView::EnsureVisible()
 
 void ListView::Paint(CDC& dc, bool focused, bool hot)
 {
-	dc.FillSolidRect(rect, RGB(255, 255, 255));
-	dc.FrameRect(rect, RGB(130, 135, 144));
+	dc.FillSolidRect(rect, sys::Window);
+	dc.FrameRect(rect, sys::ListBorder);
 	const CRect old = dc.GetClip();
 	CRect inner = rect;
 	inner.DeflateRect(1, 1);
@@ -975,11 +976,11 @@ void ListView::Paint(CDC& dc, bool focused, bool hot)
 			CRect tr = hr;
 			tr.DeflateRect(ScaleX(6), 0);
 			DrawText(dc, f, c.title, tr, (c.right ? DT_RIGHT : DT_LEFT) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
-				RGB(76, 96, 122));
-			dc.VLine(hr.right - 1, hr.top, hr.bottom, RGB(229, 229, 229));
+				sys::HeaderText);
+			dc.VLine(hr.right - 1, hr.top, hr.bottom, sys::GridLine);
 			x += c.width;
 		}
-		dc.HLine(inner.left, right, y + hh - 1, RGB(229, 229, 229));
+		dc.HLine(inner.left, right, y + hh - 1, sys::GridLine);
 		y += hh;
 	}
 	const int rh = RowHeight();
@@ -989,8 +990,8 @@ void ListView::Paint(CDC& dc, bool focused, bool hot)
 		CRect rr(inner.left, y, right, y + rh);
 		if (i == sel)
 		{
-			dc.FillSolidRect(rr, focused ? sys::ListSelected : RGB(217, 217, 217));
-			dc.FrameRect(rr, focused ? sys::ListSelectedBorder : RGB(217, 217, 217));
+			dc.FillSolidRect(rr, focused ? sys::ListSelected : sys::UnfocusedSelection);
+			dc.FrameRect(rr, focused ? sys::ListSelectedBorder : sys::UnfocusedSelection);
 		}
 		int x = inner.left;
 		for (size_t c = 0; c < columns.size() && c < rows[i].size(); c++)
@@ -1003,7 +1004,7 @@ void ListView::Paint(CDC& dc, bool focused, bool hot)
 			}
 			DrawText(dc, f, rows[i][c], cr,
 				(columns[c].right ? DT_RIGHT : DT_LEFT) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
-				c == 0 ? sys::WindowText : RGB(109, 109, 109));
+				c == 0 ? sys::WindowText : sys::SecondaryText);
 			x += columns[c].width;
 		}
 		y += rh;
@@ -1081,8 +1082,8 @@ int TreeView::RowHeight() const
 
 void TreeView::Paint(CDC& dc, bool focused, bool)
 {
-	dc.FillSolidRect(rect, RGB(255, 255, 255));
-	dc.FrameRect(rect, RGB(130, 135, 144));
+	dc.FillSolidRect(rect, sys::Window);
+	dc.FrameRect(rect, sys::ListBorder);
 	const CRect old = dc.GetClip();
 	CRect inner = rect;
 	inner.DeflateRect(1, 1);
@@ -1097,8 +1098,8 @@ void TreeView::Paint(CDC& dc, bool focused, bool)
 		CRect rr(inner.left + ScaleX(2), y, inner.right - ScaleX(2), y + rh);
 		if (i == sel && !it.header)
 		{
-			dc.FillSolidRect(rr, focused ? sys::ListSelected : RGB(217, 217, 217));
-			dc.FrameRect(rr, focused ? sys::ListSelectedBorder : RGB(217, 217, 217));
+			dc.FillSolidRect(rr, focused ? sys::ListSelected : sys::UnfocusedSelection);
+			dc.FrameRect(rr, focused ? sys::ListSelectedBorder : sys::UnfocusedSelection);
 		}
 		int x = rr.left + ScaleX(6) + it.level * ScaleX(16);
 		if (it.icon)
@@ -1108,7 +1109,7 @@ void TreeView::Paint(CDC& dc, bool focused, bool)
 		}
 		CRect tr(x, y, rr.right, y + rh);
 		DrawText(dc, it.header ? UiBoldFont() : UiFont(), it.text, tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
-			it.header ? RGB(76, 96, 122) : sys::WindowText);
+			it.header ? sys::HeaderText : sys::WindowText);
 		y += rh;
 	}
 	dc.SetClip(old);
@@ -1171,23 +1172,23 @@ void TabControl::Paint(CDC& dc, bool focused, bool)
 {
 	const int h = ScaleY(21);
 	CRect page(rect.left, rect.top + h - 1, rect.right, rect.bottom);
-	dc.FillSolidRect(page, RGB(255, 255, 255));
-	dc.FrameRect(page, RGB(217, 217, 217));
+	dc.FillSolidRect(page, sys::Window);
+	dc.FrameRect(page, sys::TabBorder);
 	for (int i = 0; i < int(tabs.size()); i++)
 	{
 		CRect t = TabRect(i);
 		if (i == sel)
 		{
 			t.InflateRect(ScaleX(2), ScaleY(2), ScaleX(2), 0);
-			dc.FillSolidRect(t, RGB(255, 255, 255));
-			dc.HLine(t.left, t.right, t.top, RGB(217, 217, 217));
-			dc.VLine(t.left, t.top, t.bottom, RGB(217, 217, 217));
-			dc.VLine(t.right - 1, t.top, t.bottom, RGB(217, 217, 217));
+			dc.FillSolidRect(t, sys::Window);
+			dc.HLine(t.left, t.right, t.top, sys::TabBorder);
+			dc.VLine(t.left, t.top, t.bottom, sys::TabBorder);
+			dc.VLine(t.right - 1, t.top, t.bottom, sys::TabBorder);
 		}
 		else
 		{
-			dc.FillSolidRect(t, RGB(240, 240, 240));
-			dc.FrameRect(t, RGB(217, 217, 217));
+			dc.FillSolidRect(t, sys::BtnFace);
+			dc.FrameRect(t, sys::TabBorder);
 		}
 		CRect tr = t;
 		DrawText(dc, UiFont(), tabs[i], tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX, sys::WindowText);
@@ -1236,7 +1237,7 @@ int TextView::VisibleLines() const
 
 void TextView::Paint(CDC& dc, bool focused, bool)
 {
-	dc.FillSolidRect(rect, RGB(255, 255, 255));
+	dc.FillSolidRect(rect, sys::Window);
 	dc.FrameRect(rect, focused ? sys::EditBorderFocus : sys::EditBorder);
 	const Font& f = UiFont();
 	const CRect old = dc.GetClip();
@@ -1282,8 +1283,8 @@ void TextView::OnWheel(int delta)
 void NumberBox::Paint(CDC& dc, bool focused, bool hot)
 {
 	const int bw = ScaleX(17);
-	dc.FillSolidRect(rect, enabled ? RGB(255, 255, 255) : sys::BtnFace);
-	dc.FrameRect(rect, !enabled ? RGB(204, 204, 204) : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder);
+	dc.FillSolidRect(rect, enabled ? sys::Window : sys::BtnFace);
+	dc.FrameRect(rect, !enabled ? sys::DisabledMark : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder);
 	CRect r(rect.left + ScaleX(4), rect.top, rect.right - bw - ScaleX(4), rect.bottom);
 	DrawText(dc, UiFont(), std::to_string(value) + suffix, r, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
 		enabled ? sys::WindowText : sys::GrayText);
@@ -1294,8 +1295,8 @@ void NumberBox::Paint(CDC& dc, bool focused, bool hot)
 	dc.FillSolidRect(dn, sys::ButtonFace);
 	dc.FrameRect(up, sys::ButtonBorder);
 	dc.FrameRect(dn, sys::ButtonBorder);
-	DrawArrowGlyph(dc, up.CenterPoint().x, up.CenterPoint().y, std::max(2, up.Height() / 4), 1, RGB(96, 96, 96));
-	DrawArrowGlyph(dc, dn.CenterPoint().x, dn.CenterPoint().y, std::max(2, dn.Height() / 4), 0, RGB(96, 96, 96));
+	DrawArrowGlyph(dc, up.CenterPoint().x, up.CenterPoint().y, std::max(2, up.Height() / 4), 1, sys::ScrollArrow);
+	DrawArrowGlyph(dc, dn.CenterPoint().x, dn.CenterPoint().y, std::max(2, dn.Height() / 4), 0, sys::ScrollArrow);
 }
 
 bool NumberBox::OnKey(Key k)
@@ -1417,7 +1418,7 @@ void Dialog::Paint(CDC& dc)
 		dc.BlendRect(CRect(rect.right, rect.top, s.right, rect.bottom), RGB(0, 0, 0), 4);
 	}
 	dc.FillSolidRect(rect, sys::BtnFace);
-	dc.FrameRect(rect, RGB(24, 131, 215));
+	dc.FrameRect(rect, sys::DialogFrame);
 	CRect cap(rect.left + 1, rect.top + 1, rect.right - 1, rect.top + CaptionHeight());
 	dc.FillSolidRect(cap, sys::Caption);
 	CRect tr(cap.left + ScaleX(10), cap.top, cap.right - ScaleX(46), cap.bottom);
@@ -1797,7 +1798,7 @@ public:
 	bool Covers(int x, int y) const override { return r.PtInRect(x, y); }
 	void Paint(CDC& dc) override
 	{
-		dc.FillSolidRect(r, RGB(255, 255, 255));
+		dc.FillSolidRect(r, sys::Window);
 		dc.FrameRect(r, RGB(100, 100, 100));
 		int y = r.top + 1;
 		for (int i = top; i < int(items.size()) && i < top + vis; i++)
@@ -1941,7 +1942,7 @@ public:
 	{
 		const CRect c = Client();
 		const int strip = ScaleY(42);
-		dc.FillSolidRect(CRect(c.left, c.top, c.right, c.bottom - strip), RGB(255, 255, 255));
+		dc.FillSolidRect(CRect(c.left, c.top, c.right, c.bottom - strip), sys::Window);
 		int x = c.left + ScaleX(26);
 		if (icon)
 		{
@@ -1950,7 +1951,7 @@ public:
 			const char* glyph = icon == 1 ? "i" : icon == 2 ? "!" : icon == 3 ? "x" : "?";
 			Font& gf = FontOfSize(ScaleY(icon == 2 ? 18 : 20), true);
 			CRect gr(x, c.top + ScaleY(26) + (icon == 2 ? ScaleY(5) : 0), x + ic.Width(), c.top + ScaleY(26) + ic.Height());
-			DrawText(dc, gf, glyph, gr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, icon == 2 ? RGB(0, 0, 0) : RGB(255, 255, 255));
+			DrawText(dc, gf, glyph, gr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, icon == 2 ? RGB(0, 0, 0) : sys::HighlightText);
 			x += ic.Width() + ScaleX(12);
 		}
 		int y = c.top + ScaleY(26) + (icon ? (ScaleY(32) - UiFont().Height()) / 2 : 0);
@@ -2129,7 +2130,7 @@ public:
 		dc.FillSolidRect(c, RGB(31, 31, 31));
 		// the text being typed, in an edit box above the keys
 		CRect e(c.left + ScaleX(14), c.top + ScaleY(14), c.right - ScaleX(14), c.top + ScaleY(54));
-		dc.FillSolidRect(e, RGB(255, 255, 255));
+		dc.FillSolidRect(e, sys::Window);
 		dc.FrameRect(e, sys::EditBorderFocus);
 		const Font& f = FontOfSize(ScaleY(16));
 		std::string shown = password ? std::string(text.size(), '*') : text;
@@ -2140,11 +2141,11 @@ public:
 		tr.DeflateRect(ScaleX(8), 0);
 		while (!shown.empty() && f.Measure(shown) > tr.Width() - ScaleX(4))
 			shown.erase(0, 1);
-		DrawText(dc, f, shown, tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, RGB(0, 0, 0));
+		DrawText(dc, f, shown, tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, sys::WindowText);
 		if (int(NowSeconds() * 2) % 2 == 0)
 		{
 			const int cx = tr.left + f.Measure(shown) + 1;
-			dc.VLine(cx, e.top + ScaleY(8), e.bottom - ScaleY(8), RGB(0, 0, 0));
+			dc.VLine(cx, e.top + ScaleY(8), e.bottom - ScaleY(8), sys::WindowText);
 		}
 		const Font& kf = FontOfSize(ScaleY(15));
 		for (int r = 0; r < int(rows.size()); r++)
@@ -2154,12 +2155,12 @@ public:
 				const CRect kr = KeyRect(r, k);
 				const bool sel = r == row && k == col;
 				const bool on = (key.action == "shift" && shift) || (key.action == "caps" && caps);
-				dc.FillSolidRect(kr, sel ? RGB(0, 120, 215) : on ? RGB(70, 70, 70) : RGB(51, 51, 51));
+				dc.FillSolidRect(kr, sel ? sys::Highlight : on ? RGB(70, 70, 70) : RGB(51, 51, 51));
 				if (sel)
-					dc.FrameRect(kr, RGB(255, 255, 255));
+					dc.FrameRect(kr, sys::HighlightText);
 				CRect lr = kr;
 				const std::string label = key.action.empty() ? (Upper() ? key.shifted : key.label) : T(key.label);
-				DrawText(dc, kf, label, lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, RGB(255, 255, 255));
+				DrawText(dc, kf, label, lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, sys::HighlightText);
 			}
 		CRect hint(c.left + ScaleX(14), c.bottom - ScaleY(30), c.right - ScaleX(14), c.bottom - ScaleY(6));
 		DrawText(dc, UiFont(), T("Cross: type   Square: backspace   Triangle: space   L2/R2: shift   Options: done   Circle: cancel"),

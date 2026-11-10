@@ -776,9 +776,9 @@ public:
 	{
 		const CRect c = Client();
 		// the command bar band under the address bar, the bottom panel
-		dc.FillSolidRect(CRect(c.left, c.top, c.right, list->rect.top - DuY(3)), RGB(255, 255, 255));
-		dc.FillSolidRect(CRect(c.left, nav->rect.top, c.right, list->rect.bottom), RGB(255, 255, 255));
-		dc.HLine(c.left, c.right, list->rect.bottom, RGB(230, 230, 230));
+		dc.FillSolidRect(CRect(c.left, c.top, c.right, list->rect.top - DuY(3)), sys::Window);
+		dc.FillSolidRect(CRect(c.left, nav->rect.top, c.right, list->rect.bottom), sys::Window);
+		dc.HLine(c.left, c.right, list->rect.bottom, sys::MenuDisabledHot);
 		CRect hint(c.left + DuX(7), c.bottom - DuY(10), c.right - DuX(7), c.bottom - DuY(2));
 		DrawText(dc, UiFont(), T("Cross: open   Circle: cancel   L1/R1: next control   Triangle: up one level"), hint,
 			DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, sys::GrayText);
@@ -1271,7 +1271,7 @@ void ShowAboutDialog()
 	d->title = T("About");
 	d->rect = CRect(0, 0, Dialog::DuX(260) + 2, Dialog::DuY(206) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
-	auto S = [&](const std::string& t, int x, int y, int w, int h, COLORREF c = sys::WindowText) {
+	auto S = [&](const std::string& t, int x, int y, int w, int h, COLORREF c = Static::AutomaticColor) {
 		Static* s = d->Add(new Static);
 		s->text = t;
 		s->rect = d->DuRect(x, y, w, h);
@@ -1365,10 +1365,11 @@ public:
 		for (int x = cap.left; x < cap.right; x++)
 		{
 			const int t = (x - cap.left) * 255 / std::max(1, cap.Width());
-			const COLORREF c = RGB(255 - t * 20 / 255, 255 - t * 20 / 255, 255 - t * 20 / 255);
+			const int shade = sys::IsDarkTheme() ? 50 - t * 10 / 255 : 255 - t * 20 / 255;
+			const COLORREF c = RGB(shade, shade, shade);
 			dc.VLine(x, cap.top, cap.bottom, c);
 		}
-		dc.FrameRect(cap, RGB(200, 200, 200));
+		dc.FrameRect(cap, sys::IsDarkTheme() ? RGB(85, 85, 85) : RGB(200, 200, 200));
 		CRect tr = cap;
 		tr.DeflateRect(ScaleX(6), 0);
 		DrawText(dc, UiBoldFont(), page >= 0 && page < int(names.size()) ? names[page] : "", tr,
@@ -1470,7 +1471,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	ComboBox* lang = d->Combo(p, 10, 141, 105, 13, {}, s.language); // the languages by their own names
 	for (int i = 0; i < int(Language::Count); i++)
 		lang->items.push_back(LanguageName(i));
-	d->Group(p, "Title bar", 5, 164, 115, 68);
+	d->Group(p, "Title bar", 5, 164, 115, 48);
 	CheckBox* t0 = d->Radio(p, "Display full path", 10, 176, 105, 8, s.title_bar == 0, 2);
 	CheckBox* t1 = d->Radio(p, "File name only", 10, 188, 105, 8, s.title_bar == 1, 2);
 	CheckBox* t2 = d->Radio(p, "Don't prefix anything", 10, 200, 105, 8, s.title_bar == 2, 2);
@@ -1491,7 +1492,11 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	d->Check(p, "Remember last window position", 129, 193, 160, 8, true, false);
 	d->Check(p, "Remember last window size", 129, 206, 160, 8, true, false);
 	d->Check(p, "Remember last Pan-n-Scan Zoom", 129, 219, 160, 8, false, false);
-	d->apply_fns.push_back([&s, t0, t1, t2, osd, hist, fpos, lang] {
+	d->Group(p, "Theme", 5, 214, 115, 27);
+	ComboBox* theme = d->Combo(p, 10, 226, 105, 13, {"Light", "Dark"}, s.dark_mode ? 1 : 0);
+	d->apply_fns.push_back([&s, t0, t1, t2, osd, hist, fpos, lang, theme] {
+		s.dark_mode = theme->sel == 1;
+		sys::SetDarkTheme(s.dark_mode);
 		s.language = std::max(0, std::min(int(Language::Count) - 1, lang->sel));
 		s.title_bar = t0->checked ? 0 : t1->checked ? 1 : 2;
 		(void)t2;

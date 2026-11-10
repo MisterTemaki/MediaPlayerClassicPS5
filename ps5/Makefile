@@ -27,7 +27,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.6
+VERSION ?= 1.6.1
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -229,7 +229,7 @@ build/app/libc.prx: $(LIBC_BUILDER) $(NATIVE_TOOL) $(wildcard $(NATIVE)/tooling/
 	@mkdir -p $(dir $@)
 	$(LIBC_BUILDER) $(NATIVE)/tooling/native/runtime/api-surface.txt $(NATIVE)/tooling/native/runtime/imports.txt build/app/libc.raw.elf
 	$(NATIVE_TOOL) self --sign --in build/app/libc.raw.elf --out $@
-	cd build/app && sha256sum --check --strict $(abspath $(NATIVE)/libc.prx.sha256)
+	cd build/app && sha256sum --check --strict '$(abspath $(NATIVE)/libc.prx.sha256)'
 
 $(APP_OUT)/sce_module/libc.prx: build/app/libc.prx
 	@mkdir -p $(dir $@)
@@ -431,6 +431,15 @@ $(HOST_OUT)/mpc-ps5-installer: $(HOST_INSTALLER_OBJ) $(HOST_OUT)/install_data.o
 $(HOST_OUT)/mpc-ps5-host: $(HOST_EMU_OBJ) $(HOST_OUT)/helper_data.o $(HOST_GPU_OBJ)
 	$(HOST_CXX) $(HOST_SAN) -o $@ $^ -L$(DEPS_HOST)/lib $(FF_LIBS) -lvulkan -lpthread -lm -ldl
 
+$(HOST_OUT)/mpc-theme-test: tests/theme_test.cpp $(filter-out $(HOST_OUT)/port/coreorbis/main-boot.o,$(HOST_EMU_OBJ)) $(HOST_OUT)/helper_data.o $(HOST_GPU_OBJ)
+	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) -o $@ $^ \
+		-L$(DEPS_HOST)/lib $(FF_LIBS) -lvulkan -lpthread -lm -ldl
+
+test-theme: $(HOST_OUT)/mpc-theme-test
+	@mkdir -p build/validation/theme/root build/validation/theme/screenshots
+	MPCPS5_PS5_ROOT='$(abspath build/validation/theme/root)' THEME_TEST_DUMP_DIR='$(abspath build/validation/theme/screenshots)' \
+		ASAN_OPTIONS=detect_leaks=0 $(HOST_OUT)/mpc-theme-test
+
 # player/mpc_disc.cpp on its own, with faults put into the drive (tests/disc_test.cpp)
 $(HOST_OUT)/mpc-disc-test: tests/disc_test.cpp player/mpc_disc.cpp player/mpc_disc.h player/mpc_i18n.h $(HOST_OUT)/flags.txt
 	@mkdir -p $(dir $@)
@@ -451,7 +460,7 @@ $(HOST_OUT)/mpc-hdr-test: tests/hdr_output_test.cpp $(HOST_GPU_OBJ)
 $(HOST_OUT)/mpc-gpu-library-test: $(SLANG_GPU)/tests/gpu_test.cpp $(HOST_GPU_OBJ)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(SLANG_GPU_WARN) $(SLANG_GPU_INC) -o $@ $< $(HOST_GPU_OBJ) -lvulkan -lpthread
 
-test: host test-audit
+test: host test-audit test-theme
 	bash tests/run-tests.sh
 
 # 1.6: the CPU's work per picture, 1.5.4's path against the GPU's (tests/gpu_bench.cpp; optimised, no sanitizers):
@@ -467,5 +476,5 @@ bench: $(BENCH_OUT)/mpc-gpu-bench
 clean:
 	rm -rf build/ps5 build/host build/app build/dist build/bench build/gen
 
-.PHONY: ps5 host test test-audit send app dist clean deps deps-subs deps-disc bench
+.PHONY: ps5 host test test-audit test-theme send app dist clean deps deps-subs deps-disc bench
 .SECONDARY:

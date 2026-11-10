@@ -477,6 +477,8 @@ void Settings::Load()
 		const bool b = n != 0;
 		if (k == "RememberFilePos")
 			remember_file_pos = b;
+		else if (k == "DarkMode")
+			dark_mode = v == "1";
 		else if (k == "TitleBarTextStyle")
 			title_bar = Clamp(n, 0, 2);
 		else if (k == "ShowOSD")
@@ -697,6 +699,7 @@ void Settings::Save() const
 	Bare(last_dir, &store);
 	auto bare = [](const std::string& u) { return Escape(Bare(u, nullptr)); };
 	fprintf(f, "; Media Player Classic PS5 settings (MPC-HC's names where it has one)\n[Settings]\n");
+	fprintf(f, "DarkMode=%d\n", dark_mode ? 1 : 0);
 	fprintf(f, "RememberFilePos=%d\nTitleBarTextStyle=%d\nShowOSD=%d\nKeepHistory=%d\n", remember_file_pos, title_bar,
 		show_osd, keep_history);
 	fprintf(f, "ShowSeekBar=%d\nShowControls=%d\nShowStatus=%d\nShowInfo=%d\nShowStatistics=%d\nShowPlaylist=%d\n",

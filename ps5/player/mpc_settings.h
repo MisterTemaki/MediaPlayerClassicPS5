@@ -229,6 +229,7 @@ struct Settings
 	// Options > Player > Keys
 	PadAction pad[int(PadButton::Count)];
 	// Interface
+	bool dark_mode = false; // Options > Player > Theme; existing settings retain the light theme
 	int dpi = 144; // 96 / 120 / 144 / 192 (100 % .. 200 %)
 	int cursor_speed = 3; // 1..5
 	bool touchpad_pointer = true; // 1.5: the DualSense touchpad moves the pointer, its click clicks (Options > Player > Keys)

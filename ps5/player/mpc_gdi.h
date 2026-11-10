@@ -26,58 +26,88 @@ inline int GetRValue(COLORREF c) { return c & 0xff; }
 inline int GetGValue(COLORREF c) { return (c >> 8) & 0xff; }
 inline int GetBValue(COLORREF c) { return (c >> 16) & 0xff; }
 
-// Windows 10's system colours (GetSysColor), the ones MPC-HC paints with.
+// MPC-HC's Windows 10 light colors and the port's dark palette.
 namespace sys
 {
-constexpr COLORREF BtnFace = RGB(240, 240, 240); // COLOR_BTNFACE / COLOR_3DFACE
-constexpr COLORREF Shadow = RGB(160, 160, 160); // COLOR_3DSHADOW
-constexpr COLORREF Hilight = RGB(255, 255, 255); // COLOR_3DHILIGHT
-constexpr COLORREF DkShadow = RGB(105, 105, 105); // COLOR_3DDKSHADOW
-constexpr COLORREF Light = RGB(227, 227, 227); // COLOR_3DLIGHT
-constexpr COLORREF GrayText = RGB(109, 109, 109); // COLOR_GRAYTEXT
-constexpr COLORREF Window = RGB(255, 255, 255); // COLOR_WINDOW
-constexpr COLORREF WindowText = RGB(0, 0, 0);
-constexpr COLORREF Highlight = RGB(0, 120, 215); // COLOR_HIGHLIGHT
-constexpr COLORREF HighlightText = RGB(255, 255, 255);
-constexpr COLORREF HotTrack = RGB(0, 102, 204);
+// The UI thread selects the theme. Colors resolve when painted, so existing dialogs update on Apply.
+inline bool dark_theme = false;
+inline void SetDarkTheme(bool dark) { dark_theme = dark; }
+inline bool IsDarkTheme() { return dark_theme; }
+struct ThemeColor
+{
+	COLORREF light, dark;
+	constexpr ThemeColor(COLORREF l, COLORREF d) : light(l), dark(d) {}
+	operator COLORREF() const { return dark_theme ? dark : light; }
+};
+constexpr ThemeColor BtnFace{RGB(240, 240, 240), RGB(32, 32, 32)};
+constexpr ThemeColor Shadow{RGB(160, 160, 160), RGB(70, 70, 70)};
+constexpr ThemeColor Hilight{RGB(255, 255, 255), RGB(72, 72, 72)};
+constexpr ThemeColor DkShadow{RGB(105, 105, 105), RGB(12, 12, 12)};
+constexpr ThemeColor Light{RGB(227, 227, 227), RGB(42, 42, 42)};
+constexpr ThemeColor GrayText{RGB(109, 109, 109), RGB(150, 150, 150)};
+constexpr ThemeColor Window{RGB(255, 255, 255), RGB(24, 24, 24)};
+constexpr ThemeColor WindowText{RGB(0, 0, 0), RGB(230, 230, 230)};
+constexpr ThemeColor Highlight{RGB(0, 120, 215), RGB(0, 92, 160)};
+constexpr ThemeColor HighlightText{RGB(255, 255, 255), RGB(255, 255, 255)};
+constexpr ThemeColor HotTrack{RGB(0, 102, 204), RGB(100, 180, 250)};
 // Windows 10's themed menus (uxtheme "Menu" class)
-constexpr COLORREF MenuBar = RGB(255, 255, 255);
-constexpr COLORREF MenuBarHot = RGB(229, 243, 255);
-constexpr COLORREF MenuBarHotBorder = RGB(204, 232, 255);
-constexpr COLORREF MenuBarPushed = RGB(204, 232, 255);
-constexpr COLORREF MenuBarPushedBorder = RGB(153, 209, 255);
-constexpr COLORREF MenuPopup = RGB(242, 242, 242);
-constexpr COLORREF MenuPopupBorder = RGB(204, 204, 204);
-constexpr COLORREF MenuItemHot = RGB(145, 201, 247);
-constexpr COLORREF MenuSeparator = RGB(215, 215, 215);
-constexpr COLORREF MenuDisabled = RGB(109, 109, 109);
+constexpr ThemeColor MenuBar{RGB(255, 255, 255), RGB(32, 32, 32)};
+constexpr ThemeColor MenuBarHot{RGB(229, 243, 255), RGB(50, 65, 78)};
+constexpr ThemeColor MenuBarHotBorder{RGB(204, 232, 255), RGB(72, 105, 132)};
+constexpr ThemeColor MenuBarPushed{RGB(204, 232, 255), RGB(54, 88, 118)};
+constexpr ThemeColor MenuBarPushedBorder{RGB(153, 209, 255), RGB(88, 144, 190)};
+constexpr ThemeColor MenuPopup{RGB(242, 242, 242), RGB(40, 40, 40)};
+constexpr ThemeColor MenuPopupBorder{RGB(204, 204, 204), RGB(74, 74, 74)};
+constexpr ThemeColor MenuItemHot{RGB(145, 201, 247), RGB(50, 85, 115)};
+constexpr ThemeColor MenuSeparator{RGB(215, 215, 215), RGB(78, 78, 78)};
+constexpr ThemeColor MenuDisabled{RGB(109, 109, 109), RGB(150, 150, 150)};
+constexpr ThemeColor MenuDisabledHot{RGB(230, 230, 230), RGB(52, 52, 52)};
 // Windows 10's title bar
-constexpr COLORREF Caption = RGB(255, 255, 255);
-constexpr COLORREF CaptionText = RGB(0, 0, 0);
-constexpr COLORREF CaptionInactiveText = RGB(153, 153, 153);
-constexpr COLORREF CaptionButtonHot = RGB(229, 229, 229);
-constexpr COLORREF CaptionButtonPushed = RGB(204, 204, 204);
+constexpr ThemeColor Caption{RGB(255, 255, 255), RGB(28, 28, 28)};
+constexpr ThemeColor CaptionText{RGB(0, 0, 0), RGB(238, 238, 238)};
+constexpr ThemeColor CaptionInactiveText{RGB(153, 153, 153), RGB(140, 140, 140)};
+constexpr ThemeColor CaptionButtonHot{RGB(229, 229, 229), RGB(58, 58, 58)};
+constexpr ThemeColor CaptionButtonPushed{RGB(204, 204, 204), RGB(76, 76, 76)};
 constexpr COLORREF CloseHot = RGB(232, 17, 35);
 constexpr COLORREF ClosePushed = RGB(241, 112, 122);
-constexpr COLORREF WindowFrame = RGB(100, 100, 100);
+constexpr ThemeColor WindowFrame{RGB(100, 100, 100), RGB(82, 82, 82)};
 // Windows 10's themed push buttons, edits, lists
-constexpr COLORREF ButtonFace = RGB(225, 225, 225);
-constexpr COLORREF ButtonBorder = RGB(173, 173, 173);
-constexpr COLORREF ButtonHotFace = RGB(229, 241, 251);
-constexpr COLORREF ButtonHotBorder = RGB(0, 120, 215);
-constexpr COLORREF ButtonPushedFace = RGB(204, 228, 247);
-constexpr COLORREF ButtonPushedBorder = RGB(0, 84, 153);
-constexpr COLORREF ButtonDisabledFace = RGB(204, 204, 204);
-constexpr COLORREF ButtonDisabledBorder = RGB(191, 191, 191);
-constexpr COLORREF EditBorder = RGB(122, 122, 122);
-constexpr COLORREF EditBorderHot = RGB(23, 23, 23);
-constexpr COLORREF EditBorderFocus = RGB(0, 120, 215);
-constexpr COLORREF ListHot = RGB(229, 243, 255);
-constexpr COLORREF ListSelected = RGB(204, 232, 255);
-constexpr COLORREF ListSelectedBorder = RGB(153, 209, 255);
-constexpr COLORREF TooltipBack = RGB(255, 255, 255);
-constexpr COLORREF TooltipBorder = RGB(118, 118, 118);
-constexpr COLORREF TooltipText = RGB(87, 87, 87);
+constexpr ThemeColor ButtonFace{RGB(225, 225, 225), RGB(54, 54, 54)};
+constexpr ThemeColor ButtonBorder{RGB(173, 173, 173), RGB(100, 100, 100)};
+constexpr ThemeColor ButtonHotFace{RGB(229, 241, 251), RGB(60, 76, 90)};
+constexpr ThemeColor ButtonHotBorder{RGB(0, 120, 215), RGB(90, 175, 245)};
+constexpr ThemeColor ButtonPushedFace{RGB(204, 228, 247), RGB(42, 66, 86)};
+constexpr ThemeColor ButtonPushedBorder{RGB(0, 84, 153), RGB(70, 145, 210)};
+constexpr ThemeColor ButtonDisabledFace{RGB(204, 204, 204), RGB(43, 43, 43)};
+constexpr ThemeColor ButtonDisabledBorder{RGB(191, 191, 191), RGB(72, 72, 72)};
+constexpr ThemeColor EditBorder{RGB(122, 122, 122), RGB(96, 96, 96)};
+constexpr ThemeColor EditBorderHot{RGB(23, 23, 23), RGB(160, 160, 160)};
+constexpr ThemeColor EditBorderFocus{RGB(0, 120, 215), RGB(90, 175, 245)};
+constexpr ThemeColor ListHot{RGB(229, 243, 255), RGB(44, 60, 75)};
+constexpr ThemeColor ListSelected{RGB(204, 232, 255), RGB(47, 78, 104)};
+constexpr ThemeColor ListSelectedBorder{RGB(153, 209, 255), RGB(78, 128, 172)};
+constexpr ThemeColor TooltipBack{RGB(255, 255, 255), RGB(48, 48, 48)};
+constexpr ThemeColor TooltipBorder{RGB(118, 118, 118), RGB(100, 100, 100)};
+constexpr ThemeColor TooltipText{RGB(87, 87, 87), RGB(235, 235, 235)};
+constexpr ThemeColor ScrollArrow{RGB(96, 96, 96), RGB(200, 200, 200)};
+constexpr ThemeColor ScrollThumb{RGB(205, 205, 205), RGB(90, 90, 90)};
+constexpr ThemeColor ControlMark{RGB(51, 51, 51), RGB(224, 224, 224)};
+constexpr ThemeColor DisabledMark{RGB(204, 204, 204), RGB(115, 115, 115)};
+constexpr ThemeColor GroupLine{RGB(220, 220, 220), RGB(85, 85, 85)};
+constexpr ThemeColor GroupText{RGB(0, 70, 213), RGB(115, 180, 245)};
+constexpr ThemeColor SliderTrack{RGB(231, 234, 234), RGB(50, 50, 50)};
+constexpr ThemeColor SliderBorder{RGB(214, 214, 214), RGB(85, 85, 85)};
+constexpr ThemeColor SliderHot{RGB(23, 23, 23), RGB(235, 235, 235)};
+constexpr ThemeColor ListBorder{RGB(130, 135, 144), RGB(85, 85, 85)};
+constexpr ThemeColor HeaderText{RGB(76, 96, 122), RGB(190, 205, 220)};
+constexpr ThemeColor GridLine{RGB(229, 229, 229), RGB(64, 64, 64)};
+constexpr ThemeColor UnfocusedSelection{RGB(217, 217, 217), RGB(64, 64, 64)};
+constexpr ThemeColor SecondaryText{RGB(109, 109, 109), RGB(170, 170, 170)};
+constexpr ThemeColor TabBorder{RGB(217, 217, 217), RGB(72, 72, 72)};
+constexpr ThemeColor DialogFrame{RGB(24, 131, 215), RGB(90, 160, 220)};
+constexpr ThemeColor PlaylistSelected{RGB(204, 218, 241), RGB(52, 78, 108)};
+constexpr ThemeColor PlaylistSelectedBorder{RGB(49, 106, 197), RGB(90, 150, 220)};
+constexpr ThemeColor PlaylistCurrent{RGB(255, 0, 0), RGB(255, 125, 125)};
 } // namespace sys
 
 struct CPoint

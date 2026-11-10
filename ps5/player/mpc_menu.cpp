@@ -118,7 +118,7 @@ void DrawLevel(CDC& dc, const Level& l)
 		}
 		const bool hot = i == l.hot || i == l.open_sub;
 		if (hot)
-			dc.FillSolidRect(r, it.enabled ? sys::MenuItemHot : RGB(230, 230, 230));
+			dc.FillSolidRect(r, it.enabled ? sys::MenuItemHot : sys::MenuDisabledHot);
 		const COLORREF tc = it.enabled ? sys::WindowText : sys::MenuDisabled;
 		if (it.checked)
 			DrawGlyphCheck(dc, CRect(r.left, r.top, r.left + Gutter(), r.bottom), it.radio, tc);
