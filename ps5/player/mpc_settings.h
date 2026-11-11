@@ -152,8 +152,7 @@ std::string PadActionText(PadAction a);
 // whether holding the button repeats it (jumps, volume, chapters, delays)
 bool PadActionRepeats(PadAction a);
 
-// An address with a user and no password (smb://user@server/...): the one kept in credentials.ini for that user
-// and server put back in; else the address as it is.
+// Resolve a transport address using the encrypted credential store. UI/model addresses stay password-free.
 std::string WithStoredPassword(const std::string& url);
 
 struct Settings
@@ -247,7 +246,7 @@ struct Settings
 
 	Settings();
 	void Load();
-	void Save() const;
+	bool Save() const;
 	void AddRecent(const std::string& url);
 	double FilePos(const std::string& url) const;
 	void SetFilePos(const std::string& url, double pos);

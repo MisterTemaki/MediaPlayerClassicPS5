@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "mpc_ui.h"
+#include "mpc_credentials.h"
 
 #include "mpc_i18n.h"
 
@@ -17,6 +18,22 @@
 
 namespace mpc
 {
+namespace
+{
+std::string PrivateUrlText(const std::string& text)
+{
+	std::string shown = credentials::WithoutPassword(text);
+	if (shown != text || credentials::HasUser(text)) return shown;
+	// While typing user:password@host, hide the password before the user has entered '@'.
+	// A completed host:port/path remains visible. IPv6 literals do not use this partial-userinfo rule.
+	const size_t scheme = text.find("://");
+	if (scheme == std::string::npos) return shown;
+	const size_t start = scheme + 3;
+	if (start >= text.size() || text[start] == '[' || text.find('/', start) != std::string::npos) return shown;
+	const size_t colon = text.find(':', start);
+	return colon == std::string::npos ? shown : text.substr(0, colon + 1) + "***";
+}
+} // namespace
 double NowSeconds()
 {
 	timespec ts = {};
@@ -716,6 +733,19 @@ void GroupBox::Paint(CDC& dc, bool, bool)
 	}
 }
 
+Edit::~Edit()
+{
+	if (password || hide_url_password) credentials::Wipe(text);
+}
+ComboBox::~ComboBox()
+{
+	if (hide_url_password)
+	{
+		credentials::Wipe(text);
+		for (auto& item : items) credentials::Wipe(item);
+	}
+}
+
 void Edit::Paint(CDC& dc, bool focused, bool hot)
 {
 	const COLORREF border = !enabled ? sys::DisabledMark : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder;
@@ -723,7 +753,7 @@ void Edit::Paint(CDC& dc, bool focused, bool hot)
 	dc.FrameRect(rect, border);
 	CRect r = rect;
 	r.DeflateRect(ScaleX(4), 0);
-	std::string shown = password ? std::string(text.size(), '*') : text;
+	std::string shown = password ? std::string(text.size(), '*') : hide_url_password ? PrivateUrlText(text) : text;
 	if (shown.empty() && !cue.empty() && !focused)
 		DrawText(dc, UiFont(), cue, r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS, sys::GrayText);
 	else
@@ -760,11 +790,12 @@ void Edit::Activate()
 		[this](bool ok, const std::string& t) {
 			if (ok)
 			{
+				if (password || hide_url_password) credentials::Wipe(text);
 				text = t;
 				if (on_change)
 					on_change();
 			}
-		});
+		}, hide_url_password);
 }
 
 void ComboBox::Paint(CDC& dc, bool focused, bool hot)
@@ -775,7 +806,7 @@ void ComboBox::Paint(CDC& dc, bool focused, bool hot)
 		dc.FillSolidRect(rect, sys::Window);
 		dc.FrameRect(rect, !enabled ? sys::DisabledMark : focused ? sys::EditBorderFocus : hot ? sys::EditBorderHot : sys::EditBorder);
 		CRect r(rect.left + ScaleX(4), rect.top, rect.right - bw, rect.bottom);
-		DrawText(dc, UiFont(), text, r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
+		DrawText(dc, UiFont(), hide_url_password ? PrivateUrlText(text) : text, r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
 			enabled ? sys::WindowText : sys::GrayText);
 		CRect b(rect.right - bw, rect.top + 1, rect.right - 1, rect.bottom - 1);
 		if (hot)
@@ -785,7 +816,7 @@ void ComboBox::Paint(CDC& dc, bool focused, bool hot)
 	}
 	DrawThemedButton(dc, rect, hot, false, false, false, enabled);
 	CRect r(rect.left + ScaleX(4), rect.top, rect.right - bw, rect.bottom);
-	const std::string t = Text();
+	const std::string t = hide_url_password ? PrivateUrlText(Text()) : Text();
 	if (focused)
 	{
 		CRect f(rect.left + ScaleX(3), rect.top + ScaleY(3), rect.right - bw, rect.bottom - ScaleY(3));
@@ -807,14 +838,16 @@ void ComboBox::Activate()
 		OnScreenKeyboard(TC("keyboard", "Type"), text, false, [this](bool ok, const std::string& t) {
 			if (ok)
 			{
+				if (hide_url_password) credentials::Wipe(text);
 				text = t;
 				if (on_change)
 					on_change();
 			}
-		});
+		}, hide_url_password);
 		return;
 	}
 	std::vector<std::string> list = items;
+	if (hide_url_password) for (auto& item : list) item = PrivateUrlText(item);
 	if (editable)
 		list.insert(list.begin(), T("(Type with the on-screen keyboard...)"));
 	DropDownList(rect, list, editable ? -1 : sel, [this](int i) {
@@ -827,11 +860,12 @@ void ComboBox::Activate()
 				OnScreenKeyboard(TC("keyboard", "Type"), text, false, [this](bool ok, const std::string& t) {
 					if (ok)
 					{
+						if (hide_url_password) credentials::Wipe(text);
 						text = t;
 						if (on_change)
 							on_change();
 					}
-				});
+				}, hide_url_password);
 				return;
 			}
 			text = items[i - 1];
@@ -1741,6 +1775,12 @@ bool WindowManager::Dispatch(const InputEvent& ev)
 	return false;
 }
 
+void WindowManager::Clear()
+{
+	popups_.clear();
+	dialogs_.clear();
+}
+
 void WindowManager::Tick()
 {
 	for (auto& d : dialogs_)
@@ -2024,6 +2064,9 @@ namespace
 class Keyboard : public Dialog
 {
 public:
+	bool hide_url_password = false;
+	~Keyboard() override { if (password || hide_url_password) credentials::Wipe(text); }
+
 	std::string text;
 	bool password = false, shift = false, caps = false;
 	int row = 1, col = 0;
@@ -2133,7 +2176,7 @@ public:
 		dc.FillSolidRect(e, sys::Window);
 		dc.FrameRect(e, sys::EditBorderFocus);
 		const Font& f = FontOfSize(ScaleY(16));
-		std::string shown = password ? std::string(text.size(), '*') : text;
+		std::string shown = password ? std::string(text.size(), '*') : hide_url_password ? PrivateUrlText(text) : text;
 		for (char& ch : shown)
 			if (ch == '\t')
 				ch = ' ';
@@ -2240,12 +2283,13 @@ public:
 } // namespace
 
 void OnScreenKeyboard(const std::string& title, const std::string& text, bool password,
-	std::function<void(bool, const std::string&)> done)
+	std::function<void(bool, const std::string&)> done, bool hide_url_password)
 {
 	Keyboard* k = new Keyboard;
 	k->title = title.empty() ? T("On-Screen Keyboard") : title;
 	k->text = text;
 	k->password = password;
+	k->hide_url_password = hide_url_password;
 	k->done = std::move(done);
 	int w = 0;
 	for (size_t c = 0; c < k->rows[1].size(); c++)

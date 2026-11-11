@@ -27,7 +27,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.6.1
+VERSION ?= 1.6.2
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -42,8 +42,8 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	coreorbis/orbis-shims/ProsperoHdr.cpp \
 	coreorbis/orbis-shims/ProsperoInput.cpp coreorbis/orbis-shims/ProsperoJailbreak.cpp \
 	coreorbis/orbis-shims/ProsperoCrash.cpp \
-	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
-	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
+	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_credentials_ui.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
+	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_credentials.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
 	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp player/mpc_i18n.cpp \
 	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp player/mpc_gpu.cpp player/mpc_bigmem.cpp \
 	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlaceApp.cpp
@@ -384,7 +384,7 @@ HOST_HELPER_OBJ := $(HOST_OUT)/port/installer/helper_main.o $(patsubst %.cpp,$(H
 HOST_INSTALLER_OBJ := $(patsubst %.cpp,$(HOST_OUT)/port/%.o,$(INSTALLER_SRC) host/sce_host.cpp) \
 	$(patsubst %.c,$(HOST_OUT)/port/%.o,$(MONO_SRC))
 
-host: $(HOST_OUT)/mpc-ps5-host $(HOST_OUT)/mpc-ps5-installer $(HOST_OUT)/mpc-ps5-helper $(HOST_OUT)/mpc-disc-test
+host: $(HOST_OUT)/mpc-ps5-host $(HOST_OUT)/mpc-ps5-installer $(HOST_OUT)/mpc-ps5-helper $(HOST_OUT)/mpc-disc-test $(HOST_OUT)/mpc-credentials-fixture
 
 $(HOST_OUT)/port/%.o: %.cpp coreorbis/include-orbis/*.h coreorbis/orbis-shims/*.h player/*.h $(HOST_OUT)/flags.txt
 	@mkdir -p $(dir $@)
@@ -440,6 +440,31 @@ test-theme: $(HOST_OUT)/mpc-theme-test
 	MPCPS5_PS5_ROOT='$(abspath build/validation/theme/root)' THEME_TEST_DUMP_DIR='$(abspath build/validation/theme/screenshots)' \
 		ASAN_OPTIONS=detect_leaks=0 $(HOST_OUT)/mpc-theme-test
 
+$(HOST_OUT)/mpc-credentials-test: tests/credentials_test.cpp player/mpc_credentials.cpp player/mpc_credentials.h \
+		$(HOST_OUT)/port/third_party/monocypher/monocypher.o $(HOST_OUT)/port/third_party/mbedtls/mpc_entropy.o $(HOST_OUT)/flags.txt
+	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(INCS) -Ithird_party/monocypher $(PORT_WARN) -o $@ tests/credentials_test.cpp \
+		player/mpc_credentials.cpp $(HOST_OUT)/port/third_party/monocypher/monocypher.o \
+		$(HOST_OUT)/port/third_party/mbedtls/mpc_entropy.o -lpthread
+
+test-credentials: $(HOST_OUT)/mpc-credentials-test
+	@task_root=$$(mktemp -d); ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 $(HOST_OUT)/mpc-credentials-test "$$task_root/credentials"
+
+$(HOST_OUT)/mpc-credentials-ui-test: tests/credentials_ui_test.cpp $(filter-out $(HOST_OUT)/port/coreorbis/main-boot.o,$(HOST_EMU_OBJ)) $(HOST_OUT)/helper_data.o $(HOST_GPU_OBJ)
+	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) -o $@ $^ \
+		-L$(DEPS_HOST)/lib $(FF_LIBS) -lvulkan -lpthread -lm -ldl
+
+$(HOST_OUT)/mpc-credentials-fixture: tests/credentials_fixture.cpp player/mpc_credentials.cpp player/mpc_settings.cpp player/mpc_i18n.cpp \
+		coreorbis/orbis-shims/orbis_paths.cpp player/mpc_credentials.h player/mpc_settings.h $(HOST_OUT)/port/third_party/monocypher/monocypher.o \
+		$(HOST_OUT)/port/third_party/mbedtls/mpc_entropy.o $(HOST_OUT)/flags.txt
+	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(INCS) $(DEFS) $(PORT_WARN) -o $@ tests/credentials_fixture.cpp \
+		player/mpc_credentials.cpp player/mpc_settings.cpp player/mpc_i18n.cpp coreorbis/orbis-shims/orbis_paths.cpp \
+		$(HOST_OUT)/port/third_party/monocypher/monocypher.o $(HOST_OUT)/port/third_party/mbedtls/mpc_entropy.o -lpthread
+
+test-credentials-ui: $(HOST_OUT)/mpc-credentials-ui-test
+	@mkdir -p build/validation/issue7/screenshots
+	@task_root=$$(mktemp -d); MPCPS5_PS5_ROOT="$$task_root/app" CREDENTIALS_TEST_DUMP_DIR='$(abspath build/validation/issue7/screenshots)' \
+		ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 $(HOST_OUT)/mpc-credentials-ui-test
+
 # player/mpc_disc.cpp on its own, with faults put into the drive (tests/disc_test.cpp)
 $(HOST_OUT)/mpc-disc-test: tests/disc_test.cpp player/mpc_disc.cpp player/mpc_disc.h player/mpc_i18n.h $(HOST_OUT)/flags.txt
 	@mkdir -p $(dir $@)
@@ -460,7 +485,7 @@ $(HOST_OUT)/mpc-hdr-test: tests/hdr_output_test.cpp $(HOST_GPU_OBJ)
 $(HOST_OUT)/mpc-gpu-library-test: $(SLANG_GPU)/tests/gpu_test.cpp $(HOST_GPU_OBJ)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(SLANG_GPU_WARN) $(SLANG_GPU_INC) -o $@ $< $(HOST_GPU_OBJ) -lvulkan -lpthread
 
-test: host test-audit test-theme
+test: host test-audit test-theme test-credentials test-credentials-ui $(HOST_OUT)/mpc-credentials-fixture
 	bash tests/run-tests.sh
 
 # 1.6: the CPU's work per picture, 1.5.4's path against the GPU's (tests/gpu_bench.cpp; optimised, no sanitizers):
@@ -476,5 +501,5 @@ bench: $(BENCH_OUT)/mpc-gpu-bench
 clean:
 	rm -rf build/ps5 build/host build/app build/dist build/bench build/gen
 
-.PHONY: ps5 host test test-audit test-theme send app dist clean deps deps-subs deps-disc bench
+.PHONY: ps5 host test test-audit test-theme test-credentials test-credentials-ui send app dist clean deps deps-subs deps-disc bench
 .SECONDARY:

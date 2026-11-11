@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "mpc_player.h"
+#include "mpc_settings.h"
 
 #include "mpc_ass.h"
 #include "mpc_disc.h"
@@ -1257,7 +1258,7 @@ struct Player::Impl
 				av_dict_set(&opts, "tls_verify", "1", 0);
 			}
 		}
-		std::string open_url = url;
+		std::string open_url = WithStoredPassword(url);
 		const AVInputFormat* force_fmt = nullptr;
 		disc_gen = disc::Generation(url);
 		if (disc::IsTitleUrl(url))

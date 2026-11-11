@@ -206,6 +206,8 @@ class Edit : public Control
 public:
 	std::string text;
 	bool password = false;
+	bool hide_url_password = false;
+	~Edit() override;
 	bool read_only = false;
 	std::string cue; // the grey hint while empty
 	std::string keyboard_title;
@@ -220,6 +222,8 @@ public:
 	std::vector<std::string> items;
 	int sel = -1;
 	bool editable = false; // a CBS_DROPDOWN: the text can be typed (on-screen keyboard)
+	bool hide_url_password = false;
+	~ComboBox() override;
 	std::string text; // the editable one's text
 	std::function<void()> on_change;
 	void Paint(CDC& dc, bool focused, bool hot) override;
@@ -428,6 +432,7 @@ public:
 	bool Dispatch(const InputEvent& ev); // true when a dialog or a popup took it
 	void Paint(CDC& dc);
 	void Tick();
+	void Clear(); // dismiss dialogs before session credentials are cleared
 	Dialog* Top() const { return dialogs_.empty() ? nullptr : dialogs_.back().get(); }
 	// 1.5.3: a dialog, a menu or a drop-down drawn over (x, y)
 	bool Covers(int x, int y) const;
@@ -454,7 +459,7 @@ enum
 
 // The on-screen keyboard: edits text, then calls done(true, text) (or done(false, "") when cancelled).
 void OnScreenKeyboard(const std::string& title, const std::string& text, bool password,
-	std::function<void(bool, const std::string&)> done);
+	std::function<void(bool, const std::string&)> done, bool hide_url_password = false);
 
 // A drop-down list under r (combo boxes): done(index) or -1
 void DropDownList(const CRect& under, const std::vector<std::string>& items, int sel, std::function<void(int)> done);

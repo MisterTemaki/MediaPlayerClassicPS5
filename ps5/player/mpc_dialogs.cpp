@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "mpc_dialogs.h"
+#include "mpc_credentials.h"
 
 #include "mpc_disc.h"
 #include "mpc_i18n.h"
@@ -168,19 +169,7 @@ std::string HideSecret(const std::string& url)
 
 std::string HidePassword(const std::string& url)
 {
-	// scheme://user:password@host/... -> scheme://user@host/... (any scheme: smb://, http://, rtsp://...)
-	const size_t sch = url.find("://");
-	if (sch == std::string::npos)
-		return url;
-	const size_t auth = sch + 3;
-	const size_t end = std::min(url.find('/', auth), url.size());
-	const size_t at = url.rfind('@', end);
-	if (at == std::string::npos || at < auth)
-		return url;
-	const size_t colon = url.find(':', auth);
-	if (colon == std::string::npos || colon > at)
-		return url;
-	return url.substr(0, colon) + url.substr(at);
+	return credentials::WithoutPassword(url);
 }
 
 bool IsMediaFile(const std::string& name)
@@ -204,7 +193,7 @@ std::string FileName(const std::string& path)
 	// a DVD-Video / Blu-ray title: the disc's name (and the title)
 	if (disc::IsTitleUrl(path))
 		return disc::DisplayName(path);
-	std::string p = path;
+	std::string p = HidePassword(path);
 	while (p.size() > 1 && p.back() == '/')
 		p.pop_back();
 	const size_t q = p.find('?');
@@ -233,7 +222,7 @@ std::string FileName(const std::string& path)
 		}
 		else
 			out += n[i];
-	return out.empty() ? path : out;
+	return out.empty() ? HidePassword(path) : out;
 }
 
 std::string ParentFolder(const std::string& path)
@@ -522,7 +511,7 @@ public:
 		nav->items.push_back({T("Network"), 0, Icon(Ico::Network), false});
 		places.push_back({T("Network"), "smb://", Ico::Network});
 		for (const NetServer& s : AppSettings().servers)
-			add(s.name, s.url, Ico::Server);
+			add(HideSecret(s.name), s.url, Ico::Server);
 		nav->items.push_back({T("Add a network location..."), 1, Icon(Ico::Add), false});
 		Place ap;
 		ap.name = T("Add a network location...");
@@ -591,6 +580,15 @@ public:
 
 	void Navigate(const std::string& to, bool record = true)
 	{
+		if (HasInlinePassword(to))
+		{
+			UseNetworkCredentials(to, [this, record](const std::string& clean) {
+				// This callback is synchronous, including when the URL keyboard is open.
+				if (!closed) Navigate(clean, record);
+			});
+			return;
+		}
+
 		if (record && to != dir)
 		{
 			back.push_back(dir);
@@ -819,6 +817,7 @@ void ShowFileBrowser(const std::string& title, BrowseFilter filter, std::functio
 	d->bup->text = "^";
 	d->bup->rect = R(40, 4, 16, 14);
 	d->address = d->Add(new Edit);
+	d->address->hide_url_password = true;
 	d->address->rect = R(60, 4, cw - 64, 14);
 	d->address->keyboard_title = T("Go to an address (a folder, or smb://server/share)");
 	// the panes
@@ -881,7 +880,7 @@ void ShowFileBrowser(const std::string& title, BrowseFilter filter, std::functio
 		else if (OrbisIsFile(t))
 			fb->Finish(t);
 		else
-			MessageBox(Fmt(T("Can't find '%s'. Check the spelling and try again."), t.c_str()), fb->title, MB_OK, 3);
+			MessageBox(Fmt(T("Can't find '%s'. Check the spelling and try again."), HideSecret(t).c_str()), fb->title, MB_OK, 3);
 	};
 	d->types->on_change = [fb] { fb->Navigate(fb->dir, false); };
 	d->list->on_open = [fb] { fb->OpenSelected(); };
@@ -967,6 +966,7 @@ void ShowOpenDialog(std::function<void(const std::string&, const std::string&, b
 	l1->text = T("Open:");
 	l1->rect = d->DuRect(10, 32, 245, 8);
 	d->open = d->Add(new ComboBox);
+	d->open->hide_url_password = true;
 	d->open->editable = true;
 	d->open->rect = d->DuRect(10, 42, 188, 14);
 	d->recent = AppSettings().recent;
@@ -981,6 +981,7 @@ void ShowOpenDialog(std::function<void(const std::string&, const std::string&, b
 	l2->text = T("Dub:");
 	l2->rect = d->DuRect(10, 58, 245, 8);
 	d->dub = d->Add(new ComboBox);
+	d->dub->hide_url_password = true;
 	d->dub->editable = true;
 	d->dub->rect = d->DuRect(10, 68, 188, 14);
 	d->dub->enabled = false; // a separate audio file is not supported yet
@@ -1904,7 +1905,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	auto fill_servers = [&s, servers] {
 		servers->rows.clear();
 		for (const auto& v : s.servers)
-			servers->rows.push_back({v.name, HideSecret(v.url)});
+			servers->rows.push_back({HideSecret(v.name), HideSecret(v.url)});
 		if (servers->sel >= int(servers->rows.size()))
 			servers->sel = int(servers->rows.size()) - 1;
 	};
@@ -2124,12 +2125,13 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 	struct Net : public Dialog
 	{
 		Edit *host = nullptr, *share = nullptr, *user = nullptr, *pass = nullptr, *name = nullptr;
+		CheckBox* remember = nullptr;
 		std::function<void(const std::string&, const std::string&)> done;
 	};
 	Net* d = new Net;
 	d->title = T("Add Network Location");
 	d->done = std::move(done);
-	d->rect = CRect(0, 0, Dialog::DuX(280) + 2, Dialog::DuY(176) + d->CaptionHeight() + 1);
+	d->rect = CRect(0, 0, Dialog::DuX(280) + 2, Dialog::DuY(200) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	Static* intro = d->Add(new Static);
 	intro->text = T("Specify the location of your network share (a shared folder on a Windows PC, a NAS, Samba). "
@@ -2150,16 +2152,21 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 	row("Password:", 100, d->pass, "Password");
 	d->pass->password = true;
 	row("Name for this location:", 120, d->name, "Name shown in the browser");
+	d->host->hide_url_password = true;
 	d->host->cue = "192.168.0.10";
 	d->share->cue = "Videos";
 	d->user->cue = "guest";
+	d->remember = d->Add(new CheckBox);
+	d->remember->text = T("Save password on this PS5");
+	d->remember->rect = d->DuRect(92, 143, 181, 14);
+	d->remember->checked = true;
 	Button* ok = d->Add(new Button);
 	ok->text = T("OK");
 	ok->is_default = true;
-	ok->rect = d->DuRect(169, 154, 50, 14);
+	ok->rect = d->DuRect(169, 178, 50, 14);
 	Button* cancel = d->Add(new Button);
 	cancel->text = T("Cancel");
-	cancel->rect = d->DuRect(223, 154, 50, 14);
+	cancel->rect = d->DuRect(223, 178, 50, 14);
 	Net* dd = d;
 	ok->on_click = [dd] {
 		std::string host = dd->host->text;
@@ -2179,7 +2186,9 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 			std::string o;
 			for (char c : s)
 			{
-				if (c == '@' || c == ':' || c == '/' || c == '%' || c == ';')
+				const bool unreserved = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+					(c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~';
+				if (!unreserved)
 				{
 					char b[4];
 					snprintf(b, sizeof(b), "%%%02X", static_cast<unsigned char>(c));
@@ -2201,13 +2210,15 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 		url += host;
 		if (!dd->share->text.empty())
 			url += "/" + dd->share->text;
-		std::string n = dd->name->text;
-		if (n.empty())
-			n = dd->share->text.empty() ? host : dd->share->text + " (" + host + ")";
-		auto cb = dd->done;
-		dd->EndDialog(1);
-		if (cb)
-			cb(n, url);
+		std::string n = HideSecret(dd->name->text);
+		if (n.empty()) n = FileName(url);
+		UseNetworkCredentials(std::move(url), [dd, n](const std::string& clean) {
+			if (WindowManager::Get().Top() != dd || dd->closed) return;
+			auto cb = dd->done;
+			dd->EndDialog(1);
+			if (cb) cb(n, clean);
+		}, dd->remember->checked);
+		credentials::Wipe(url);
 	};
 	cancel->on_click = [dd] { dd->EndDialog(2); };
 	WindowManager::Get().Push(d);

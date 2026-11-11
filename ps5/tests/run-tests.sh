@@ -897,7 +897,7 @@ nosan "$T"
 fi
 
 if want 19; then
-echo "== 19. 1.2: the audio boost clips (no wrap-around), HDR workers kept, the decoder's pictures checked, SMB passwords kept out of mpc-hc.ini and the logs"
+echo "== 19. audio boost, HDR workers, decoder picture validation and encrypted SMB credentials"
 # a: a full-scale tone with the boost at its most (+300%: 4x): held at the 16-bit limits, never wrapped to the other sign
 T=$(newroot t19)
 cp "$MEDIA/loud.mkv" "$T/root/media/"
@@ -945,24 +945,35 @@ s.addCredential('bob', 1000, compute_lmhash('s3cret'), compute_nthash('s3cret'))
 s.start()
 PY
 SPID=$!
-sleep 2
+listening "$SPORT" || bad "SMB fixture server did not start"
+FIXTURE="$PWD/build/host/mpc-credentials-fixture"
+fixture() { MPCPS5_TEST_FIXTURE=1 ASAN_OPTIONS=detect_leaks=0 "$FIXTURE" "$@"; }
 T=$(newroot t19d)
-rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS/red.mp4")
-expect "[ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "smb://bob:s3cret@... plays"
-expect "grep -q 'smb://bob:\*\*\*@127.0.0.1' $T/root/logs/boot.log && ! grep -rq s3cret $T/root/logs $T/out.txt" "the password is *** in the log; nowhere in the logs or the output"
-expect "! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^File1=smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4$' $T/root/mpc-hc.ini" "mpc-hc.ini keeps the address without the password"
-expect "grep -q \"smb://bob@127.0.0.1:$SPORT	s3cret\" $T/root/credentials.ini && [ \$(stat -c %a $T/root/credentials.ini) = 600 ]" "the password in credentials.ini, readable by its owner only"
-rm -f $T/root/logs/boot.log
+fixture "$T/root" setup "smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS/red.mp4"
 rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
-expect "[ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "smb://bob@... typed without the password: the kept one is used, it plays"
+cp "$T/out.txt" "$T/playback-out.txt"
+cp "$T/root/logs/boot.log" "$T/playback-boot.log"
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "authenticated SMB plays automatically with the saved encrypted password"
+expect "! grep -rq s3cret $T/root/logs $T/out.txt" "network password is absent from logs and output"
+expect "! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^File1=smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4$' $T/root/mpc-hc.ini" "saved addresses omit the network password"
+expect "[ -f $T/root/credentials.enc ] && [ ! -f $T/root/credentials.ini ] && ! grep -aq s3cret $T/root/credentials.enc && [ \"\$(stat -c %a $T/root/credentials.enc)\" = 600 ]" "credentials are encrypted with owner-only permissions"
+rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "a second app process restores the encrypted password and plays"
 nosan "$T"
-# an mpc-hc.ini of 1.1.1, the password in its addresses: moved out at the first start
+fixture "$T/root" session "smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS/red.mp4"
+rc=$(run "$T" "0:0" "50:state;80:quit" "45" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
+expect "[ $rc = 0 ] && ! grep -q '\[player\] opened' $T/root/logs/boot.log" "unchecking save removes the saved password for the next launch"
+nosan "$T"
+# Existing plaintext is migrated automatically only after verified encrypted writes.
 T=$(newroot t19e)
-ini "$T" "Volume=100
+ini "$T" "Volume=73
 [Network]
 Server0=Home|smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS"
-rc=$(run "$T" "0:0" "30:quit" "")
-expect "[ $rc = 0 ] && grep -q 'passwords moved from mpc-hc.ini to credentials.ini' $T/root/logs/boot.log && ! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^Server0=Home|smb://bob@127.0.0.1:$SPORT/VIDEOS$' $T/root/mpc-hc.ini && grep -q s3cret $T/root/credentials.ini" "an older mpc-hc.ini: its passwords moved to credentials.ini at once"
+cp "$T/root/mpc-hc.ini" "$T/before.ini"
+rc=$(MPCPS5_HOST_CREDENTIALS_FAIL=entropy run "$T" "0:0" "50:quit" "25")
+expect "[ $rc = 0 ] && cmp -s $T/root/mpc-hc.ini $T/before.ini && [ ! -e $T/root/credentials.enc ]" "failed automatic migration preserves the original data"
+rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && ! grep -aq s3cret $T/root/mpc-hc.ini $T/root/credentials.enc && grep -q '^Volume=73$' $T/root/mpc-hc.ini" "automatic migration preserves SMB authentication and old preferences without any setup dialog"
 nosan "$T"
 # the 8-channel port refused once: stereo for that film; asked again (10 s later) for the next surround one
 T=$(newroot t19h)
@@ -971,37 +982,24 @@ ini "$T" "AudioOutput=1"
 rc=$(MPCPS5_HOST_AUDIO8_FAIL=1 run "$T" "0:0" "720:open $T/root/media/surround71.mkv;800:quit" "" "$T/root/media/surround51.mkv")
 expect "[ \$(grep -c 'sceAudioOutOpen(48 kHz, S16 8 channels, 256) -> -' $T/root/logs/boot.log) = 1 ] && grep -q 'sound: 8 channels -> 7.1 (8-channel output)' $T/root/logs/boot.log && grep -q '\[audio\] 8-channel output' $T/root/logs/boot.log" "the 8-channel port refused once: asked again for the next surround film, which gets it"
 nosan "$T"
-# credentials.ini can't be written: mpc-hc.ini is left as it was, so no password is lost; the next start moves it
-T=$(newroot t19f)
-ini "$T" "Volume=100
-[Network]
-Server0=Home|smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS"
-rc=$(MPCPS5_HOST_SETTINGS_FAIL=credentials run "$T" "0:0" "30:quit" "")
-expect "[ $rc = 0 ] && grep -q \"couldn't write credentials.ini: mpc-hc.ini left as it was\" $T/root/logs/boot.log && grep -q '^Server0=Home|smb://bob:s3cret@' $T/root/mpc-hc.ini && [ ! -e $T/root/credentials.ini ] && [ ! -e $T/root/credentials.ini.tmp ] && [ ! -e $T/root/mpc-hc.ini.tmp ]" "credentials.ini can't be written: mpc-hc.ini untouched, the password still there"
-rc=$(run "$T" "0:0" "30:quit" "")
-expect "! grep -q s3cret $T/root/mpc-hc.ini && grep -q s3cret $T/root/credentials.ini" "the next start: moved to credentials.ini"
-# mpc-hc.ini can't be replaced: credentials.ini keeps the old passwords too (the old mpc-hc.ini still needs them)
-cp $T/root/mpc-hc.ini $T/ini.before
-rc=$(MPCPS5_HOST_SETTINGS_FAIL=settings run "$T" "0:0" "20:quit" "smb://alice:pw2@127.0.0.1:$SPORT/VIDEOS/red.mp4")
-expect "cmp -s $T/root/mpc-hc.ini $T/ini.before && grep -q s3cret $T/root/credentials.ini" "mpc-hc.ini can't be replaced: left as it was, its passwords kept"
-nosan "$T"
 kill $SPID 2>/dev/null
-# a password changed: the old one stays until the new mpc-hc.ini is in place (generations)
-T=$(newroot t19g)
-U=127.0.0.1:1/VIDEOS/x.mkv
-rc=$(run "$T" "0:0" "30:quit" "" "smb://bob:oldpass@$U")
-expect "grep -qx '; generation 1' $T/root/credentials.ini && grep -q 'oldpass' $T/root/credentials.ini && grep -qx 'Generation=1' $T/root/mpc-hc.ini" "a password kept: credentials.ini and mpc-hc.ini both say generation 1"
-rc=$(MPCPS5_HOST_SETTINGS_FAIL=settings run "$T" "0:0" "30:quit" "" "smb://bob:NEWpass@$U")
-expect "grep -q 'oldpass' $T/root/credentials.ini && ! grep -q NEWpass $T/root/credentials.ini && grep -qx 'Generation=1' $T/root/mpc-hc.ini && [ ! -e $T/root/credentials.ini.new ]" "the password changed but mpc-hc.ini can't be replaced: the old password and settings stay together"
-rc=$(MPCPS5_HOST_SETTINGS_FAIL=credentials-rename run "$T" "0:0" "30:quit" "" "smb://bob:NEWpass@$U")
-expect "grep -qx 'Generation=2' $T/root/mpc-hc.ini && grep -q oldpass $T/root/credentials.ini && grep -q NEWpass $T/root/credentials.ini.new" "cut off after mpc-hc.ini was replaced: the new password waits in credentials.ini.new (generation 2)"
-rm -f $T/root/logs/boot.log
-rc=$(run "$T" "0:0" "30:quit" "")
-expect "grep -q 'credentials.ini of generation 2 put in place' $T/root/logs/boot.log && grep -q NEWpass $T/root/credentials.ini && ! grep -q oldpass $T/root/credentials.ini && [ ! -e $T/root/credentials.ini.new ]" "the next start takes it: credentials.ini has the new password"
-printf '; generation 99\nsmb://bob@127.0.0.1:1\tstale\n' >$T/root/credentials.ini.new
-rc=$(run "$T" "0:0" "30:quit" "")
-expect "[ ! -e $T/root/credentials.ini.new ] && grep -q NEWpass $T/root/credentials.ini && ! grep -q stale $T/root/credentials.ini" "a credentials.ini.new of another generation (a save that didn't finish): dropped"
-nosan "$T"
+# A pending old-generation transaction imports the file selected by the settings generation.
+T=$(newroot t19generation)
+ini "$T" "[Network]
+Server0=Home|smb://bob@127.0.0.1:$SPORT/VIDEOS
+[Credentials]
+Generation=2"
+printf '; generation 1\nsmb://bob@127.0.0.1:%s\toldpass\n' "$SPORT" >"$T/root/credentials.ini"
+printf '; generation 2\nsmb://bob@127.0.0.1:%s\ts3cret\n' "$SPORT" >"$T/root/credentials.ini.new"
+fixture "$T/root" migrate
+expect "[ -f $T/root/credentials.enc ] && [ ! -e $T/root/credentials.ini ] && [ ! -e $T/root/credentials.ini.new ] && ! grep -aq s3cret $T/root/credentials.enc" "interrupted legacy credential transaction migrates to the encrypted format without plaintext remnants"
+# Password updates are encrypted even if a separate settings write fails.
+T=$(newroot t19save)
+fixture "$T/root" setup "smb://bob:oldpass@127.0.0.1:1/VIDEOS/red.mp4"
+cp "$T/root/mpc-hc.ini" "$T/before.ini"
+MPCPS5_HOST_SETTINGS_FAIL=settings fixture "$T/root" setup "smb://bob:NEWpass@127.0.0.1:1/VIDEOS/red.mp4" >/dev/null 2>&1
+expect "cmp -s $T/root/mpc-hc.ini $T/before.ini && [ -f $T/root/credentials.enc ] && ! grep -aq -e oldpass -e NEWpass $T/root/credentials.enc && [ ! -e $T/root/credentials.ini ]" "failed settings replacement leaves the old settings and encrypted credentials intact"
+
 fi
 
 if want 20; then
