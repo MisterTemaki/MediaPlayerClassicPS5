@@ -6,7 +6,9 @@ unlock step or separate credential-management dialog.
 
 ## SMB connection
 
-Open **Add a network location**, enter the server, share, user name and password, then choose **OK**.
+Open **View > Options > Miscellaneous > Network locations > Add...**, enter the server, share, user name
+and password, then choose **OK** and apply the Options changes. The file browser also provides
+**Add a network location...** in its navigation pane.
 The password field and its on-screen keyboard show masked characters. Address fields, saved locations,
 recent files, favorites and logs omit or redact the password.
 
