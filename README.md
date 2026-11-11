@@ -15,9 +15,11 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-**1.6.2 development: encrypted network passwords.** Passwords are masked in the SMB form and hidden from
+**1.6.2: encrypted network passwords.** Passwords are masked in the SMB form and hidden from
 addresses. **Save password on this PS5** reuses the encrypted password automatically after restart, with no
-master password or extra dialog. See [saved network passwords](docs/NETWORK-PASSWORDS.md) for details.
+master password or extra dialog. Open **View > Options > Miscellaneous > Network locations > Add...** to
+access the checkbox. See [saved network passwords](docs/NETWORK-PASSWORDS.md) and the
+[1.6.2 release notes](docs/RELEASE-NOTES-v1.6.2.md) for downloads and updating.
 
 **1.6.1: dark mode.** Choose **View > Options > Player > Theme > Dark**, then **Apply** or **OK**.
 The interface changes immediately and remembers the selection after restart. **Light** remains the default for
