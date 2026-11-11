@@ -580,12 +580,11 @@ public:
 
 	void Navigate(const std::string& to, bool record = true)
 	{
-		if (NeedsCredentialPrompt(to))
+		if (HasInlinePassword(to))
 		{
-			const bool immediate = credentials::Get().Unlocked();
-			RequestCredentials(to, [this, record, immediate](const std::string& clean) {
-				// A keyboard callback runs before the keyboard leaves the modal stack.
-				if ((immediate || WindowManager::Get().Top() == this) && !closed) Navigate(clean, record);
+			UseNetworkCredentials(to, [this, record](const std::string& clean) {
+				// This callback is synchronous, including when the URL keyboard is open.
+				if (!closed) Navigate(clean, record);
 			});
 			return;
 		}
@@ -1928,9 +1927,6 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	};
 	d->Group(p, "Settings management", 5, 194, 286, 28);
 	Button* reset = d->P(p, new Button, 10, 204, 86, 14);
-	Button* vault = d->P(p, new Button, 105, 204, 180, 14);
-	vault->text = T("Credential vault...");
-	vault->on_click = [] { ShowCredentialVaultDialog(); };
 	reset->text = T("Reset");
 	reset->on_click = [o] {
 		MessageBox(T("Restore all the settings to their defaults? (Recent files, favorites and network locations are kept.)"),
@@ -2129,12 +2125,13 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 	struct Net : public Dialog
 	{
 		Edit *host = nullptr, *share = nullptr, *user = nullptr, *pass = nullptr, *name = nullptr;
+		CheckBox* remember = nullptr;
 		std::function<void(const std::string&, const std::string&)> done;
 	};
 	Net* d = new Net;
 	d->title = T("Add Network Location");
 	d->done = std::move(done);
-	d->rect = CRect(0, 0, Dialog::DuX(280) + 2, Dialog::DuY(176) + d->CaptionHeight() + 1);
+	d->rect = CRect(0, 0, Dialog::DuX(280) + 2, Dialog::DuY(200) + d->CaptionHeight() + 1);
 	d->Center(WindowManager::Get().screen);
 	Static* intro = d->Add(new Static);
 	intro->text = T("Specify the location of your network share (a shared folder on a Windows PC, a NAS, Samba). "
@@ -2159,13 +2156,17 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 	d->host->cue = "192.168.0.10";
 	d->share->cue = "Videos";
 	d->user->cue = "guest";
+	d->remember = d->Add(new CheckBox);
+	d->remember->text = T("Save password on this PS5");
+	d->remember->rect = d->DuRect(92, 143, 181, 14);
+	d->remember->checked = true;
 	Button* ok = d->Add(new Button);
 	ok->text = T("OK");
 	ok->is_default = true;
-	ok->rect = d->DuRect(169, 154, 50, 14);
+	ok->rect = d->DuRect(169, 178, 50, 14);
 	Button* cancel = d->Add(new Button);
 	cancel->text = T("Cancel");
-	cancel->rect = d->DuRect(223, 154, 50, 14);
+	cancel->rect = d->DuRect(223, 178, 50, 14);
 	Net* dd = d;
 	ok->on_click = [dd] {
 		std::string host = dd->host->text;
@@ -2211,12 +2212,12 @@ void ShowAddNetworkDialog(std::function<void(const std::string&, const std::stri
 			url += "/" + dd->share->text;
 		std::string n = HideSecret(dd->name->text);
 		if (n.empty()) n = FileName(url);
-		RequestCredentials(std::move(url), [dd, n](const std::string& clean) {
+		UseNetworkCredentials(std::move(url), [dd, n](const std::string& clean) {
 			if (WindowManager::Get().Top() != dd || dd->closed) return;
 			auto cb = dd->done;
 			dd->EndDialog(1);
 			if (cb) cb(n, clean);
-		});
+		}, dd->remember->checked);
 		credentials::Wipe(url);
 	};
 	cancel->on_click = [dd] { dd->EndDialog(2); };

@@ -88,7 +88,7 @@ std::string SettingsPath()
 	return OrbisRoot() + "/mpc-hc.ini";
 }
 
-// Legacy plaintext files are read only for migration into the encrypted credential vault.
+// Legacy plaintext files are read only for migration into the encrypted credential storage.
 namespace
 {
 // Host tests: MPCPS5_HOST_SETTINGS_FAIL=settings preserves the previous settings file.
@@ -567,7 +567,7 @@ void Settings::Load()
 	if (recent.size() > 20)
 		recent.resize(20);
 	// Do not put credentials back into UI/model addresses. Preserve legacy files until the user
-	// creates/unlocks the vault and a verified encrypted copy has been committed.
+	// has committed a verified encrypted copy.
 	Secrets legacy;
 	auto strip = [&](std::string& url) {
 		std::string clean = Bare(url, &legacy);
@@ -591,7 +591,7 @@ void Settings::Load()
 
 bool Settings::Save() const
 {
-	if (!credentials::Get().Unlocked() && !credentials::Get().Pending())
+	if (!credentials::Get().Pending())
 	{
 		// A caller may save a fresh Settings object without Load. Do not discard an existing legacy file.
 		for (const auto& file : {CredentialsPath(), CredentialsPath() + ".new", CredentialsPath() + ".tmp"})
@@ -677,19 +677,22 @@ bool Settings::Save() const
 		return false;
 	}
 	SyncFolder(OrbisRoot());
-	// Only remove the old plaintext after the vault and password-free settings are committed.
-	// Empty legacy files carry no credentials and can be removed without creating a vault.
+	std::vector<std::string> referenced = recent;
+	for (const auto& server : servers) referenced.push_back(server.url);
+	for (const auto& favorite : favorites) referenced.push_back(favorite.url);
+	for (const auto& position : positions) referenced.push_back(position.url);
+	referenced.push_back(last_dir);
+	if (!credentials::Get().Retain(referenced, error))
+	{
+		OrbisLog("[settings] %s Legacy credentials were kept.", error.c_str());
+		return false;
+	}
+	// Remove old plaintext only after verified encryption and password-free settings are committed.
 	bool cleaned = true;
 	for (const auto& legacy : {CredentialsPath(), CredentialsPath() + ".new", CredentialsPath() + ".tmp"})
 	{
 		Secrets remaining;
 		static_cast<std::map<std::string, std::string>&>(remaining) = ReadCredentials(legacy);
-		if (!credentials::Get().Unlocked() && !remaining.empty())
-		{
-			credentials::Get().ImportLegacy(remaining);
-			cleaned = false;
-			continue;
-		}
 		if (legacy_read_failed) { cleaned = false; continue; }
 		if (unlink(legacy.c_str()) != 0 && errno != ENOENT)
 		{

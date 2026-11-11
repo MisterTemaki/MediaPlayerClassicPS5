@@ -152,7 +152,7 @@ std::string PadActionText(PadAction a);
 // whether holding the button repeats it (jumps, volume, chapters, delays)
 bool PadActionRepeats(PadAction a);
 
-// Resolve a transport address using the unlocked credential vault. UI/model addresses stay password-free.
+// Resolve a transport address using the encrypted credential store. UI/model addresses stay password-free.
 std::string WithStoredPassword(const std::string& url);
 
 struct Settings

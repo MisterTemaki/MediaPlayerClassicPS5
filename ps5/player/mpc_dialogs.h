@@ -41,10 +41,9 @@ void ShowAddFavoriteDialog(const std::string& name, std::function<void(const std
 void ShowOrganizeFavoritesDialog();
 // a network location (smb://), as Windows' "Add a network location" wizard: done(name, url)
 void ShowAddNetworkDialog(std::function<void(const std::string&, const std::string&)> done);
-void ShowCredentialVaultDialog(std::function<void(bool)> done = nullptr);
-bool NeedsCredentialPrompt(const std::string& url);
-// Cancelling leaves the requested network operation unopened. The callback receives a password-free URL.
-void RequestCredentials(std::string url, std::function<void(const std::string&)> ready);
+bool HasInlinePassword(const std::string& url);
+// The callback receives a password-free URL. A failed encrypted write leaves the form open.
+void UseNetworkCredentials(std::string url, std::function<void(const std::string&)> ready, bool remember = true);
 
 // the media and subtitle extensions MPC-HC registers (CMediaFormats)
 bool IsMediaFile(const std::string& name);

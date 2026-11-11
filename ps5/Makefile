@@ -42,7 +42,7 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	coreorbis/orbis-shims/ProsperoHdr.cpp \
 	coreorbis/orbis-shims/ProsperoInput.cpp coreorbis/orbis-shims/ProsperoJailbreak.cpp \
 	coreorbis/orbis-shims/ProsperoCrash.cpp \
-	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_vault_ui.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
+	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_credentials_ui.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
 	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_credentials.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
 	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp player/mpc_i18n.cpp \
 	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp player/mpc_gpu.cpp player/mpc_bigmem.cpp \
@@ -447,7 +447,7 @@ $(HOST_OUT)/mpc-credentials-test: tests/credentials_test.cpp player/mpc_credenti
 		$(HOST_OUT)/port/third_party/mbedtls/mpc_entropy.o -lpthread
 
 test-credentials: $(HOST_OUT)/mpc-credentials-test
-	@task_root=$$(mktemp -d); ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 $(HOST_OUT)/mpc-credentials-test "$$task_root/vault"
+	@task_root=$$(mktemp -d); ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 $(HOST_OUT)/mpc-credentials-test "$$task_root/credentials"
 
 $(HOST_OUT)/mpc-credentials-ui-test: tests/credentials_ui_test.cpp $(filter-out $(HOST_OUT)/port/coreorbis/main-boot.o,$(HOST_EMU_OBJ)) $(HOST_OUT)/helper_data.o $(HOST_GPU_OBJ)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN) -o $@ $^ \

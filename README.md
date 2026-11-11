@@ -15,10 +15,9 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-**1.6.2 development: encrypted credentials.** Network passwords are stored in a master-password vault, and
-passwords are hidden from address fields and the URL keyboard. The optional **Remember on this PS5** checkbox
-allows automatic unlock on later launches; it stores a local key and is off by default. See the
-[credential-vault guide](docs/CREDENTIAL-VAULT.md) for the security tradeoff and migration from older settings.
+**1.6.2 development: encrypted network passwords.** Passwords are masked in the SMB form and hidden from
+addresses. **Save password on this PS5** reuses the encrypted password automatically after restart, with no
+master password or extra dialog. See [saved network passwords](docs/NETWORK-PASSWORDS.md) for details.
 
 **1.6.1: dark mode.** Choose **View > Options > Player > Theme > Dark**, then **Apply** or **OK**.
 The interface changes immediately and remembers the selection after restart. **Light** remains the default for
@@ -469,7 +468,7 @@ Where:
   address, the share (optional: without it the server's shares are listed), user and password (empty: guest),
   a name. The location stays in the navigation pane. Addresses can also be typed:
   `smb://user:password@192.168.0.10/Videos/Movie.mkv` (once a password is kept, `smb://user@192.168.0.10/...`
-  uses it after the vault is unlocked). Windows 10/11 needs the share's user and password
+  uses the saved password automatically). Windows 10/11 needs the share's user and password
   (guest access is off by default there); a NAS or Samba share may allow guest.
 - **The Internet**: `http://` and `https://` (certificates checked against Mozilla's list), HLS (`.m3u8`),
   `rtmp://`, `rtsp://`, `udp://`. Type the address in File > Open File.
@@ -799,8 +798,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
                              TouchpadPointer, where Options was moved (OptionsX / OptionsY), when the hidden
                              fullscreen controls show (HideFullscreenControlsPolicy: 2 the pointer moves, 1 over them),
                              Recent Files, file positions, Favorites, network locations (without passwords)
-/data/mpcps5/credentials.vault encrypted network credentials (master-password vault)
-/data/mpcps5/.credentials-device/unlock.key optional local key when automatic unlock is explicitly enabled
+/data/mpcps5/credentials.enc encrypted network credentials
+/data/mpcps5/.credentials-device/key.bin private local encryption key
 /data/mpcps5/media           a place for media on the console's storage
 /data/mpcps5/fonts           subtitle fonts: the Default Style's font, ASS/SSA's fonts, the characters others lack
 /data/mpcps5/screenshots     File > Save Image
@@ -811,10 +810,11 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 /data/mpcps5/update-pending.txt  an update installed, until a start runs it (1.5: the version check after it)
 ```
 
-Network passwords stay out of saved addresses and logs. They are encrypted in `credentials.vault`. The master
-password is requested once per session unless **Remember on this PS5 (automatic unlock)** is enabled. Automatic
-unlock stores a private local key; someone who can read the key and vault can access the passwords. See the
-[credential-vault guide](docs/CREDENTIAL-VAULT.md) for setup, migration, disabling automatic unlock and limitations.
+Network passwords stay out of saved addresses and logs. They are encrypted in `credentials.enc`, with a
+random local key stored separately under private permissions. Saved passwords are reused automatically;
+unchecking **Save password on this PS5** keeps the password only for the current session. Someone who can read
+both the local key and encrypted file can recover the passwords. See [saved network passwords](docs/NETWORK-PASSWORDS.md)
+for migration and storage details.
 
 ## Building
 
@@ -869,7 +869,7 @@ Source map:
 | `player/mpc_smb.cpp`, `mpc_console.cpp` | SMB through libsmb2; the console glue (thread stacks, name lookups) |
 | `player/mpc_disc.cpp` | disc drives: the watcher, the sector reader (read-ahead cache), UDF / ISO 9660, DVD-Video and Blu-ray titles |
 | `player/mpc_settings.cpp` | mpc-hc.ini and migration of legacy credentials |
-| `player/mpc_credentials.cpp`, `player/mpc_vault_ui.cpp` | encrypted credentials, master-password dialogs and optional automatic unlock |
+| `player/mpc_credentials.cpp`, `player/mpc_credentials_ui.cpp` | encrypted network passwords, session-only credentials and masked URL capture |
 
 ## Credits and licences
 

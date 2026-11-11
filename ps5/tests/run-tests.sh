@@ -945,34 +945,35 @@ s.addCredential('bob', 1000, compute_lmhash('s3cret'), compute_nthash('s3cret'))
 s.start()
 PY
 SPID=$!
-sleep 2
+listening "$SPORT" || bad "SMB fixture server did not start"
 FIXTURE="$PWD/build/host/mpc-credentials-fixture"
 fixture() { MPCPS5_TEST_FIXTURE=1 ASAN_OPTIONS=detect_leaks=0 "$FIXTURE" "$@"; }
 T=$(newroot t19d)
 fixture "$T/root" setup "smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS/red.mp4"
 rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
-expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "remembered vault unlock: authenticated SMB plays without re-entering credentials"
+cp "$T/out.txt" "$T/playback-out.txt"
+cp "$T/root/logs/boot.log" "$T/playback-boot.log"
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "authenticated SMB plays automatically with the saved encrypted password"
 expect "! grep -rq s3cret $T/root/logs $T/out.txt" "network password is absent from logs and output"
 expect "! grep -q s3cret $T/root/mpc-hc.ini && grep -q '^File1=smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4$' $T/root/mpc-hc.ini" "saved addresses omit the network password"
-expect "[ -f $T/root/credentials.vault ] && [ ! -f $T/root/credentials.ini ] && ! grep -aq s3cret $T/root/credentials.vault && [ \"\$(stat -c %a $T/root/credentials.vault)\" = 600 ]" "credentials are encrypted with owner-only permissions"
+expect "[ -f $T/root/credentials.enc ] && [ ! -f $T/root/credentials.ini ] && ! grep -aq s3cret $T/root/credentials.enc && [ \"\$(stat -c %a $T/root/credentials.enc)\" = 600 ]" "credentials are encrypted with owner-only permissions"
 rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
-expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "a second app process restores the remembered vault and plays"
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && $CHECK $T/dump/flip00075.ppm 960 400 red >/dev/null" "a second app process restores the encrypted password and plays"
 nosan "$T"
-fixture "$T/root" disable
-rc=$(run "$T" "0:0" "50:state;60:key escape;80:quit" "45" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
-expect "[ $rc = 0 ] && [ ! -e $T/root/.credentials-device/unlock.key ] && ! grep -q '\[player\] opened' $T/root/logs/boot.log" "unchecking remember makes the next launch wait for the master password"
+fixture "$T/root" session "smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS/red.mp4"
+rc=$(run "$T" "0:0" "50:state;80:quit" "45" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
+expect "[ $rc = 0 ] && ! grep -q '\[player\] opened' $T/root/logs/boot.log" "unchecking save removes the saved password for the next launch"
 nosan "$T"
-# Existing plaintext is preserved until the user completes master-password setup.
+# Existing plaintext is migrated automatically only after verified encrypted writes.
 T=$(newroot t19e)
 ini "$T" "Volume=73
 [Network]
 Server0=Home|smb://bob:s3cret@127.0.0.1:$SPORT/VIDEOS"
 cp "$T/root/mpc-hc.ini" "$T/before.ini"
-rc=$(run "$T" "0:0" "30:key escape;50:quit" "25")
-expect "[ $rc = 0 ] && cmp -s $T/root/mpc-hc.ini $T/before.ini && [ ! -e $T/root/credentials.vault ]" "cancelling legacy migration preserves the original data"
-fixture "$T/root" migrate
+rc=$(MPCPS5_HOST_CREDENTIALS_FAIL=entropy run "$T" "0:0" "50:quit" "25")
+expect "[ $rc = 0 ] && cmp -s $T/root/mpc-hc.ini $T/before.ini && [ ! -e $T/root/credentials.enc ]" "failed automatic migration preserves the original data"
 rc=$(run "$T" "0:0" "80:state;90:quit" "75" "smb://bob@127.0.0.1:$SPORT/VIDEOS/red.mp4")
-expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && ! grep -aq s3cret $T/root/mpc-hc.ini $T/root/credentials.vault && grep -q '^Volume=73$' $T/root/mpc-hc.ini" "verified legacy migration preserves both SMB authentication and old preferences"
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && ! grep -aq s3cret $T/root/mpc-hc.ini $T/root/credentials.enc && grep -q '^Volume=73$' $T/root/mpc-hc.ini" "automatic migration preserves SMB authentication and old preferences without any setup dialog"
 nosan "$T"
 # the 8-channel port refused once: stereo for that film; asked again (10 s later) for the next surround one
 T=$(newroot t19h)
@@ -991,13 +992,13 @@ Generation=2"
 printf '; generation 1\nsmb://bob@127.0.0.1:%s\toldpass\n' "$SPORT" >"$T/root/credentials.ini"
 printf '; generation 2\nsmb://bob@127.0.0.1:%s\ts3cret\n' "$SPORT" >"$T/root/credentials.ini.new"
 fixture "$T/root" migrate
-expect "[ -f $T/root/credentials.vault ] && [ ! -e $T/root/credentials.ini ] && [ ! -e $T/root/credentials.ini.new ] && ! grep -aq s3cret $T/root/credentials.vault" "interrupted legacy credential transaction migrates to the encrypted format without plaintext remnants"
+expect "[ -f $T/root/credentials.enc ] && [ ! -e $T/root/credentials.ini ] && [ ! -e $T/root/credentials.ini.new ] && ! grep -aq s3cret $T/root/credentials.enc" "interrupted legacy credential transaction migrates to the encrypted format without plaintext remnants"
 # Password updates are encrypted even if a separate settings write fails.
 T=$(newroot t19save)
 fixture "$T/root" setup "smb://bob:oldpass@127.0.0.1:1/VIDEOS/red.mp4"
 cp "$T/root/mpc-hc.ini" "$T/before.ini"
 MPCPS5_HOST_SETTINGS_FAIL=settings fixture "$T/root" setup "smb://bob:NEWpass@127.0.0.1:1/VIDEOS/red.mp4" >/dev/null 2>&1
-expect "cmp -s $T/root/mpc-hc.ini $T/before.ini && [ -f $T/root/credentials.vault ] && ! grep -aq -e oldpass -e NEWpass $T/root/credentials.vault && [ ! -e $T/root/credentials.ini ]" "failed settings replacement leaves the old settings and encrypted credentials intact"
+expect "cmp -s $T/root/mpc-hc.ini $T/before.ini && [ -f $T/root/credentials.enc ] && ! grep -aq -e oldpass -e NEWpass $T/root/credentials.enc && [ ! -e $T/root/credentials.ini ]" "failed settings replacement leaves the old settings and encrypted credentials intact"
 
 fi
 

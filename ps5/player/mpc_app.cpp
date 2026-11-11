@@ -392,9 +392,9 @@ private:
 	// a file, a URL or a playlist file: a new playlist with it
 	void OpenAny(const std::string& url)
 	{
-		if (NeedsCredentialPrompt(url))
+		if (HasInlinePassword(url))
 		{
-			RequestCredentials(url, [this](const std::string& clean) { OpenAny(clean); });
+			UseNetworkCredentials(url, [this](const std::string& clean) { OpenAny(clean); });
 			return;
 		}
 
@@ -410,8 +410,8 @@ private:
 	}
 	void AddToPlaylist(const std::string& url)
 	{
-		if (NeedsCredentialPrompt(url))
-			RequestCredentials(url, [this](const std::string& clean) { AddToPlaylist(clean); });
+		if (HasInlinePassword(url))
+			UseNetworkCredentials(url, [this](const std::string& clean) { AddToPlaylist(clean); });
 		else playlist_.push_back(credentials::WithoutPassword(url));
 	}
 };
@@ -2452,9 +2452,9 @@ void MainFrame::SavePosition()
 
 void MainFrame::Open(const std::string& url, bool use_saved_pos)
 {
-	if (NeedsCredentialPrompt(url))
+	if (HasInlinePassword(url))
 	{
-		RequestCredentials(url, [this, use_saved_pos](const std::string& clean) {
+		UseNetworkCredentials(url, [this, use_saved_pos](const std::string& clean) {
 			for (auto& item : playlist_)
 				if (credentials::WithoutPassword(item) == clean) { credentials::Wipe(item); item = clean; }
 			Open(clean, use_saved_pos);
@@ -3420,9 +3420,9 @@ void MainFrame::OnEvent(const InputEvent& ev)
 int MainFrame::Run(const std::string& first)
 {
 	s_.Load();
-	std::string vault_error;
-	if (credentials::Get().UnlockRemembered(vault_error)) s_.Save();
-	else if (!vault_error.empty()) OrbisLog("[credentials] %s", vault_error.c_str());
+	std::string credential_error;
+	if (!credentials::Get().Load(credential_error)) OrbisLog("[credentials] %s", credential_error.c_str());
+	else s_.Save();
 	sys::SetDarkTheme(s_.dark_mode);
 	OrbisLog("[ui] theme: %s", s_.dark_mode ? "Dark" : "Light");
 	g_dpi = s_.dpi;
@@ -3454,8 +3454,6 @@ int MainFrame::Run(const std::string& first)
 	ApplyAudio();
 	if (!first.empty())
 		OpenAny(first);
-	if (credentials::Get().Pending() && !credentials::HasUser(first))
-		ShowCredentialVaultDialog();
 	if (!have_data_)
 		MessageBox(Fmt(T("Media Player Classic PS5 has no access to the console's storage (/data) or USB drives.\n\nSend "
 						 "MediaPlayerClassicPS5-v%s.elf with your payload loader (it unlocks the app), then open the app "
@@ -3691,7 +3689,7 @@ int MainFrame::Run(const std::string& first)
 	disc::Stop();
 	tonemap::Shutdown(); // the HDR workers stopped and joined (the player's threads are gone)
 	s_.Save();
-	credentials::Get().Lock();
+	credentials::Get().ClearSession();
 	return 0;
 }
 } // namespace

@@ -432,7 +432,7 @@ public:
 	bool Dispatch(const InputEvent& ev); // true when a dialog or a popup took it
 	void Paint(CDC& dc);
 	void Tick();
-	void Clear(); // joins background dialog work before the application's credential vault is locked
+	void Clear(); // dismiss dialogs before session credentials are cleared
 	Dialog* Top() const { return dialogs_.empty() ? nullptr : dialogs_.back().get(); }
 	// 1.5.3: a dialog, a menu or a drop-down drawn over (x, y)
 	bool Covers(int x, int y) const;
