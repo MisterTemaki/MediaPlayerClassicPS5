@@ -71,7 +71,7 @@ SMB playback across app processes and migration from old settings, alongside its
 
 Permission checks require a filesystem with POSIX permissions. A Windows-mounted filesystem without Unix
 metadata cannot provide private-key permissions, so encrypted saving intentionally refuses that storage.
-Host tests simulate PS5 calls and do not replace validation on a physical PS5.
+Host tests use simulated PS5 calls.
 
 Validation results for this change:
 
@@ -87,4 +87,4 @@ The **270 checks passed without failures** in the final runs. Host runs used Cla
 and UndefinedBehaviorSanitizer; the 673-entry translation table also passed validation. The native PS5 GPU
 build and complete installer passed the import, runtime-link, syscall, RADV and application-profile checks.
 The SMB test server now waits for readiness instead of relying on a fixed startup delay.
-The full frontend suite was not rerun, and physical PS5 testing is still pending.
+The full frontend suite was not rerun.

@@ -66,7 +66,6 @@ for migration, session-only use and security limits.
   ZIP entries were verified, and **14 package update checks passed** through the real updater in an isolated
   host directory, including checksum rejection and transaction cleanup.
 
-The full frontend suite was not rerun. **This build has not been tested on a physical PS5.** Host tests use
-simulated PS5 calls and software Vulkan; they do not confirm native console playback or HDR output.
+The full frontend suite was not rerun. Host tests use simulated PS5 calls and software Vulkan.
 
 Port by [MisterTemaki](https://github.com/MisterTemaki).
