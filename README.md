@@ -15,6 +15,12 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
+**1.6.3: settings backup, and the app under Media.** **View > Options > Miscellaneous > Backup** keeps a copy of
+the settings (Options, Keys, favorites, recent files, file positions, network locations) on a USB drive, written
+again whenever they change, and **Import...** brings it back after a factory reset or on another PS5 (#10). The
+home screen lists the app under **Media** instead of Games (#6). See [settings backup](docs/SETTINGS-BACKUP.md)
+and the [1.6.3 release notes](docs/RELEASE-NOTES-v1.6.3.md).
+
 **1.6.2: encrypted network passwords.** Passwords are masked in the SMB form and hidden from
 addresses. **Save password on this PS5** reuses the encrypted password automatically after restart, with no
 master password or extra dialog. Open **View > Options > Miscellaneous > Network locations > Add...** to
@@ -810,6 +816,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
                              installer.log, helper.log)
 /data/mpcps5/update-check.txt  when the app last looked for an update
 /data/mpcps5/update-pending.txt  an update installed, until a start runs it (1.5: the version check after it)
+<drive>/mpcps5/backup/mpc-hc.ini  1.6.3: a copy of mpc-hc.ini on the USB drive chosen in Options > Miscellaneous >
+                             Backup (BackupDrive=), written whenever the settings change; Import... reads it back
 ```
 
 Network passwords stay out of saved addresses and logs. They are encrypted in `credentials.enc`, with a

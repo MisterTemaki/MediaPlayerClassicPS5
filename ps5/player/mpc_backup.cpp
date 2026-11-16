@@ -156,7 +156,9 @@ bool WriteTo(const std::string& drive, std::string& error, bool* written)
 		{
 			bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
 			ok = fflush(f) == 0 && ok;
-			ok = fsync(fileno(f)) == 0 && ok;
+			// on the disk before the rename; a drive's file system that can't (fsync refused) still gets the file
+			if (ok && fsync(fileno(f)) != 0)
+				OrbisLog("[backup] fsync of %s: %s (written without it)", tmp.c_str(), strerror(errno));
 			ok = fclose(f) == 0 && ok;
 			if (!ok)
 				error = "can't write " + tmp + " (" + strerror(errno) + ")";
