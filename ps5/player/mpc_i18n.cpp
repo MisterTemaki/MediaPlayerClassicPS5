@@ -1386,6 +1386,77 @@ const Entry kTable[] = {
 		"Media Player Classic PS5 %s ist verfügbar (du hast %s).\n\nDiese Kopie läuft aus %s, wo die App nicht "
 		"schreiben kann: Sie lässt sich von hier aus nicht aktualisieren. Aktualisiere diesen Ordner so, wie du ihn "
 		"dorthin gelegt hast (mit dem Ordner der neuen Version aus dem Zip der Version oder mit ihrem Payload)."},
+	// 1.6.3 (#10): Options > Miscellaneous > Backup
+	{"Backup", "Copia de seguridad", "Backup", "Sauvegarde", "Sicherung"},
+	{"Back up the settings to a USB drive", "Copia de seguridad de los ajustes en una unidad USB",
+		"Backup das configurações em um drive USB", "Sauvegarder les paramètres sur un disque USB",
+		"Einstellungen auf einem USB-Laufwerk sichern"},
+	{"A copy of the settings (Options, Keys, favorites, recent files, file positions and network locations) is kept in "
+	 "the mpcps5/backup folder of the drive chosen here, and written again whenever they change.",
+		"Se guarda una copia de los ajustes (Opciones, Teclas, favoritos, archivos recientes, posiciones de archivo y "
+		"ubicaciones de red) en la carpeta mpcps5/backup de la unidad elegida aquí, y se vuelve a escribir cada vez que "
+		"cambian.",
+		"Uma cópia das configurações (Opções, Teclas, favoritos, arquivos recentes, posições de arquivo e locais de "
+		"rede) fica na pasta mpcps5/backup do drive escolhido aqui, e é gravada de novo sempre que elas mudam.",
+		"Une copie des paramètres (Options, Touches, favoris, fichiers récents, positions de fichier et emplacements "
+		"réseau) est gardée dans le dossier mpcps5/backup du disque choisi ici, et réécrite à chaque modification.",
+		"Eine Kopie der Einstellungen (Optionen, Tasten, Favoriten, zuletzt geöffnete Dateien, Dateipositionen und "
+		"Netzwerkorte) liegt im Ordner mpcps5/backup des hier gewählten Laufwerks und wird bei jeder Änderung neu "
+		"geschrieben."},
+	{"Back up automatically to:", "Copia automática en:", "Backup automático em:", "Sauvegarde automatique sur :",
+		"Automatisch sichern auf:"},
+	{"Off", "Desactivado", "Desligado", "Désactivé", "Aus"},
+	{"%s (not connected)", "%s (no conectada)", "%s (não conectado)", "%s (non connecté)", "%s (nicht verbunden)"},
+	{"Back up now", "Copiar ahora", "Fazer backup agora", "Sauvegarder maintenant", "Jetzt sichern"},
+	{"No automatic backup.", "Sin copia automática.", "Sem backup automático.", "Pas de sauvegarde automatique.",
+		"Keine automatische Sicherung."},
+	{"Last backup: %s, in %s", "Última copia: %s, en %s", "Último backup: %s, em %s", "Dernière sauvegarde : %s, dans %s",
+		"Letzte Sicherung: %s, in %s"},
+	{"No backup on this drive yet: %s", "Aún no hay copia en esta unidad: %s", "Ainda não há backup neste drive: %s",
+		"Pas encore de sauvegarde sur ce disque : %s", "Noch keine Sicherung auf diesem Laufwerk: %s"},
+	{"The last backup failed: %s", "La última copia falló: %s", "O último backup falhou: %s",
+		"La dernière sauvegarde a échoué : %s", "Die letzte Sicherung ist fehlgeschlagen: %s"},
+	{"The settings are backed up in %s.", "Los ajustes están copiados en %s.", "As configurações estão salvas em %s.",
+		"Les paramètres sont sauvegardés dans %s.", "Die Einstellungen sind in %s gesichert."},
+	{"The settings couldn't be backed up: %s", "No se pudo hacer la copia de los ajustes: %s",
+		"Não foi possível fazer o backup das configurações: %s", "Les paramètres n'ont pas pu être sauvegardés : %s",
+		"Die Einstellungen konnten nicht gesichert werden: %s"},
+	{"Import", "Importar", "Importar", "Importer", "Importieren"},
+	{"Replaces all the settings with the newest backup found on the connected drives.",
+		"Reemplaza todos los ajustes por la copia más reciente encontrada en las unidades conectadas.",
+		"Substitui todas as configurações pelo backup mais recente encontrado nos drives conectados.",
+		"Remplace tous les paramètres par la sauvegarde la plus récente trouvée sur les disques connectés.",
+		"Ersetzt alle Einstellungen durch die neueste Sicherung auf den verbundenen Laufwerken."},
+	{"Import...", "Importar...", "Importar...", "Importer...", "Importieren..."},
+	{"Network passwords and the fonts folder aren't backed up: type the passwords again after an import.",
+		"Las contraseñas de red y la carpeta fonts no se copian: escribe las contraseñas de nuevo tras importar.",
+		"Senhas de rede e a pasta fonts não entram no backup: digite as senhas de novo depois de importar.",
+		"Les mots de passe réseau et le dossier fonts ne sont pas sauvegardés : saisissez à nouveau les mots de passe "
+		"après une importation.",
+		"Netzwerkpasswörter und der Ordner fonts werden nicht gesichert: Gib die Passwörter nach dem Importieren neu "
+		"ein."},
+	{"No backup was found. Connect the USB drive that has the mpcps5/backup folder, then try again.",
+		"No se encontró ninguna copia. Conecta la unidad USB que tiene la carpeta mpcps5/backup y vuelve a intentarlo.",
+		"Nenhum backup foi encontrado. Conecte o drive USB que tem a pasta mpcps5/backup e tente de novo.",
+		"Aucune sauvegarde trouvée. Branchez le disque USB qui contient le dossier mpcps5/backup, puis réessayez.",
+		"Keine Sicherung gefunden. Schließe das USB-Laufwerk mit dem Ordner mpcps5/backup an und versuche es erneut."},
+	{"Replace all the current settings with the backup of %s from %s?",
+		"¿Reemplazar todos los ajustes actuales por la copia del %s de %s?",
+		"Substituir todas as configurações atuais pelo backup de %s em %s?",
+		"Remplacer tous les paramètres actuels par la sauvegarde du %s depuis %s ?",
+		"Alle aktuellen Einstellungen durch die Sicherung vom %s aus %s ersetzen?"},
+	{"The backup couldn't be imported: %s", "No se pudo importar la copia: %s", "Não foi possível importar o backup: %s",
+		"La sauvegarde n'a pas pu être importée : %s", "Die Sicherung konnte nicht importiert werden: %s"},
+	{"The settings were imported. Type the network passwords again when they are asked for. The video renderer and "
+	 "HDR output are used from the next start of the app.",
+		"Se importaron los ajustes. Escribe de nuevo las contraseñas de red cuando se pidan. El renderizador de vídeo y "
+		"la salida HDR se usan a partir del próximo inicio de la app.",
+		"As configurações foram importadas. Digite de novo as senhas de rede quando forem pedidas. O renderizador de "
+		"vídeo e a saída HDR valem a partir da próxima abertura do app.",
+		"Les paramètres ont été importés. Saisissez à nouveau les mots de passe réseau quand ils sont demandés. Le moteur "
+		"de rendu vidéo et la sortie HDR s'appliquent au prochain démarrage de l'app.",
+		"Die Einstellungen wurden importiert. Gib die Netzwerkpasswörter neu ein, wenn danach gefragt wird. Videorenderer "
+		"und HDR-Ausgabe gelten ab dem nächsten Start der App."},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};

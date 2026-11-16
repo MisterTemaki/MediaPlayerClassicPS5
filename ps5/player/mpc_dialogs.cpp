@@ -9,6 +9,7 @@
 #include "mpc_i18n.h"
 #include "mpc_player.h"
 #include "mpc_settings.h"
+#include "mpc_backup.h"
 #include "mpc_smb.h"
 #include "mpc_ui.h"
 
@@ -1951,6 +1952,117 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		s.cursor_speed = speed->value;
 		s.debug_logs = logs->checked;
 	});
+
+	// ---- Miscellaneous > Backup (1.6.3, Sulfurico-One64, #10): the settings kept on a USB drive, and imported back
+	// after a console's factory reset or on another PS5 (mpc_backup.h). Not in MPC-HC: its settings are a file or
+	// the registry on the PC.
+	p = d->NewPage("Backup", 1);
+	d->Group(p, "Back up the settings to a USB drive", 5, 5, 286, 128);
+	d->Text(p, "A copy of the settings (Options, Keys, favorites, recent files, file positions and network "
+			   "locations) is kept in the mpcps5/backup folder of the drive chosen here, and written again "
+			   "whenever they change.",
+		10, 17, 276, 26);
+	d->Text(p, "Back up automatically to:", 10, 50, 100, 8);
+	// Off, the connected drives (as the file browser names them), and the chosen one when it isn't connected
+	std::vector<std::string> drive_paths = {""};
+	ComboBox* drive = d->Combo(p, 112, 48, 173, 13, {"Off"}, 0);
+	for (const std::string& path : backup::ConnectedDrives())
+	{
+		const bool usb = path.compare(0, 8, "/mnt/usb") == 0, ext = path.compare(0, 8, "/mnt/ext") == 0;
+		const int n = usb || ext ? atoi(path.c_str() + 8) : int(drive_paths.size()) - 1;
+		drive->items.push_back(ext ? Fmt(T("Extended Storage %d (%s)"), n, path.c_str())
+								   : Fmt(T("USB Drive %d (%s)"), n, path.c_str()));
+		drive_paths.push_back(path);
+	}
+	if (!s.backup_drive.empty() && std::find(drive_paths.begin(), drive_paths.end(), s.backup_drive) == drive_paths.end())
+	{
+		drive->items.push_back(Fmt(T("%s (not connected)"), s.backup_drive.c_str()));
+		drive_paths.push_back(s.backup_drive);
+	}
+	for (int i = 0; i < int(drive_paths.size()); i++)
+		if (drive_paths[i] == s.backup_drive)
+			drive->sel = i;
+	Button* now = d->P(p, new Button, 10, 68, 80, 14);
+	now->text = T("Back up now");
+	Static* status = d->Text(p, "", 10, 89, 276, 40);
+	auto show_status = [drive, drive_paths, now, status] {
+		const std::string path = drive->sel > 0 && drive->sel < int(drive_paths.size()) ? drive_paths[drive->sel] : "";
+		now->enabled = !path.empty();
+		if (path.empty())
+		{
+			status->text = T("No automatic backup.");
+			return;
+		}
+		const time_t when = backup::BackupTime(path);
+		std::string text = when ? Fmt(T("Last backup: %s, in %s"), DateText(when).c_str(), backup::FileOn(path).c_str())
+								: Fmt(T("No backup on this drive yet: %s"), backup::FileOn(path).c_str());
+		const backup::Status last = backup::LastStatus();
+		if (last.drive == path && !last.error.empty())
+			text += "\n" + Fmt(T("The last backup failed: %s"), last.error.c_str());
+		status->text = text;
+	};
+	show_status();
+	drive->on_change = show_status;
+	d->apply_fns.push_back([&s, drive, drive_paths, show_status] {
+		s.backup_drive = drive->sel > 0 && drive->sel < int(drive_paths.size()) ? drive_paths[drive->sel] : "";
+	});
+	// Apply (the settings as they are on the pages, saved: the automatic backup writes them when a drive is chosen),
+	// then the backup written if it wasn't (the same text already there), and said
+	now->on_click = [o, drive, drive_paths, show_status] {
+		if (drive->sel <= 0 || drive->sel >= int(drive_paths.size()))
+			return;
+		const std::string path = drive_paths[drive->sel];
+		o->Apply();
+		std::string error;
+		const bool ok = backup::WriteTo(path, error);
+		show_status();
+		if (ok)
+			MessageBox(Fmt(T("The settings are backed up in %s."), backup::FileOn(path).c_str()), T("Backup"), MB_OK, 1);
+		else
+			MessageBox(Fmt(T("The settings couldn't be backed up: %s"), error.c_str()), T("Backup"), MB_OK, 3);
+	};
+	d->Group(p, "Import", 5, 137, 286, 64);
+	d->Text(p, "Replaces all the settings with the newest backup found on the connected drives.", 10, 149, 276, 18);
+	Button* imp = d->P(p, new Button, 10, 175, 80, 14);
+	imp->text = T("Import...");
+	d->Text(p, "Network passwords and the fonts folder aren't backed up: type the passwords again after an import.",
+		5, 207, 286, 18);
+	imp->on_click = [o] {
+		const std::vector<backup::Found> found = backup::FindBackups();
+		if (found.empty())
+		{
+			MessageBox(T("No backup was found. Connect the USB drive that has the mpcps5/backup folder, then try again."),
+				T("Import"), MB_OK, 2);
+			return;
+		}
+		const backup::Found b = found.front();
+		MessageBox(Fmt(T("Replace all the current settings with the backup of %s from %s?"), DateText(b.when).c_str(),
+					   b.path.c_str()),
+			T("Import"), MB_YESNO, 4, [o, b](int r) {
+				if (r != IDYES)
+					return;
+				Settings imported;
+				std::string error;
+				if (!backup::ReadBackup(b.path, imported, error))
+				{
+					MessageBox(Fmt(T("The backup couldn't be imported: %s"), error.c_str()), T("Import"), MB_OK, 3);
+					return;
+				}
+				// the drive it came from is the one backed up to from now on (a drive's number can change with
+				// the port or the console: the backup's own BackupDrive may name another)
+				imported.backup_drive = b.drive;
+				Settings& st = AppSettings();
+				st = imported;
+				sys::SetDarkTheme(st.dark_mode);
+				OrbisLog("[backup] imported %s", b.path.c_str());
+				o->EndDialog(1);
+				if (o->applied)
+					o->applied(); // applied and saved
+				MessageBox(T("The settings were imported. Type the network passwords again when they are asked for. "
+							 "The video renderer and HDR output are used from the next start of the app."),
+					T("Import"), MB_OK, 1);
+			});
+	};
 
 	// the buttons
 	Button* ok = d->Add(new Button);

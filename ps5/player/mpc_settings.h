@@ -136,6 +136,7 @@ enum class OptionsPage : int
 	DefaultStyle,
 	AudioSwitcher,
 	Miscellaneous,
+	Backup, // 1.6.3 (#10): Miscellaneous > Backup
 	Count
 };
 
@@ -237,6 +238,9 @@ struct Settings
 	// boot.log and the others in <data>/logs: off unless mpc-hc.ini says debug_logs=1 (orbis_paths.cpp reads the
 	// same line: the installer and the helper follow it); Options > Miscellaneous "Debug logs", applied at once
 	bool debug_logs = false;
+	// 1.6.3 (#10): Options > Miscellaneous > Backup: the drive mpc-hc.ini is backed up to automatically
+	// (<drive>/mpcps5/backup, mpc_backup.h): "/mnt/usb0".."/mnt/usb7", "/mnt/ext0", "/mnt/ext1"; "" off (the default)
+	std::string backup_drive;
 	// Lists
 	std::vector<std::string> recent; // MRU, newest first
 	std::vector<FilePosition> positions;
@@ -246,7 +250,13 @@ struct Settings
 
 	Settings();
 	void Load();
+	// 1.6.3 (#10): the same reading of another file (a backup): no credential files read or migrated, any password
+	// in its addresses dropped. False when the file can't be read or has no [Settings] section.
+	bool LoadFile(const std::string& path);
 	bool Save() const;
+private:
+	bool ReadFile(const std::string& path, bool migrate);
+public:
 	void AddRecent(const std::string& url);
 	double FilePos(const std::string& url) const;
 	void SetFilePos(const std::string& url, double pos);

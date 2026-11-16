@@ -6,6 +6,7 @@
 
 #include "mpc_i18n.h"
 #include "mpc_credentials.h"
+#include "mpc_backup.h"
 
 #include "OrbisPaths.h"
 
@@ -392,13 +393,27 @@ Settings::Settings()
 
 void Settings::Load()
 {
-	legacy_read_failed = false;
+	ReadFile(SettingsPath(), true);
+}
+
+bool Settings::LoadFile(const std::string& path)
+{
+	return ReadFile(path, false);
+}
+
+// mpc-hc.ini (migrate: the app's own, with its credentials) or a backup of it (1.6.3, #10: nothing but this file read,
+// its passwords dropped). True when it was read and had a [Settings] section.
+bool Settings::ReadFile(const std::string& path, bool migrate)
+{
+	if (migrate)
+		legacy_read_failed = false;
 	// off by default; the host tests turn the default on (orbis_paths.cpp reads the same variable)
 	if (const char* d = getenv("MPCPS5_LOGS_DEFAULT"))
 		debug_logs = atoi(d) != 0;
-	FILE* f = fopen(SettingsPath().c_str(), "r");
+	FILE* f = fopen(path.c_str(), "r");
 	if (!f)
-		return;
+		return false;
+	bool settings_section = false;
 	int cred_gen = 0; // [Credentials] Generation: the credentials file this mpc-hc.ini goes with
 	char line[8192];
 	while (fgets(line, sizeof(line), f))
@@ -406,6 +421,8 @@ void Settings::Load()
 		std::string l = line;
 		while (!l.empty() && (l.back() == '\n' || l.back() == '\r'))
 			l.pop_back();
+		if (l == "[Settings]")
+			settings_section = true;
 		const size_t eq = l.find('=');
 		if (eq == std::string::npos || l[0] == ';' || l[0] == '[')
 			continue;
@@ -540,6 +557,8 @@ void Settings::Load()
 			cred_gen = n;
 		else if (k == "debug_logs")
 			debug_logs = b;
+		else if (k == "BackupDrive")
+			backup_drive = backup::ValidDrive(v) ? v : "";
 		else if (k == "LastDir")
 			last_dir = Unescape(v);
 		else if (k.compare(0, 4, "File") == 0 && k.size() > 4 && isdigit(static_cast<unsigned char>(k[4])))
@@ -579,6 +598,8 @@ void Settings::Load()
 	for (auto& favorite : favorites) { strip(favorite.url); strip(favorite.name); }
 	for (auto& position : positions) strip(position.url);
 	strip(last_dir);
+	if (!migrate)
+		return settings_section; // a backup's passwords (there are none since 1.6.2) wiped with legacy, never used
 	int main_generation = 0, new_generation = 0;
 	bool has_new = false;
 	Secrets old, pending;
@@ -587,6 +608,7 @@ void Settings::Load()
 	const auto& selected = has_new && new_generation == cred_gen && main_generation != cred_gen ? pending : old;
 	for (const auto& entry : selected) legacy.emplace(entry);
 	credentials::Get().ImportLegacy(legacy);
+	return settings_section;
 }
 
 bool Settings::Save() const
@@ -652,6 +674,7 @@ bool Settings::Save() const
 	fprintf(f, "Dpi=%d\nCursorSpeed=%d\nLanguage=%d\ndebug_logs=%d\nLastDir=%s\n", dpi, cursor_speed, language,
 		debug_logs ? 1 : 0, bare(last_dir).c_str());
 	fprintf(f, "TouchpadPointer=%d\nOptionsX=%d\nOptionsY=%d\n", touchpad_pointer ? 1 : 0, options_x, options_y);
+	fprintf(f, "BackupDrive=%s\n", backup::ValidDrive(backup_drive) ? backup_drive.c_str() : "");
 	fprintf(f, "[Keys]\n");
 	for (int i = 0; i < int(PadButton::Count); i++)
 		fprintf(f, "Key%s=%s\n", kPadButtons[i].ini, PadActionKey(pad[i]));
@@ -677,6 +700,7 @@ bool Settings::Save() const
 		return false;
 	}
 	SyncFolder(OrbisRoot());
+	backup::AfterSave(*this); // 1.6.3 (#10): the automatic backup, when a drive is chosen
 	std::vector<std::string> referenced = recent;
 	for (const auto& server : servers) referenced.push_back(server.url);
 	for (const auto& favorite : favorites) referenced.push_back(favorite.url);

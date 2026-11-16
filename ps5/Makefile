@@ -43,7 +43,7 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	coreorbis/orbis-shims/ProsperoInput.cpp coreorbis/orbis-shims/ProsperoJailbreak.cpp \
 	coreorbis/orbis-shims/ProsperoCrash.cpp \
 	player/mpc_app.cpp player/mpc_dialogs.cpp player/mpc_credentials_ui.cpp player/mpc_font.cpp player/mpc_gdi.cpp player/mpc_menu.cpp \
-	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_credentials.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
+	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_backup.cpp player/mpc_credentials.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
 	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp player/mpc_i18n.cpp \
 	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp player/mpc_gpu.cpp player/mpc_bigmem.cpp \
 	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlaceApp.cpp
@@ -454,10 +454,11 @@ $(HOST_OUT)/mpc-credentials-ui-test: tests/credentials_ui_test.cpp $(filter-out 
 		-L$(DEPS_HOST)/lib $(FF_LIBS) -lvulkan -lpthread -lm -ldl
 
 $(HOST_OUT)/mpc-credentials-fixture: tests/credentials_fixture.cpp player/mpc_credentials.cpp player/mpc_settings.cpp player/mpc_i18n.cpp \
+		player/mpc_backup.cpp player/mpc_backup.h \
 		coreorbis/orbis-shims/orbis_paths.cpp player/mpc_credentials.h player/mpc_settings.h $(HOST_OUT)/port/third_party/monocypher/monocypher.o \
 		$(HOST_OUT)/port/third_party/mbedtls/mpc_entropy.o $(HOST_OUT)/flags.txt
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(INCS) $(DEFS) $(PORT_WARN) -o $@ tests/credentials_fixture.cpp \
-		player/mpc_credentials.cpp player/mpc_settings.cpp player/mpc_i18n.cpp coreorbis/orbis-shims/orbis_paths.cpp \
+		player/mpc_credentials.cpp player/mpc_settings.cpp player/mpc_backup.cpp player/mpc_i18n.cpp coreorbis/orbis-shims/orbis_paths.cpp \
 		$(HOST_OUT)/port/third_party/monocypher/monocypher.o $(HOST_OUT)/port/third_party/mbedtls/mpc_entropy.o -lpthread
 
 test-credentials-ui: $(HOST_OUT)/mpc-credentials-ui-test

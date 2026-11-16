@@ -3127,5 +3127,95 @@ for renderer in 0 1; do
 done
 fi
 
+echo
+if want 37; then
+echo "== 37. 1.6.3 (Sulfurico-One64, #10): Options > Miscellaneous > Backup: the settings on a USB drive, written when they change, imported back"
+# the drives are folders here (MPCPS5_HOST_DRIVES, in the order /mnt/usb0.. would be); u1 isn't connected (no folder)
+D=$WORK/t37d
+rm -rf "$D" && mkdir -p "$D/u0"
+DRIVES="$D/u0:$D/u1"
+TO_BACKUP=""
+for frame in 20 22 24 26 28 30 32 34 36; do TO_BACKUP="$TO_BACKUP;$frame:key down"; done # Player .. Backup, the tree's tenth page
+# a fresh install (no drive chosen) never touches a backup that is there
+T=$(newroot t37fresh)
+mkdir -p "$D/u0/mpcps5/backup" && printf '[Settings]\nVolume=11\n' >"$D/u0/mpcps5/backup/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
+expect "[ $rc = 0 ] && [ \"\$(cat $D/u0/mpcps5/backup/mpc-hc.ini)\" = \"\$(printf '[Settings]\nVolume=11')\" ] && ! grep -q '\[backup\]' $T/root/logs/boot.log" "no drive chosen: a backup already on the drive is left as it is, nothing written"
+rm -rf "$D/u0/mpcps5"
+# the drive chosen on the page (Off -> USB Drive 0), OK: the backup written at once, the same text as mpc-hc.ini
+T=$(newroot t37choose)
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key right;56:key r1;58:key r1;60:key r1;64:key enter;90:quit" "40,52,80")
+expect "[ $rc = 0 ] && grep -q '\[ui\] Options at' $T/root/logs/boot.log" "Options opens"
+expect "grep -qx \"BackupDrive=$D/u0\" $T/root/mpc-hc.ini" "OK keeps the chosen drive (BackupDrive=)"
+expect "cmp -s $T/root/mpc-hc.ini $D/u0/mpcps5/backup/mpc-hc.ini && grep -q '\[backup\] the settings ([0-9]* bytes) backed up to $D/u0/mpcps5/backup/mpc-hc.ini' $T/root/logs/boot.log" "the backup is written at once, a copy of mpc-hc.ini"
+expect "[ ! -e $D/u0/mpcps5/backup/mpc-hc.ini.tmp ]" "no .tmp left beside it"
+nosan "$T"
+cp "$T/dump/flip00052.ppm" "$WORK/t37-backup-page.ppm" 2>/dev/null
+# nothing changed: started and closed again, the backup isn't written again (the same text)
+B1=$(stat -c %Y.%y "$D/u0/mpcps5/backup/mpc-hc.ini")
+sleep 1.1
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
+expect "[ $rc = 0 ] && [ \"\$(stat -c %Y.%y $D/u0/mpcps5/backup/mpc-hc.ini)\" = '$B1' ] && ! grep -q 'backed up to' $T/root/logs/boot.log" "unchanged settings: the backup isn't rewritten"
+# a change (the volume, from the menu): written again
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd voldown;20:cmd options;24:key enter;40:quit" "")
+expect "[ $rc = 0 ] && cmp -s $T/root/mpc-hc.ini $D/u0/mpcps5/backup/mpc-hc.ini && grep -q 'backed up to' $T/root/logs/boot.log" "changed settings: the backup follows mpc-hc.ini"
+# the chosen drive isn't connected: nothing written, said in the log; the page shows it as not connected, Back up now says why
+T=$(newroot t37gone)
+printf '[Settings]\nBackupDrive=%s\n' "$D/u1" >"$T/root/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter;70:key enter;80:key escape;90:quit" "46")
+expect "[ $rc = 0 ] && grep -q \"\[backup\] not written: $D/u1 isn't connected\" $T/root/logs/boot.log && [ ! -e $D/u1 ]" "a drive that isn't connected: nothing written, the log says so"
+expect "grep -q \"\[ui\] message: The settings couldn't be backed up: $D/u1 isn't connected\" $T/root/logs/boot.log" "Back up now says why it couldn't"
+expect "grep -qx \"BackupDrive=$D/u1\" $T/root/mpc-hc.ini" "the choice is kept for when the drive is back"
+nosan "$T"
+# import on a fresh install: the newest backup on the connected drives replaces every setting; its passwords dropped
+T=$(newroot t37import)
+mkdir -p "$D/u0/mpcps5/backup"
+cat >"$D/u0/mpcps5/backup/mpc-hc.ini" <<'INI'
+; Media Player Classic PS5 settings (MPC-HC's names where it has one)
+[Settings]
+DarkMode=1
+Volume=42
+SubFontSize=30
+AudioDelay=250
+[Keys]
+KeyCross=FullScreen
+[Favorites]
+Favorite0=Film|smb://ann:secretpw@nas/films/a.mkv|12.000
+[Network]
+Server0=NAS|smb://bob:hunter2@nas/media
+INI
+printf 'BackupDrive=%s\n' "$D/u1" >>"$D/u0/mpcps5/backup/mpc-hc.ini" # made with the drive on another port
+touch -d '2026-01-02 03:04' "$D/u0/mpcps5/backup/mpc-hc.ini"
+BK=$(sha256sum <"$D/u0/mpcps5/backup/mpc-hc.ini")
+IMPORT="10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key escape;80:quit" "56")
+expect "[ $rc = 0 ] && grep -q \"\[ui\] message: Replace all the current settings with the backup of 01/02/2026 03:04 AM from $D/u0/mpcps5/backup/mpc-hc.ini?\" $T/root/logs/boot.log" "Import... asks first, naming the backup's date and place"
+expect "! grep -q '^Volume=42' $T/root/mpc-hc.ini && [ \"\$(sha256sum <$D/u0/mpcps5/backup/mpc-hc.ini)\" = '$BK' ]" "No: nothing imported, the backup untouched"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;90:quit" "84")
+expect "[ $rc = 0 ] && grep -q '\[backup\] imported' $T/root/logs/boot.log && grep -q '\[ui\] message: The settings were imported' $T/root/logs/boot.log" "Yes: imported, and said"
+expect "grep -qx 'Volume=42' $T/root/mpc-hc.ini && grep -qx 'DarkMode=1' $T/root/mpc-hc.ini && grep -qx 'SubFontSize=30' $T/root/mpc-hc.ini && grep -qx 'AudioDelay=250' $T/root/mpc-hc.ini && grep -qx 'KeyCross=FullScreen' $T/root/mpc-hc.ini" "the settings, the Keys come from the backup"
+expect "grep -q '^Favorite0=Film|smb://ann@nas/films/a.mkv|12.000' $T/root/mpc-hc.ini && grep -q '^Server0=NAS|smb://bob@nas/media' $T/root/mpc-hc.ini && grep -qx \"BackupDrive=$D/u0\" $T/root/mpc-hc.ini" "favorites and network locations come from it, without their passwords; the drive backed up to is the one it came from"
+expect "! grep -rqa 'secretpw\|hunter2' $T/root $D/u0" "the backup's passwords are nowhere: not in the settings, not on the drive (its copy rewritten without them)"
+expect "$CHECK $T/dump/flip00084.ppm 900 10 28 28 28 2 >/dev/null" "the imported dark theme is on at once"
+nosan "$T"
+# no backup anywhere: said; a file that isn't a settings file: refused, nothing changed
+T=$(newroot t37none)
+rm -rf "$D/u0/mpcps5"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key enter;80:quit" "")
+expect "[ $rc = 0 ] && grep -q '\[ui\] message: No backup was found' $T/root/logs/boot.log" "no backup on the drives: Import says so"
+mkdir -p "$D/u0/mpcps5/backup" && printf 'not a settings file\nVolume=5\n' >"$D/u0/mpcps5/backup/mpc-hc.ini"
+printf '[Settings]\nVolume=64\n' >"$T/root/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;90:quit" "")
+expect "[ $rc = 0 ] && grep -q \"\[ui\] message: The backup couldn't be imported: $D/u0/mpcps5/backup/mpc-hc.ini isn't a settings backup\" $T/root/logs/boot.log && grep -qx 'Volume=64' $T/root/mpc-hc.ini" "a file that isn't a settings backup: refused, the settings kept"
+nosan "$T"
+rm -rf "$D/u0/mpcps5"
+# Reset turns the automatic backup off with the other settings (the backup on the drive stays as it was)
+T=$(newroot t37reset)
+printf '[Settings]\nBackupDrive=%s\nVolume=33\n' "$D/u0" >"$T/root/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
+expect "[ $rc = 0 ] && grep -qx 'Volume=33' $D/u0/mpcps5/backup/mpc-hc.ini" "a drive in mpc-hc.ini: backed up at the start"
+expect "! grep -q 'BackupDrive=/' $WORK/t37fresh/root/mpc-hc.ini" "the default: no drive (Off)"
+fi
+
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]
