@@ -2,7 +2,7 @@
   "ageLevel": {
     "default": 0
   },
-  "applicationCategoryType": 0,
+  "applicationCategoryType": 65536,
   "applicationDrmType": "free",
   "attribute": 1644167168,
   "attribute2": 0,
@@ -10,7 +10,7 @@
   "conceptId": "99015",
   "contentBadgeType": 1,
   "contentId": "UP9000-PPSA99015_00-MPCHCPS500000001",
-  "contentVersion": "01.062.000",
+  "contentVersion": "01.063.000",
   "downloadDataSize": 256,
   "gameIntent": {
     "permittedIntents": [

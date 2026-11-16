@@ -27,7 +27,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.6.2
+VERSION ?= 1.6.3
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -350,7 +350,7 @@ $(APP_OUT)/eboot.bin: build/app/eboot.elf $(NATIVE_TOOL)
 $(APP_OUT)/sce_sys/param.json: app/sce_sys/param.json tools/check_app_profile.py
 	@mkdir -p $(dir $@)
 	sed 's/PPSA99015/$(TITLE_ID)/g' $< > $@
-	python3 tools/check_app_profile.py $@
+	python3 tools/check_app_profile.py $@ $(VERSION)
 
 $(APP_OUT)/sce_sys/%.png: app/sce_sys/%.png
 	@mkdir -p $(dir $@)
