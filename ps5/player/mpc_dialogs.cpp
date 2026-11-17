@@ -436,6 +436,19 @@ std::string DateText(int64_t t)
 	strftime(b, sizeof(b), "%m/%d/%Y %I:%M %p", &tmv);
 	return b;
 }
+
+// 1.6.3 review: a backup's time, the same in every language (01/02 isn't the same day everywhere)
+std::string BackupDate(int64_t t)
+{
+	if (t <= 0)
+		return "";
+	const time_t tt = time_t(t);
+	struct tm tmv;
+	localtime_r(&tt, &tmv);
+	char b[64];
+	strftime(b, sizeof(b), "%Y-%m-%d %H:%M", &tmv);
+	return b;
+}
 } // namespace
 
 // ===========================================================================================================
@@ -1940,6 +1953,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 				fresh.favorites = st.favorites;
 				fresh.servers = st.servers;
 				fresh.positions = st.positions;
+				fresh.backup_id = st.backup_id; // 1.6.3: the installation stays the same (its backup stays its own)
 				st = fresh;
 				o->EndDialog(1);
 				if (o->applied)
@@ -1964,19 +1978,23 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		10, 17, 276, 26);
 	d->Text(p, "Back up automatically to:", 10, 50, 100, 8);
 	// Off, the connected drives (as the file browser names them), and the chosen one when it isn't connected
+	auto drive_name = [](const std::string& path) {
+		const bool usb = path.compare(0, 8, "/mnt/usb") == 0, ext = path.compare(0, 8, "/mnt/ext") == 0;
+		if (!usb && !ext)
+			return path; // (host tests' folders)
+		return ext ? Fmt(T("Extended Storage %d (%s)"), atoi(path.c_str() + 8), path.c_str())
+				   : Fmt(T("USB Drive %d (%s)"), atoi(path.c_str() + 8), path.c_str());
+	};
 	std::vector<std::string> drive_paths = {""};
 	ComboBox* drive = d->Combo(p, 112, 48, 173, 13, {"Off"}, 0);
 	for (const std::string& path : backup::ConnectedDrives())
 	{
-		const bool usb = path.compare(0, 8, "/mnt/usb") == 0, ext = path.compare(0, 8, "/mnt/ext") == 0;
-		const int n = usb || ext ? atoi(path.c_str() + 8) : int(drive_paths.size()) - 1;
-		drive->items.push_back(ext ? Fmt(T("Extended Storage %d (%s)"), n, path.c_str())
-								   : Fmt(T("USB Drive %d (%s)"), n, path.c_str()));
+		drive->items.push_back(drive_name(path));
 		drive_paths.push_back(path);
 	}
 	if (!s.backup_drive.empty() && std::find(drive_paths.begin(), drive_paths.end(), s.backup_drive) == drive_paths.end())
 	{
-		drive->items.push_back(Fmt(T("%s (not connected)"), s.backup_drive.c_str()));
+		drive->items.push_back(Fmt(T("%s (not connected)"), drive_name(s.backup_drive).c_str()));
 		drive_paths.push_back(s.backup_drive);
 	}
 	for (int i = 0; i < int(drive_paths.size()); i++)
@@ -1984,42 +2002,80 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 			drive->sel = i;
 	Button* now = d->P(p, new Button, 10, 68, 80, 14);
 	now->text = T("Back up now");
-	Static* status = d->Text(p, "", 10, 89, 276, 40);
-	auto show_status = [drive, drive_paths, now, status] {
-		const std::string path = drive->sel > 0 && drive->sel < int(drive_paths.size()) ? drive_paths[drive->sel] : "";
-		now->enabled = !path.empty();
-		if (path.empty())
+	// the line under the button, worked out again whenever the page is drawn (an automatic backup written in the
+	// background, a drive plugged in): at most once a second
+	struct LiveText : Static
+	{
+		std::function<std::string()> make;
+		int64_t last = 0;
+		void Paint(CDC& dc, bool focused, bool hot) override
 		{
-			status->text = T("No automatic backup.");
-			return;
+			const int64_t t = int64_t(time(nullptr));
+			if (make && t != last)
+			{
+				last = t;
+				text = make();
+			}
+			Static::Paint(dc, focused, hot);
 		}
-		const time_t when = backup::BackupTime(path);
-		std::string text = when ? Fmt(T("Last backup: %s, in %s"), DateText(when).c_str(), backup::FileOn(path).c_str())
-								: Fmt(T("No backup on this drive yet: %s"), backup::FileOn(path).c_str());
-		const backup::Status last = backup::LastStatus();
-		if (last.drive == path && !last.error.empty())
-			text += "\n" + Fmt(T("The last backup failed: %s"), last.error.c_str());
-		status->text = text;
 	};
-	show_status();
-	drive->on_change = show_status;
-	d->apply_fns.push_back([&s, drive, drive_paths, show_status] {
-		s.backup_drive = drive->sel > 0 && drive->sel < int(drive_paths.size()) ? drive_paths[drive->sel] : "";
+	LiveText* status = d->P(p, new LiveText, 10, 89, 276, 40);
+	auto selected = [drive, drive_paths] {
+		return drive->sel > 0 && drive->sel < int(drive_paths.size()) ? drive_paths[drive->sel] : std::string();
+	};
+	status->make = [selected] {
+		const std::string path = selected();
+		if (path.empty())
+			return std::string(T("No automatic backup."));
+		const backup::Info info = backup::InfoOn(path, AppSettings().backup_id);
+		std::string text = !info.exists ? Fmt(T("No backup on this drive yet: %s"), backup::FileOn(path).c_str())
+						   : info.ours ? Fmt(T("Last backup: %s, in %s"), BackupDate(info.when).c_str(), backup::FileOn(path).c_str())
+									   : Fmt(T("This drive has a backup from %s that isn't this console's settings: it is "
+											   "kept. Import it, or press Back up now to replace it."),
+											 BackupDate(info.when).c_str());
+		const backup::Status last = backup::LastStatus();
+		if (last.drive == path && last.result == backup::Result::Failed && !last.error.empty())
+			text += "\n" + Fmt(T("The last backup failed: %s"), last.error.c_str());
+		return text;
+	};
+	auto refresh = [selected, now, status] {
+		now->enabled = !selected().empty();
+		status->last = 0; // worked out again at the next paint
+	};
+	refresh();
+	drive->on_change = refresh;
+	d->apply_fns.push_back([&s, selected, refresh] {
+		s.backup_drive = selected();
+		refresh();
 	});
-	// Apply (the settings as they are on the pages, saved: the automatic backup writes them when a drive is chosen),
-	// then the backup written if it wasn't (the same text already there), and said
-	now->on_click = [o, drive, drive_paths, show_status] {
-		if (drive->sel <= 0 || drive->sel >= int(drive_paths.size()))
+	// Apply (the pages' settings saved), then the backup written now and said. Another installation's backup on the
+	// drive is replaced only after a yes.
+	now->on_click = [o, selected, refresh] {
+		const std::string path = selected();
+		if (path.empty())
 			return;
-		const std::string path = drive_paths[drive->sel];
 		o->Apply();
-		std::string error;
-		const bool ok = backup::WriteTo(path, error);
-		show_status();
-		if (ok)
-			MessageBox(Fmt(T("The settings are backed up in %s."), backup::FileOn(path).c_str()), T("Backup"), MB_OK, 1);
-		else
-			MessageBox(Fmt(T("The settings couldn't be backed up: %s"), error.c_str()), T("Backup"), MB_OK, 3);
+		auto write = [path, refresh](bool force) {
+			std::string error;
+			const backup::Result r = backup::WriteTo(path, AppSettings().backup_id, error, force);
+			refresh();
+			if (r == backup::Result::Written || r == backup::Result::Unchanged)
+				MessageBox(Fmt(T("The settings are backed up in %s."), backup::FileOn(path).c_str()), T("Backup"), MB_OK, 1);
+			else if (r == backup::Result::Failed)
+				MessageBox(Fmt(T("The settings couldn't be backed up: %s"), error.c_str()), T("Backup"), MB_OK, 3);
+			return r;
+		};
+		if (write(false) == backup::Result::Foreign)
+		{
+			const backup::Info info = backup::InfoOn(path, AppSettings().backup_id);
+			MessageBox(Fmt(T("%s has a backup from %s that isn't this console's settings. Replace it with the current "
+							 "settings? (To get it back instead, choose No, then Import...)"),
+						   backup::FileOn(path).c_str(), BackupDate(info.when).c_str()),
+				T("Backup"), MB_YESNO, 2, [write](int r) {
+					if (r == IDYES)
+						write(true);
+				});
+		}
 	};
 	d->Group(p, "Import", 5, 137, 286, 64);
 	d->Text(p, "Replaces all the settings with the newest backup found on the connected drives.", 10, 149, 276, 18);
@@ -2036,7 +2092,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 			return;
 		}
 		const backup::Found b = found.front();
-		MessageBox(Fmt(T("Replace all the current settings with the backup of %s from %s?"), DateText(b.when).c_str(),
+		MessageBox(Fmt(T("Replace all the current settings with the backup of %s from %s?"), BackupDate(b.when).c_str(),
 					   b.path.c_str()),
 			T("Import"), MB_YESNO, 4, [o, b](int r) {
 				if (r != IDYES)
@@ -2049,15 +2105,21 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 					return;
 				}
 				// the drive it came from is the one backed up to from now on (a drive's number can change with
-				// the port or the console: the backup's own BackupDrive may name another)
+				// the port or the console: the backup's own BackupDrive may name another), and the backup becomes
+				// this installation's (its id taken over, or written again with this one's when it had none)
 				imported.backup_drive = b.drive;
 				Settings& st = AppSettings();
+				const std::string own_id = st.backup_id;
+				if (!backup::ValidId(imported.backup_id))
+					imported.backup_id = own_id;
 				st = imported;
 				sys::SetDarkTheme(st.dark_mode);
 				OrbisLog("[backup] imported %s", b.path.c_str());
 				o->EndDialog(1);
 				if (o->applied)
 					o->applied(); // applied and saved
+				std::string werror;
+				backup::WriteTo(b.drive, st.backup_id, werror, true);
 				MessageBox(T("The settings were imported. Type the network passwords again when they are asked for. "
 							 "The video renderer and HDR output are used from the next start of the app."),
 					T("Import"), MB_OK, 1);

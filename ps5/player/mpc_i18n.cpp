@@ -1389,7 +1389,7 @@ const Entry kTable[] = {
 	// 1.6.3 (#10): Options > Miscellaneous > Backup
 	{"Backup", "Copia de seguridad", "Backup", "Sauvegarde", "Sicherung"},
 	{"Back up the settings to a USB drive", "Copia de seguridad de los ajustes en una unidad USB",
-		"Backup das configurações em um drive USB", "Sauvegarder les paramètres sur un disque USB",
+		"Backup das configurações em uma unidade USB", "Sauvegarder les paramètres sur une clé USB",
 		"Einstellungen auf einem USB-Laufwerk sichern"},
 	{"A copy of the settings (Options, Keys, favorites, recent files, file positions and network locations) is kept in "
 	 "the mpcps5/backup folder of the drive chosen here, and written again whenever they change.",
@@ -1397,23 +1397,23 @@ const Entry kTable[] = {
 		"ubicaciones de red) en la carpeta mpcps5/backup de la unidad elegida aquí, y se vuelve a escribir cada vez que "
 		"cambian.",
 		"Uma cópia das configurações (Opções, Teclas, favoritos, arquivos recentes, posições de arquivo e locais de "
-		"rede) fica na pasta mpcps5/backup do drive escolhido aqui, e é gravada de novo sempre que elas mudam.",
+		"rede) fica na pasta mpcps5/backup da unidade escolhida aqui, e é gravada de novo sempre que elas mudam.",
 		"Une copie des paramètres (Options, Touches, favoris, fichiers récents, positions de fichier et emplacements "
-		"réseau) est gardée dans le dossier mpcps5/backup du disque choisi ici, et réécrite à chaque modification.",
+		"réseau) est gardée dans le dossier mpcps5/backup de la clé choisie ici, et réécrite à chaque modification.",
 		"Eine Kopie der Einstellungen (Optionen, Tasten, Favoriten, zuletzt geöffnete Dateien, Dateipositionen und "
-		"Netzwerkorte) liegt im Ordner mpcps5/backup des hier gewählten Laufwerks und wird bei jeder Änderung neu "
+		"Netzwerkadressen) liegt im Ordner mpcps5/backup des hier gewählten Laufwerks und wird bei jeder Änderung neu "
 		"geschrieben."},
 	{"Back up automatically to:", "Copia automática en:", "Backup automático em:", "Sauvegarde automatique sur :",
 		"Automatisch sichern auf:"},
 	{"Off", "Desactivado", "Desligado", "Désactivé", "Aus"},
-	{"%s (not connected)", "%s (no conectada)", "%s (não conectado)", "%s (non connecté)", "%s (nicht verbunden)"},
-	{"Back up now", "Copiar ahora", "Fazer backup agora", "Sauvegarder maintenant", "Jetzt sichern"},
+	{"%s (not connected)", "%s (no conectada)", "%s (não conectada)", "%s (non connectée)", "%s (nicht verbunden)"},
+	{"Back up now", "Hacer copia ahora", "Fazer backup agora", "Sauvegarder maintenant", "Jetzt sichern"},
 	{"No automatic backup.", "Sin copia automática.", "Sem backup automático.", "Pas de sauvegarde automatique.",
 		"Keine automatische Sicherung."},
 	{"Last backup: %s, in %s", "Última copia: %s, en %s", "Último backup: %s, em %s", "Dernière sauvegarde : %s, dans %s",
 		"Letzte Sicherung: %s, in %s"},
-	{"No backup on this drive yet: %s", "Aún no hay copia en esta unidad: %s", "Ainda não há backup neste drive: %s",
-		"Pas encore de sauvegarde sur ce disque : %s", "Noch keine Sicherung auf diesem Laufwerk: %s"},
+	{"No backup on this drive yet: %s", "Aún no hay copia en esta unidad: %s", "Ainda não há backup nesta unidade: %s",
+		"Pas encore de sauvegarde sur cette clé : %s", "Noch keine Sicherung auf diesem Laufwerk: %s"},
 	{"The last backup failed: %s", "La última copia falló: %s", "O último backup falhou: %s",
 		"La dernière sauvegarde a échoué : %s", "Die letzte Sicherung ist fehlgeschlagen: %s"},
 	{"The settings are backed up in %s.", "Los ajustes están copiados en %s.", "As configurações estão salvas em %s.",
@@ -1424,8 +1424,8 @@ const Entry kTable[] = {
 	{"Import", "Importar", "Importar", "Importer", "Importieren"},
 	{"Replaces all the settings with the newest backup found on the connected drives.",
 		"Reemplaza todos los ajustes por la copia más reciente encontrada en las unidades conectadas.",
-		"Substitui todas as configurações pelo backup mais recente encontrado nos drives conectados.",
-		"Remplace tous les paramètres par la sauvegarde la plus récente trouvée sur les disques connectés.",
+		"Substitui todas as configurações pelo backup mais recente encontrado nas unidades conectadas.",
+		"Remplace tous les paramètres par la sauvegarde la plus récente trouvée sur les clés connectées.",
 		"Ersetzt alle Einstellungen durch die neueste Sicherung auf den verbundenen Laufwerken."},
 	{"Import...", "Importar...", "Importar...", "Importer...", "Importieren..."},
 	{"Network passwords and the fonts folder aren't backed up: type the passwords again after an import.",
@@ -1437,13 +1437,13 @@ const Entry kTable[] = {
 		"ein."},
 	{"No backup was found. Connect the USB drive that has the mpcps5/backup folder, then try again.",
 		"No se encontró ninguna copia. Conecta la unidad USB que tiene la carpeta mpcps5/backup y vuelve a intentarlo.",
-		"Nenhum backup foi encontrado. Conecte o drive USB que tem a pasta mpcps5/backup e tente de novo.",
-		"Aucune sauvegarde trouvée. Branchez le disque USB qui contient le dossier mpcps5/backup, puis réessayez.",
+		"Nenhum backup foi encontrado. Conecte a unidade USB que tem a pasta mpcps5/backup e tente de novo.",
+		"Aucune sauvegarde trouvée. Branchez la clé USB qui contient le dossier mpcps5/backup, puis réessayez.",
 		"Keine Sicherung gefunden. Schließe das USB-Laufwerk mit dem Ordner mpcps5/backup an und versuche es erneut."},
 	{"Replace all the current settings with the backup of %s from %s?",
 		"¿Reemplazar todos los ajustes actuales por la copia del %s de %s?",
 		"Substituir todas as configurações atuais pelo backup de %s em %s?",
-		"Remplacer tous les paramètres actuels par la sauvegarde du %s depuis %s ?",
+		"Remplacer tous les paramètres actuels par la sauvegarde du %s sur %s ?",
 		"Alle aktuellen Einstellungen durch die Sicherung vom %s aus %s ersetzen?"},
 	{"The backup couldn't be imported: %s", "No se pudo importar la copia: %s", "Não foi possível importar o backup: %s",
 		"La sauvegarde n'a pas pu être importée : %s", "Die Sicherung konnte nicht importiert werden: %s"},
@@ -1457,6 +1457,47 @@ const Entry kTable[] = {
 		"de rendu vidéo et la sortie HDR s'appliquent au prochain démarrage de l'app.",
 		"Die Einstellungen wurden importiert. Gib die Netzwerkpasswörter neu ein, wenn danach gefragt wird. Videorenderer "
 		"und HDR-Ausgabe gelten ab dem nächsten Start der App."},
+	{"no drive is chosen", "no se eligió ninguna unidad", "nenhuma unidade foi escolhida", "aucune clé n'est choisie",
+		"kein Laufwerk gewählt"},
+	{"%s isn't connected", "%s no está conectada", "%s não está conectada", "%s n'est pas connectée",
+		"%s ist nicht verbunden"},
+	{"the settings file can't be read", "no se puede leer el archivo de ajustes",
+		"não é possível ler o arquivo de configurações", "le fichier des paramètres est illisible",
+		"die Einstellungsdatei kann nicht gelesen werden"},
+	{"can't create %s (%s)", "no se puede crear %s (%s)", "não é possível criar %s (%s)", "impossible de créer %s (%s)",
+		"%s kann nicht erstellt werden (%s)"},
+	{"can't write %s (%s)", "no se puede escribir %s (%s)", "não é possível gravar %s (%s)",
+		"impossible d'écrire %s (%s)", "%s kann nicht geschrieben werden (%s)"},
+	{"can't replace %s (%s)", "no se puede reemplazar %s (%s)", "não é possível substituir %s (%s)",
+		"impossible de remplacer %s (%s)", "%s kann nicht ersetzt werden (%s)"},
+	{"can't replace %s (%s); the new backup is in %s", "no se puede reemplazar %s (%s); la nueva copia está en %s",
+		"não é possível substituir %s (%s); o novo backup está em %s",
+		"impossible de remplacer %s (%s) ; la nouvelle sauvegarde est dans %s",
+		"%s kann nicht ersetzt werden (%s); die neue Sicherung liegt in %s"},
+	{"there's no backup at %s", "no hay ninguna copia en %s", "não há backup em %s", "il n'y a pas de sauvegarde dans %s",
+		"in %s gibt es keine Sicherung"},
+	{"%s isn't a settings backup", "%s no es una copia de ajustes", "%s não é um backup de configurações",
+		"%s n'est pas une sauvegarde de paramètres", "%s ist keine Sicherung der Einstellungen"},
+	{"This drive has a backup from %s that isn't this console's settings: it is kept. Import it, or press Back up now "
+	 "to replace it.",
+		"Esta unidad tiene una copia del %s que no son los ajustes de esta consola: se conserva. Impórtala, o pulsa "
+		"Hacer copia ahora para reemplazarla.",
+		"Esta unidade tem um backup de %s que não é das configurações deste console: ele é mantido. Importe-o, ou "
+		"aperte Fazer backup agora para substituí-lo.",
+		"Cette clé contient une sauvegarde du %s qui n'est pas celle des paramètres de cette console : elle est "
+		"conservée. Importez-la, ou appuyez sur Sauvegarder maintenant pour la remplacer.",
+		"Dieses Laufwerk hat eine Sicherung vom %s, die nicht zu den Einstellungen dieser Konsole gehört: Sie bleibt "
+		"erhalten. Importiere sie, oder drücke Jetzt sichern, um sie zu ersetzen."},
+	{"%s has a backup from %s that isn't this console's settings. Replace it with the current settings? (To get it "
+	 "back instead, choose No, then Import...)",
+		"%s tiene una copia del %s que no son los ajustes de esta consola. ¿Reemplazarla por los ajustes actuales? "
+		"(Para recuperarla, elige No y luego Importar...)",
+		"%s tem um backup de %s que não é das configurações deste console. Substituí-lo pelas configurações atuais? "
+		"(Para recuperá-lo, escolha Não e depois Importar...)",
+		"%s contient une sauvegarde du %s qui n'est pas celle des paramètres de cette console. La remplacer par les "
+		"paramètres actuels ? (Pour la récupérer, choisissez Non, puis Importer...)",
+		"%s enthält eine Sicherung vom %s, die nicht zu den Einstellungen dieser Konsole gehört. Durch die aktuellen "
+		"Einstellungen ersetzen? (Um sie zurückzuholen, wähle Nein und dann Importieren...)"},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};

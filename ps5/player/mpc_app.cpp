@@ -21,6 +21,7 @@
 #include "mpc_vdec.h"
 #include "mpc_res.h"
 #include "mpc_settings.h"
+#include "mpc_backup.h"
 #include "mpc_ui.h"
 #include "mpc_update.h"
 
@@ -2634,6 +2635,7 @@ void MainFrame::RestartForUpdate()
 {
 	SavePosition();
 	s_.Save();
+	backup::Flush(3000); // 1.6.3: the last automatic backup on the drive
 	std::string why;
 	if (jailbreak::RequestRelaunch(MPCPS5_TITLE_ID, LanguageCode(s_.language), why))
 	{
@@ -3689,6 +3691,7 @@ int MainFrame::Run(const std::string& first)
 	disc::Stop();
 	tonemap::Shutdown(); // the HDR workers stopped and joined (the player's threads are gone)
 	s_.Save();
+	backup::Flush(3000); // 1.6.3: the last automatic backup on the drive (a slow drive: 3 s at most)
 	credentials::Get().ClearSession();
 	return 0;
 }

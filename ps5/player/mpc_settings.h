@@ -241,6 +241,9 @@ struct Settings
 	// 1.6.3 (#10): Options > Miscellaneous > Backup: the drive mpc-hc.ini is backed up to automatically
 	// (<drive>/mpcps5/backup, mpc_backup.h): "/mnt/usb0".."/mnt/usb7", "/mnt/ext0", "/mnt/ext1"; "" off (the default)
 	std::string backup_drive;
+	// 1.6.3 review: this installation's id (BackupId=, 32 hex digits): made by the first Save, kept by Reset, taken
+	// over by an import. The automatic backup writes only over a backup with the same id (mpc_backup.h).
+	mutable std::string backup_id;
 	// Lists
 	std::vector<std::string> recent; // MRU, newest first
 	std::vector<FilePosition> positions;

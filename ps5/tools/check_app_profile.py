@@ -18,7 +18,8 @@ HDR_PROFILE = 0x62000000
 
 
 def content_version(version):
-    m = re.fullmatch(r"(\d+)\.(\d)(?:\.(\d))?", version)
+    # a test build's suffix ("1.6.3-test1") doesn't change the content version
+    m = re.fullmatch(r"(\d+)\.(\d)(?:\.(\d))?(?:-[0-9A-Za-z.]+)?", version)
     if not m:
         sys.exit(f"version {version!r} is not major.minor[.patch] with one-digit minor and patch")
     major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)

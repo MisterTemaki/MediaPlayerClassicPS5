@@ -559,6 +559,8 @@ bool Settings::ReadFile(const std::string& path, bool migrate)
 			debug_logs = b;
 		else if (k == "BackupDrive")
 			backup_drive = backup::ValidDrive(v) ? v : "";
+		else if (k == "BackupId")
+			backup_id = backup::ValidId(v) ? v : "";
 		else if (k == "LastDir")
 			last_dir = Unescape(v);
 		else if (k.compare(0, 4, "File") == 0 && k.size() > 4 && isdigit(static_cast<unsigned char>(k[4])))
@@ -675,6 +677,9 @@ bool Settings::Save() const
 		debug_logs ? 1 : 0, bare(last_dir).c_str());
 	fprintf(f, "TouchpadPointer=%d\nOptionsX=%d\nOptionsY=%d\n", touchpad_pointer ? 1 : 0, options_x, options_y);
 	fprintf(f, "BackupDrive=%s\n", backup::ValidDrive(backup_drive) ? backup_drive.c_str() : "");
+	if (!backup::ValidId(backup_id))
+		backup_id = backup::NewId(); // this installation's, from its first save on
+	fprintf(f, "BackupId=%s\n", backup_id.c_str());
 	fprintf(f, "[Keys]\n");
 	for (int i = 0; i < int(PadButton::Count); i++)
 		fprintf(f, "Key%s=%s\n", kPadButtons[i].ini, PadActionKey(pad[i]));
