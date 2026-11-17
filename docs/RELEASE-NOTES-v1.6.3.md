@@ -60,7 +60,8 @@ Application version is **1.6.3**, content version is **01.063.000**, and the tit
   another installation kept and replaced only after a yes, Reset, import with Yes and No, a backup made on another
   port, passwords dropped, an unreadable backup and a file that isn't a backup.
 - Credential core 36, real SMB UI 31 and theme harness 42 checks passed, and the update, log, installer, GPU,
-  decoder and HDR harnesses pass. Host runs used Clang 18 with ASan and UBSan.
+  decoder and HDR harnesses pass. The frontend suite ran with GCC 13 and ASan/UBSan; the decoder and HDR
+  harnesses with Clang 18 and ASan.
 - The translation table (707 texts) passed validation in all five languages; the Backup page was checked on
   screen in English, Spanish, Portuguese, French and German.
 - The native PS5 GPU build and complete installer passed import, runtime-link, syscall, RADV linkage and
