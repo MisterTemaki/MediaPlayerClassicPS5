@@ -18,7 +18,7 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 **1.6.3: settings backup, and the app under Media.** **View > Options > Miscellaneous > Backup** keeps a copy of
 the settings (Options, Keys, favorites, recent files, file positions, network locations) on a USB drive, written
 again whenever they change, and **Import...** brings it back after a factory reset or on another PS5 (#10). The
-home screen lists the app under **Media** instead of Games (#6). See [settings backup](docs/SETTINGS-BACKUP.md)
+app now declares itself a media application, for the home screen to list it under **Media** instead of Games (#6). See [settings backup](docs/SETTINGS-BACKUP.md)
 and the [1.6.3 release notes](docs/RELEASE-NOTES-v1.6.3.md).
 
 **1.6.2: encrypted network passwords.** Passwords are masked in the SMB form and hidden from
