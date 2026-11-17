@@ -16,8 +16,6 @@ Application version is **1.6.3**, content version is **01.063.000**, and the tit
 - Network passwords are not in backups (their key never leaves the console): type them again after an import.
   The fonts folder isn't copied either. See [settings backup](https://github.com/MisterTemaki/MediaPlayerClassicPS5/blob/v1.6.3/docs/SETTINGS-BACKUP.md).
 
-![The Backup page](https://raw.githubusercontent.com/MisterTemaki/MediaPlayerClassicPS5/v1.6.3/docs/screenshots/settings-backup.png)
-
 ### Changed
 
 - `sce_sys/param.json` declares the app as a media application: `applicationCategoryType` is `65536`
