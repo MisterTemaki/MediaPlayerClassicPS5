@@ -54,7 +54,7 @@ Application version is **1.6.3**, content version is **01.063.000**, and the tit
 
 - **Not run on a PS5 before this release.** Please report how the Backup page, the import and the home-screen tab
   behave on your console (with **Debug logs** on, `/data/mpcps5/logs/boot.log`).
-- **Full frontend suite: FULL-PASSED checks passed.** The 12 checks that fail (groups 30 and 34: an SMB address
+- **Full frontend suite: 842 checks passed.** The 12 checks that fail (groups 30 and 34: an SMB address
   check and the GPU HDR comparisons) fail the same way on a 1.6.2 build without these changes. The new group 37
   (34 checks) covers choosing a drive, unchanged settings not rewritten, a drive not connected, a backup from
   another installation kept and replaced only after a yes, Reset, import with Yes and No, a backup made on another
