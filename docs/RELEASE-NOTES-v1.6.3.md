@@ -66,7 +66,7 @@ Application version is **1.6.3**, content version is **01.063.000**, and the tit
   screen in English, Spanish, Portuguese, French and German.
 - The native PS5 GPU build and complete installer passed import, runtime-link, syscall, RADV linkage and
   application-profile checks (`applicationCategoryType` 65536, content version 01.063.000).
-- Two independent code reviews; their findings are fixed.
+- Three independent review rounds; the last found nothing that blocks the release.
 
 Host tests use simulated PS5 calls and software Vulkan.
 
