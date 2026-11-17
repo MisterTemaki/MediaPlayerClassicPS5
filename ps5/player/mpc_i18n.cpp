@@ -1406,7 +1406,7 @@ const Entry kTable[] = {
 	{"Back up automatically to:", "Copia automática en:", "Backup automático em:", "Sauvegarde automatique sur :",
 		"Automatisch sichern auf:"},
 	{"Off", "Desactivado", "Desligado", "Désactivé", "Aus"},
-	{"%s (not connected)", "%s (no conectada)", "%s (não conectada)", "%s (non connectée)", "%s (nicht verbunden)"},
+	{"%s (not connected)", "%s (sin conexión)", "%s (sem conexão)", "%s (hors connexion)", "%s (nicht verbunden)"},
 	{"Back up now", "Hacer copia ahora", "Fazer backup agora", "Sauvegarder maintenant", "Jetzt sichern"},
 	{"No automatic backup.", "Sin copia automática.", "Sem backup automático.", "Pas de sauvegarde automatique.",
 		"Keine automatische Sicherung."},
@@ -1478,26 +1478,43 @@ const Entry kTable[] = {
 		"in %s gibt es keine Sicherung"},
 	{"%s isn't a settings backup", "%s no es una copia de ajustes", "%s não é um backup de configurações",
 		"%s n'est pas une sauvegarde de paramètres", "%s ist keine Sicherung der Einstellungen"},
-	{"This drive has a backup from %s that isn't this console's settings: it is kept. Import it, or press Back up now "
-	 "to replace it.",
-		"Esta unidad tiene una copia del %s que no son los ajustes de esta consola: se conserva. Impórtala, o pulsa "
-		"Hacer copia ahora para reemplazarla.",
-		"Esta unidade tem um backup de %s que não é das configurações deste console: ele é mantido. Importe-o, ou "
-		"aperte Fazer backup agora para substituí-lo.",
-		"Cette clé contient une sauvegarde du %s qui n'est pas celle des paramètres de cette console : elle est "
-		"conservée. Importez-la, ou appuyez sur Sauvegarder maintenant pour la remplacer.",
-		"Dieses Laufwerk hat eine Sicherung vom %s, die nicht zu den Einstellungen dieser Konsole gehört: Sie bleibt "
-		"erhalten. Importiere sie, oder drücke Jetzt sichern, um sie zu ersetzen."},
-	{"%s has a backup from %s that isn't this console's settings. Replace it with the current settings? (To get it "
-	 "back instead, choose No, then Import...)",
-		"%s tiene una copia del %s que no son los ajustes de esta consola. ¿Reemplazarla por los ajustes actuales? "
-		"(Para recuperarla, elige No y luego Importar...)",
-		"%s tem um backup de %s que não é das configurações deste console. Substituí-lo pelas configurações atuais? "
-		"(Para recuperá-lo, escolha Não e depois Importar...)",
-		"%s contient une sauvegarde du %s qui n'est pas celle des paramètres de cette console. La remplacer par les "
-		"paramètres actuels ? (Pour la récupérer, choisissez Non, puis Importer...)",
-		"%s enthält eine Sicherung vom %s, die nicht zu den Einstellungen dieser Konsole gehört. Durch die aktuellen "
-		"Einstellungen ersetzen? (Um sie zurückzuholen, wähle Nein und dann Importieren...)"},
+	{"This drive has a backup from %s that this installation didn't write (from before a factory reset, or another "
+	 "PS5's): it is kept. Import it, or press Back up now to replace it.",
+		"Esta unidad tiene una copia del %s que esta instalación no escribió (de antes de un restablecimiento de "
+		"fábrica, o de otra PS5): se conserva. Impórtala, o pulsa Hacer copia ahora para reemplazarla.",
+		"Esta unidade tem um backup de %s que esta instalação não gravou (de antes de uma restauração de fábrica, ou de "
+		"outro PS5): ele é mantido. Importe-o, ou aperte Fazer backup agora para substituí-lo.",
+		"Cette clé contient une sauvegarde du %s que cette installation n'a pas écrite (d'avant une réinitialisation "
+		"d'usine, ou d'une autre PS5) : elle est conservée. Importez-la, ou appuyez sur Sauvegarder maintenant pour la "
+		"remplacer.",
+		"Dieses Laufwerk hat eine Sicherung vom %s, die diese Installation nicht geschrieben hat (von vor einem "
+		"Zurücksetzen auf die Werkseinstellungen oder von einer anderen PS5): Sie bleibt erhalten. Importiere sie, oder "
+		"drücke Jetzt sichern, um sie zu ersetzen."},
+	{"%s has a backup from %s that this installation didn't write (from before a factory reset, or another PS5's). "
+	 "Replace it with the current settings? (To get it back instead, choose No, then Import...)",
+		"%s tiene una copia del %s que esta instalación no escribió (de antes de un restablecimiento de fábrica, o de "
+		"otra PS5). ¿Reemplazarla por los ajustes actuales? (Para recuperarla, elige No y luego Importar...)",
+		"%s tem um backup de %s que esta instalação não gravou (de antes de uma restauração de fábrica, ou de outro "
+		"PS5). Substituí-lo pelas configurações atuais? (Para recuperá-lo, escolha Não e depois Importar...)",
+		"%s contient une sauvegarde du %s que cette installation n'a pas écrite (d'avant une réinitialisation d'usine, "
+		"ou d'une autre PS5). La remplacer par les paramètres actuels ? (Pour la récupérer, choisissez Non, puis "
+		"Importer...)",
+		"%s enthält eine Sicherung vom %s, die diese Installation nicht geschrieben hat (von vor einem Zurücksetzen auf "
+		"die Werkseinstellungen oder von einer anderen PS5). Durch die aktuellen Einstellungen ersetzen? (Um sie "
+		"zurückzuholen, wähle Nein und dann Importieren...)"},
+	{"The settings couldn't be saved, so they weren't backed up.",
+		"No se pudieron guardar los ajustes, así que no se hizo la copia.",
+		"Não foi possível salvar as configurações, então o backup não foi feito.",
+		"Les paramètres n'ont pas pu être enregistrés : ils n'ont donc pas été sauvegardés.",
+		"Die Einstellungen konnten nicht gespeichert werden, deshalb wurden sie nicht gesichert."},
+	{"The imported settings are in use, but they couldn't be saved: they'll be lost when the app closes.",
+		"Los ajustes importados están en uso, pero no se pudieron guardar: se perderán al cerrar la app.",
+		"As configurações importadas estão em uso, mas não foi possível salvá-las: elas serão perdidas quando o app "
+		"fechar.",
+		"Les paramètres importés sont utilisés, mais ils n'ont pas pu être enregistrés : ils seront perdus à la fermeture "
+		"de l'app.",
+		"Die importierten Einstellungen sind aktiv, konnten aber nicht gespeichert werden: Sie gehen verloren, wenn die "
+		"App geschlossen wird."},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};

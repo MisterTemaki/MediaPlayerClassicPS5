@@ -22,12 +22,18 @@ settings on a USB drive and brings it back.
 
 ## Whose backup
 
-`mpc-hc.ini` has a random `BackupId=`, made the first time the settings are saved, kept by **Reset**, and taken over
-from a backup by **Import...**. A backup belongs to the installation with the same id. The automatic backup writes
-only where there is no backup yet, or this installation's own. It never writes over a backup from before a factory
-reset, from another PS5, or on another stick that is now at the same `/mnt/usbN`. The page says when the chosen
-drive holds such a backup: import it, or press **Back up now** and say yes to replace it. A backup without an id is
-written again with this installation's id after it is imported.
+`mpc-hc.ini` has a random `BackupId=`, made the first time the settings are saved and kept by **Reset** and by
+**Import...**. A backup belongs to the installation with the same id. The automatic backup writes only where there
+is no backup yet, or this installation's own. It never writes over a backup from before a factory reset, from
+another PS5, on another stick that is now at the same `/mnt/usbN`, or one it can't read. The page says when the
+chosen drive holds such a backup: import it, or press **Back up now** and say yes to replace it (the question has
+**No** as its default).
+
+After an import the backup is written again with this installation's id, so it is this one's from then on. If the
+console that made it still writes to the same stick, it finds another installation's backup there and leaves it.
+
+Going back to 1.6.2 and then forward again makes a new id (1.6.2 doesn't keep the line): the backup on the stick is
+then another installation's, and **Back up now** asks before replacing it.
 
 ## What is in a backup
 
@@ -52,7 +58,7 @@ favorites and network locations.
 - A drive that isn't connected keeps its place in the list as "(not connected)"; backups resume when a drive is at
   that place again, if its backup is this installation's (or it has none).
 - The backup is written by its own thread: the picture never waits for the drive. Closing the app waits up to three
-  seconds for the last one.
+  seconds for the last one. **Back up now** stops (and says so) when the settings can't be saved first.
 - The backup is written beside the old one and then renamed over it: a backup interrupted halfway (the drive pulled
   out, the console switched off) leaves the previous one whole. On a drive that won't rename over a file, the old
   backup is removed first; if the rename still fails, the new one stays as `mpc-hc.ini.tmp` and the page says so.

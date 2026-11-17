@@ -8,11 +8,12 @@
 //   mpc-hc.ini has had no passwords in it since 1.6.2 (they are in the encrypted store, whose key never leaves
 //   the console): network passwords are not in a backup, and are typed again after an import. The fonts folder
 //   (fonts the user added for subtitles) isn't copied either.
-// - Whose backup: mpc-hc.ini has a random BackupId= (made once, kept by Reset, taken over by an import). A backup
-//   is this installation's when its BackupId is the same. The automatic backup only writes over this
-//   installation's backup (or where there is none): a drive holding another one -- the backup of a console before
-//   its factory reset, another PS5's, another stick now at the same /mnt/usbN -- is never written over without the
-//   user saying yes (Back up now asks). Import makes the imported backup this installation's.
+// - Whose backup: mpc-hc.ini has a random BackupId= (made once, kept by Reset and by an import). A backup is this
+//   installation's when its BackupId is the same. The automatic backup only writes over this installation's backup
+//   (or where there is none): a drive holding another one -- the backup of a console before its factory reset,
+//   another PS5's, another stick now at the same /mnt/usbN, one that can't be read -- is never written over without
+//   the user saying yes (Back up now asks, No first). An import writes the imported backup again with this
+//   installation's id: from then on it is this one's (a console still writing the old id finds another's there).
 // - Automatic: with a drive chosen (Settings::backup_drive), every time mpc-hc.ini is saved its text is handed to
 //   a thread that writes it to the drive when it differs from the backup's (beside it, then renamed over it: a
 //   backup interrupted halfway leaves the previous one whole). The screen never waits for the drive; the app's
@@ -56,7 +57,8 @@ enum class Result
 	Foreign,   // another installation's backup is there: not written over (force: written over)
 	Failed,    // error says why
 };
-// mpc-hc.ini (as saved) to the drive's backup, now, on the calling thread (Back up now, after an import)
+// mpc-hc.ini (as saved) to the drive's backup, now, on the calling thread (Back up now, after an import); error:
+// why it failed, translated (call it from the UI thread)
 Result WriteTo(const std::string& drive, const std::string& id, std::string& error, bool force = false);
 
 // called by Settings::Save once mpc-hc.ini is written: the automatic backup (s.backup_drive), when there is one,
@@ -65,15 +67,33 @@ void AfterSave(const Settings& s);
 // waits (up to ms) until the backup thread has written what it was given (the app's exit)
 void Flush(int ms);
 
-// the last attempt in this session: its drive, its result, why it failed ("" when it didn't)
+// why a write failed: kept as a code and its details, made into words on the thread that shows them (T() reads
+// the language setting, which only the UI thread changes)
+enum class Error
+{
+	None,
+	NoDrive,
+	NotConnected,  // path: the drive
+	CantRead,      // the settings file
+	CantCreate,    // path, reason
+	CantWrite,     // path, reason
+	CantReplace,   // path, reason
+	CantReplaceKept, // path, reason, kept: the new backup left as mpc-hc.ini.tmp
+};
+// the last attempt in this session: its drive, its result, why it failed
 struct Status
 {
 	std::string drive;
 	time_t when = 0;
 	Result result = Result::Unchanged;
-	std::string error;
+	Error error = Error::None;
+	std::string path, reason, kept;
 };
 Status LastStatus();
+// a status' error in words: translated (the UI thread) or in English (the log); "" when there is none
+std::string ErrorText(const Status& s, bool translated = true);
+// changes whenever an attempt ends (the page reads the drive again only then)
+unsigned Generation();
 
 // the backups on the connected drives, the newest first
 struct Found

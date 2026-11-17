@@ -1971,12 +1971,12 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	// after a console's factory reset or on another PS5 (mpc_backup.h). Not in MPC-HC: its settings are a file or
 	// the registry on the PC.
 	p = d->NewPage("Backup", 1);
-	d->Group(p, "Back up the settings to a USB drive", 5, 5, 286, 128);
+	d->Group(p, "Back up the settings to a USB drive", 5, 5, 286, 140);
 	d->Text(p, "A copy of the settings (Options, Keys, favorites, recent files, file positions and network "
 			   "locations) is kept in the mpcps5/backup folder of the drive chosen here, and written again "
 			   "whenever they change.",
-		10, 17, 276, 26);
-	d->Text(p, "Back up automatically to:", 10, 50, 100, 8);
+		10, 17, 276, 34); // four lines in German
+	d->Text(p, "Back up automatically to:", 10, 58, 112, 8); // "Sauvegarde automatique sur :" in one line
 	// Off, the connected drives (as the file browser names them), and the chosen one when it isn't connected
 	auto drive_name = [](const std::string& path) {
 		const bool usb = path.compare(0, 8, "/mnt/usb") == 0, ext = path.compare(0, 8, "/mnt/ext") == 0;
@@ -1986,7 +1986,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 				   : Fmt(T("USB Drive %d (%s)"), atoi(path.c_str() + 8), path.c_str());
 	};
 	std::vector<std::string> drive_paths = {""};
-	ComboBox* drive = d->Combo(p, 112, 48, 173, 13, {"Off"}, 0);
+	ComboBox* drive = d->Combo(p, 124, 56, 161, 13, {"Off"}, 0);
 	for (const std::string& path : backup::ConnectedDrives())
 	{
 		drive->items.push_back(drive_name(path));
@@ -2000,26 +2000,28 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	for (int i = 0; i < int(drive_paths.size()); i++)
 		if (drive_paths[i] == s.backup_drive)
 			drive->sel = i;
-	Button* now = d->P(p, new Button, 10, 68, 80, 14);
+	Button* now = d->P(p, new Button, 10, 75, 104, 14); // "Sauvegarder maintenant"
 	now->text = T("Back up now");
-	// the line under the button, worked out again whenever the page is drawn (an automatic backup written in the
-	// background, a drive plugged in): at most once a second
+	// the line under the button, worked out again when something changed: the drive chosen, a backup attempt (the
+	// automatic one ends on its own thread). The drive is read then, not at every paint.
 	struct LiveText : Static
 	{
 		std::function<std::string()> make;
-		int64_t last = 0;
+		unsigned seen = ~0u;
+		bool stale = true;
 		void Paint(CDC& dc, bool focused, bool hot) override
 		{
-			const int64_t t = int64_t(time(nullptr));
-			if (make && t != last)
+			const unsigned g = backup::Generation();
+			if (make && (stale || g != seen))
 			{
-				last = t;
+				seen = g;
+				stale = false;
 				text = make();
 			}
 			Static::Paint(dc, focused, hot);
 		}
 	};
-	LiveText* status = d->P(p, new LiveText, 10, 89, 276, 40);
+	LiveText* status = d->P(p, new LiveText, 10, 94, 276, 48); // up to five lines
 	auto selected = [drive, drive_paths] {
 		return drive->sel > 0 && drive->sel < int(drive_paths.size()) ? drive_paths[drive->sel] : std::string();
 	};
@@ -2030,17 +2032,18 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		const backup::Info info = backup::InfoOn(path, AppSettings().backup_id);
 		std::string text = !info.exists ? Fmt(T("No backup on this drive yet: %s"), backup::FileOn(path).c_str())
 						   : info.ours ? Fmt(T("Last backup: %s, in %s"), BackupDate(info.when).c_str(), backup::FileOn(path).c_str())
-									   : Fmt(T("This drive has a backup from %s that isn't this console's settings: it is "
-											   "kept. Import it, or press Back up now to replace it."),
+									   : Fmt(T("This drive has a backup from %s that this installation didn't write (from "
+											   "before a factory reset, or another PS5's): it is kept. Import it, or press "
+											   "Back up now to replace it."),
 											 BackupDate(info.when).c_str());
 		const backup::Status last = backup::LastStatus();
-		if (last.drive == path && last.result == backup::Result::Failed && !last.error.empty())
-			text += "\n" + Fmt(T("The last backup failed: %s"), last.error.c_str());
+		if (last.drive == path && last.result == backup::Result::Failed)
+			text += "\n" + Fmt(T("The last backup failed: %s"), backup::ErrorText(last).c_str());
 		return text;
 	};
 	auto refresh = [selected, now, status] {
 		now->enabled = !selected().empty();
-		status->last = 0; // worked out again at the next paint
+		status->stale = true; // worked out again at the next paint
 	};
 	refresh();
 	drive->on_change = refresh;
@@ -2055,6 +2058,12 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		if (path.empty())
 			return;
 		o->Apply();
+		if (!AppSettings().Save())
+		{
+			// the backup would be the file as it was before
+			MessageBox(T("The settings couldn't be saved, so they weren't backed up."), T("Backup"), MB_OK, 3);
+			return;
+		}
 		auto write = [path, refresh](bool force) {
 			std::string error;
 			const backup::Result r = backup::WriteTo(path, AppSettings().backup_id, error, force);
@@ -2068,18 +2077,19 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		if (write(false) == backup::Result::Foreign)
 		{
 			const backup::Info info = backup::InfoOn(path, AppSettings().backup_id);
-			MessageBox(Fmt(T("%s has a backup from %s that isn't this console's settings. Replace it with the current "
-							 "settings? (To get it back instead, choose No, then Import...)"),
+			MessageBox(Fmt(T("%s has a backup from %s that this installation didn't write (from before a factory "
+							 "reset, or another PS5's). Replace it with the current settings? (To get it back instead, "
+							 "choose No, then Import...)"),
 						   backup::FileOn(path).c_str(), BackupDate(info.when).c_str()),
-				T("Backup"), MB_YESNO, 2, [write](int r) {
+				T("Backup"), MB_YESNO | MB_DEFBUTTON2, 2, [write](int r) {
 					if (r == IDYES)
 						write(true);
 				});
 		}
 	};
-	d->Group(p, "Import", 5, 137, 286, 64);
-	d->Text(p, "Replaces all the settings with the newest backup found on the connected drives.", 10, 149, 276, 18);
-	Button* imp = d->P(p, new Button, 10, 175, 80, 14);
+	d->Group(p, "Import", 5, 149, 286, 52);
+	d->Text(p, "Replaces all the settings with the newest backup found on the connected drives.", 10, 161, 276, 18);
+	Button* imp = d->P(p, new Button, 10, 182, 104, 14);
 	imp->text = T("Import...");
 	d->Text(p, "Network passwords and the fonts folder aren't backed up: type the passwords again after an import.",
 		5, 207, 286, 18);
@@ -2106,18 +2116,24 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 				}
 				// the drive it came from is the one backed up to from now on (a drive's number can change with
 				// the port or the console: the backup's own BackupDrive may name another), and the backup becomes
-				// this installation's (its id taken over, or written again with this one's when it had none)
+				// this installation's: this one's id is kept and the backup written again with it below (a console
+				// still writing the old id then finds another installation's backup there, and asks)
 				imported.backup_drive = b.drive;
 				Settings& st = AppSettings();
-				const std::string own_id = st.backup_id;
-				if (!backup::ValidId(imported.backup_id))
-					imported.backup_id = own_id;
+				imported.backup_id = st.backup_id;
 				st = imported;
 				sys::SetDarkTheme(st.dark_mode);
 				OrbisLog("[backup] imported %s", b.path.c_str());
 				o->EndDialog(1);
 				if (o->applied)
 					o->applied(); // applied and saved
+				if (!st.Save())
+				{
+					MessageBox(T("The imported settings are in use, but they couldn't be saved: they'll be lost when the "
+								 "app closes."),
+						T("Import"), MB_OK, 3);
+					return;
+				}
 				std::string werror;
 				backup::WriteTo(b.drive, st.backup_id, werror, true);
 				MessageBox(T("The settings were imported. Type the network passwords again when they are asked for. "

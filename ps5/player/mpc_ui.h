@@ -443,7 +443,8 @@ private:
 	std::vector<std::unique_ptr<Popup>> popups_;
 };
 
-// MessageBox (MB_OK / MB_YESNO / MB_OKCANCEL), icon 0 none 1 information 2 warning 3 error 4 question
+// MessageBox (MB_OK / MB_YESNO / MB_OKCANCEL, | MB_DEFBUTTON2: the second button is the default, as on Windows),
+// icon 0 none 1 information 2 warning 3 error 4 question
 void MessageBox(const std::string& text, const std::string& caption, int buttons = 0, int icon = 1,
 	std::function<void(int)> done = nullptr);
 enum
@@ -451,6 +452,7 @@ enum
 	MB_OK = 0,
 	MB_OKCANCEL = 1,
 	MB_YESNO = 4,
+	MB_DEFBUTTON2 = 0x100,
 	IDOK = 1,
 	IDCANCEL = 2,
 	IDYES = 6,

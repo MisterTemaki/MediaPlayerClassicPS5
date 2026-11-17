@@ -34,15 +34,25 @@ namespace
 // a settings file is a few KB (20 recent files, positions, favorites...): anything bigger isn't one
 constexpr long kMaxBytes = 4 << 20;
 
-std::mutex g_status_mutex;
-Status g_status;
-std::mutex g_write_mutex; // one writer at a time: the backup thread, Back up now
-
-// the backup thread's work: the newest text handed over, written when the thread gets to it
-std::mutex g_job_mutex;
-std::condition_variable g_job_cv;
-bool g_thread_started = false, g_job_pending = false, g_busy = false;
-std::string g_job_drive, g_job_id, g_job_text;
+// made once and never destroyed: the backup thread waits on the condition variable until the process ends, and
+// destroying one with a waiter at exit() blocks for ever on glibc (the app itself ends with _exit)
+struct Shared
+{
+	std::mutex status_mutex;
+	Status status;
+	unsigned generation = 0;
+	std::mutex write_mutex; // one writer at a time: the backup thread, Back up now
+	// the backup thread's work: the newest text handed over, written when the thread gets to it
+	std::mutex job_mutex;
+	std::condition_variable job_cv;
+	bool thread_started = false, thread_failed = false, job_pending = false, busy = false;
+	std::string job_drive, job_id, job_text;
+};
+Shared& G()
+{
+	static Shared* g = new Shared;
+	return *g;
+}
 
 std::vector<std::string> AllDrives()
 {
@@ -112,88 +122,80 @@ std::string IdIn(const std::string& text)
 	return "";
 }
 
-void Note(const std::string& drive, Result result, const std::string& error)
+Status Note(const std::string& drive, Result result, Error error = Error::None, const std::string& path = "",
+	const std::string& reason = "", const std::string& kept = "")
 {
-	std::lock_guard<std::mutex> lock(g_status_mutex);
-	g_status.drive = drive;
-	g_status.when = time(nullptr);
-	g_status.result = result;
-	g_status.error = error;
+	Status s;
+	s.drive = drive;
+	s.when = time(nullptr);
+	s.result = result;
+	s.error = error;
+	s.path = path;
+	s.reason = reason;
+	s.kept = kept;
+	if (error != Error::None)
+		OrbisLog("[backup] not written: %s", ErrorText(s, false).c_str());
+	std::lock_guard<std::mutex> lock(G().status_mutex);
+	G().status = s;
+	G().generation++;
+	return s;
 }
 
-// text to the drive's backup (the write lock held)
-Result Write(const std::string& drive, const std::string& id, const std::string& text, std::string& error, bool force)
+// text to the drive's backup (the write lock held). Never translates (the backup thread calls it).
+Status Write(const std::string& drive, const std::string& id, const std::string& text, bool force)
 {
-	error.clear();
 	if (!ValidDrive(drive))
-		error = T("no drive is chosen");
-	else if (!OrbisIsDir(drive))
-		error = Fmt(T("%s isn't connected"), drive.c_str());
-	else if (text.empty())
-		error = T("the settings file can't be read");
-	if (!error.empty())
-	{
-		OrbisLog("[backup] not written: %s", error.c_str());
-		Note(drive, Result::Failed, error);
-		return Result::Failed;
-	}
+		return Note(drive, Result::Failed, Error::NoDrive);
+	if (!OrbisIsDir(drive))
+		return Note(drive, Result::Failed, Error::NotConnected, drive);
+	if (text.empty())
+		return Note(drive, Result::Failed, Error::CantRead);
 	const std::string folder = FolderOn(drive), path = FileOn(drive), tmp = path + ".tmp";
-	std::string old;
-	if (ReadAll(path, old))
+	struct stat st = {};
+	if (stat(path.c_str(), &st) == 0)
 	{
-		if (old == text)
+		std::string old;
+		const bool read = ReadAll(path, old);
+		if (read && old == text)
+			return Note(drive, Result::Unchanged); // the backup already has these settings
+		// someone else's, or one that can't be read (another file system's, a folder, too big): kept
+		if (!force && (!read || id.empty() || IdIn(old) != id))
 		{
-			Note(drive, Result::Unchanged, "");
-			return Result::Unchanged; // the backup already has these settings
-		}
-		if (!force && (id.empty() || IdIn(old) != id))
-		{
-			OrbisLog("[backup] not written: %s is another installation's backup (BackupId %s, this one's %s)",
-				path.c_str(), IdIn(old).empty() ? "none" : IdIn(old).c_str(), id.c_str());
-			Note(drive, Result::Foreign, "");
-			return Result::Foreign;
+			OrbisLog("[backup] not written: %s is another installation's backup or can't be read (BackupId %s, this "
+					 "one's %s)",
+				path.c_str(), !read ? "unreadable" : IdIn(old).empty() ? "none" : IdIn(old).c_str(), id.c_str());
+			return Note(drive, Result::Foreign);
 		}
 	}
 	if (!OrbisMkdirs(folder))
-		error = Fmt(T("can't create %s (%s)"), folder.c_str(), strerror(errno));
-	else
+		return Note(drive, Result::Failed, Error::CantCreate, folder, strerror(errno));
+	FILE* f = fopen(tmp.c_str(), "wb");
+	if (!f)
+		return Note(drive, Result::Failed, Error::CantWrite, tmp, strerror(errno));
+	bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+	ok = fflush(f) == 0 && ok;
+	// on the disk before the rename; a drive's file system that can't (fsync refused) still gets the file
+	if (ok && fsync(fileno(f)) != 0)
+		OrbisLog("[backup] fsync of %s: %s (written without it)", tmp.c_str(), strerror(errno));
+	ok = fclose(f) == 0 && ok;
+	if (!ok)
 	{
-		FILE* f = fopen(tmp.c_str(), "wb");
-		if (!f)
-			error = Fmt(T("can't write %s (%s)"), tmp.c_str(), strerror(errno));
-		else
-		{
-			bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
-			ok = fflush(f) == 0 && ok;
-			// on the disk before the rename; a drive's file system that can't (fsync refused) still gets the file
-			if (ok && fsync(fileno(f)) != 0)
-				OrbisLog("[backup] fsync of %s: %s (written without it)", tmp.c_str(), strerror(errno));
-			ok = fclose(f) == 0 && ok;
-			if (!ok)
-			{
-				error = Fmt(T("can't write %s (%s)"), tmp.c_str(), strerror(errno));
-				unlink(tmp.c_str());
-			}
-			else if (rename(tmp.c_str(), path.c_str()) != 0)
-			{
-				// a file system that won't rename over a file: the old backup goes first. If the rename still
-				// fails, the new backup stays as mpc-hc.ini.tmp (said), never deleted
-				if (unlink(path.c_str()) != 0 && errno != ENOENT)
-				{
-					error = Fmt(T("can't replace %s (%s)"), path.c_str(), strerror(errno));
-					unlink(tmp.c_str());
-				}
-				else if (rename(tmp.c_str(), path.c_str()) != 0)
-					error = Fmt(T("can't replace %s (%s); the new backup is in %s"), path.c_str(), strerror(errno),
-						tmp.c_str());
-			}
-		}
+		const std::string reason = strerror(errno);
+		unlink(tmp.c_str());
+		return Note(drive, Result::Failed, Error::CantWrite, tmp, reason);
 	}
-	if (!error.empty())
+	if (rename(tmp.c_str(), path.c_str()) != 0)
 	{
-		OrbisLog("[backup] not written: %s", error.c_str());
-		Note(drive, Result::Failed, error);
-		return Result::Failed;
+		// a file system that won't rename over a file: the old backup goes first. If the rename still fails, the
+		// new backup stays as mpc-hc.ini.tmp (said), never deleted
+		if (unlink(path.c_str()) != 0 && errno != ENOENT)
+		{
+			const std::string reason = strerror(errno);
+			unlink(tmp.c_str());
+			return Note(drive, Result::Failed, Error::CantReplace, path, reason);
+		}
+		if (rename(tmp.c_str(), path.c_str()) != 0)
+			return Note(drive, Result::Failed, Error::CantReplaceKept, path, strerror(errno), tmp);
 	}
 	const int fd = open(folder.c_str(), O_RDONLY);
 	if (fd >= 0)
@@ -203,31 +205,54 @@ Result Write(const std::string& drive, const std::string& id, const std::string&
 	}
 	OrbisLog("[backup] the settings (%zu bytes) backed up to %s%s", text.size(), path.c_str(),
 		force ? " (replacing another installation's backup)" : "");
-	Note(drive, Result::Written, "");
-	return Result::Written;
+	return Note(drive, Result::Written);
 }
 
 void Thread()
 {
-	std::unique_lock<std::mutex> lock(g_job_mutex);
+	Shared& g = G();
+	std::unique_lock<std::mutex> lock(g.job_mutex);
 	for (;;)
 	{
-		g_job_cv.wait(lock, [] { return g_job_pending; });
-		const std::string drive = g_job_drive, id = g_job_id, text = g_job_text;
-		g_job_pending = false;
-		g_busy = true;
+		g.job_cv.wait(lock, [&g] { return g.job_pending; });
+		const std::string drive = g.job_drive, id = g.job_id, text = g.job_text;
+		g.job_pending = false;
+		g.busy = true;
 		lock.unlock();
 		{
-			std::lock_guard<std::mutex> write(g_write_mutex);
-			std::string error;
-			Write(drive, id, text, error, false);
+			std::lock_guard<std::mutex> write(g.write_mutex);
+			Write(drive, id, text, false);
 		}
 		lock.lock();
-		g_busy = false;
-		g_job_cv.notify_all();
+		g.busy = false;
+		g.job_cv.notify_all();
 	}
 }
 } // namespace
+
+std::string ErrorText(const Status& s, bool translated)
+{
+	auto tr = [translated](const char* english) { return translated ? T(english) : english; };
+	switch (s.error)
+	{
+	case Error::None: return "";
+	case Error::NoDrive: return tr("no drive is chosen");
+	case Error::NotConnected: return Fmt(tr("%s isn't connected"), s.path.c_str());
+	case Error::CantRead: return tr("the settings file can't be read");
+	case Error::CantCreate: return Fmt(tr("can't create %s (%s)"), s.path.c_str(), s.reason.c_str());
+	case Error::CantWrite: return Fmt(tr("can't write %s (%s)"), s.path.c_str(), s.reason.c_str());
+	case Error::CantReplace: return Fmt(tr("can't replace %s (%s)"), s.path.c_str(), s.reason.c_str());
+	case Error::CantReplaceKept:
+		return Fmt(tr("can't replace %s (%s); the new backup is in %s"), s.path.c_str(), s.reason.c_str(), s.kept.c_str());
+	}
+	return "";
+}
+
+unsigned Generation()
+{
+	std::lock_guard<std::mutex> lock(G().status_mutex);
+	return G().generation;
+}
 
 std::vector<std::string> ConnectedDrives()
 {
@@ -300,8 +325,10 @@ Result WriteTo(const std::string& drive, const std::string& id, std::string& err
 	std::string text;
 	if (!ReadAll(SettingsPath(), text))
 		text.clear();
-	std::lock_guard<std::mutex> write(g_write_mutex);
-	return Write(drive, id, text, error, force);
+	std::lock_guard<std::mutex> write(G().write_mutex);
+	const Status s = Write(drive, id, text, force);
+	error = ErrorText(s, true);
+	return s.result;
 }
 
 void AfterSave(const Settings& s)
@@ -311,30 +338,48 @@ void AfterSave(const Settings& s)
 	std::string text;
 	if (!ReadAll(SettingsPath(), text))
 		text.clear(); // the thread says why
-	std::lock_guard<std::mutex> lock(g_job_mutex);
-	g_job_drive = s.backup_drive;
-	g_job_id = s.backup_id;
-	g_job_text = std::move(text);
-	g_job_pending = true;
-	if (!g_thread_started)
+	Shared& g = G();
+	std::unique_lock<std::mutex> lock(g.job_mutex);
+	if (!g.thread_started && !g.thread_failed)
 	{
-		g_thread_started = true;
-		std::thread(Thread).detach(); // waits on g_job_cv for the rest of the process
+		try
+		{
+			std::thread(Thread).detach(); // waits on job_cv for the rest of the process
+			g.thread_started = true;
+		}
+		catch (...)
+		{
+			g.thread_failed = true;
+			OrbisLog("[backup] no backup thread: the backups are written as the settings are saved");
+		}
 	}
-	g_job_cv.notify_all();
+	if (!g.thread_started)
+	{
+		// no thread: written here (the screen waits for the drive)
+		lock.unlock();
+		std::lock_guard<std::mutex> write(g.write_mutex);
+		Write(s.backup_drive, s.backup_id, text, false);
+		return;
+	}
+	g.job_drive = s.backup_drive;
+	g.job_id = s.backup_id;
+	g.job_text = std::move(text);
+	g.job_pending = true;
+	g.job_cv.notify_all();
 }
 
 void Flush(int ms)
 {
-	std::unique_lock<std::mutex> lock(g_job_mutex);
-	if (!g_job_cv.wait_for(lock, std::chrono::milliseconds(ms), [] { return !g_job_pending && !g_busy; }))
+	Shared& g = G();
+	std::unique_lock<std::mutex> lock(g.job_mutex);
+	if (!g.job_cv.wait_for(lock, std::chrono::milliseconds(ms), [&g] { return !g.job_pending && !g.busy; }))
 		OrbisLog("[backup] the backup thread didn't finish within %d ms", ms);
 }
 
 Status LastStatus()
 {
-	std::lock_guard<std::mutex> lock(g_status_mutex);
-	return g_status;
+	std::lock_guard<std::mutex> lock(G().status_mutex);
+	return G().status;
 }
 
 std::vector<Found> FindBackups()

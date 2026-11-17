@@ -347,11 +347,12 @@ $(APP_OUT)/eboot.bin: build/app/eboot.elf $(NATIVE_TOOL)
 	$(NATIVE_TOOL) self --sign --in $< --out $@ --magic 0x1D3D154F
 	$(NATIVE_TOOL) self --inspect --file $@
 
-# the version the param.json was checked against (1.6.3 review): a build with another VERSION checks it again
-build/version.stamp: FORCE
-	@mkdir -p build; echo '$(VERSION)' | cmp -s - $@ || echo '$(VERSION)' > $@
+# the version the param.json was checked against (1.6.3 review): rewritten when the Makefile is read, and only when
+# VERSION changed, so a build with another VERSION checks param.json again (and make -n/-q stay right)
+VERSION_STAMP := build/version.stamp
+$(shell mkdir -p build; echo '$(VERSION)' | cmp -s - $(VERSION_STAMP) || echo '$(VERSION)' > $(VERSION_STAMP))
 
-$(APP_OUT)/sce_sys/param.json: app/sce_sys/param.json tools/check_app_profile.py build/version.stamp
+$(APP_OUT)/sce_sys/param.json: app/sce_sys/param.json tools/check_app_profile.py $(VERSION_STAMP)
 	@mkdir -p $(dir $@)
 	sed 's/PPSA99015/$(TITLE_ID)/g' $< > $@
 	python3 tools/check_app_profile.py $@ $(VERSION)
@@ -508,6 +509,3 @@ clean:
 
 .PHONY: ps5 host test test-audit test-theme test-credentials test-credentials-ui send app dist clean deps deps-subs deps-disc bench
 .SECONDARY:
-
-.PHONY: FORCE
-FORCE:

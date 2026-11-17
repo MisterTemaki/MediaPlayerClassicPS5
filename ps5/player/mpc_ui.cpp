@@ -2007,6 +2007,8 @@ public:
 void MessageBox(const std::string& text, const std::string& caption, int buttons, int icon, std::function<void(int)> done)
 {
 	OrbisLog("[ui] message: %s", text.c_str());
+	const size_t default_button = (buttons & MB_DEFBUTTON2) ? 1 : 0; // 1.6.3: No first for a question that destroys
+	buttons &= ~MB_DEFBUTTON2;
 	MsgBox* d = new MsgBox;
 	d->title = caption;
 	d->text = text;
@@ -2043,7 +2045,7 @@ void MessageBox(const std::string& text, const std::string& caption, int buttons
 		Button* b = d->Add(new Button);
 		b->text = T(bs[i].text);
 		b->rect = CRect(x, c.bottom - ScaleY(42) + (ScaleY(42) - bh) / 2, x + bw, c.bottom - ScaleY(42) + (ScaleY(42) + bh) / 2);
-		b->is_default = i == 0;
+		b->is_default = i == std::min(default_button, bs.size() - 1);
 		const int id = bs[i].id;
 		MsgBox* dd = d;
 		b->on_click = [dd, id] { dd->EndDialog(id); };

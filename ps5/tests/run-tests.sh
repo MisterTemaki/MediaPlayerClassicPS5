@@ -3148,10 +3148,10 @@ expect "! grep -q 'BackupDrive=/' $T/root/mpc-hc.ini && [ \$(idof $T/root/mpc-hc
 # OK doesn't write over it; the page says so; Back up now asks, No keeps it
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key right;56:key r1;58:key r1;60:key r1;64:key enter;90:quit" "52")
 expect "[ $rc = 0 ] && grep -qx \"BackupDrive=$D/u0\" $T/root/mpc-hc.ini && [ \"\$(cat $BK)\" = \"\$(printf '[Settings]\nVolume=11')\" ] && grep -q 'is another installation.s backup' $T/root/logs/boot.log" "a drive with another installation's backup: chosen, but the backup isn't written over"
-rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter;66:key escape;76:key escape;90:quit" "60")
-expect "[ $rc = 0 ] && grep -q '\[ui\] message: .*has a backup from .* that isn.t this console.s settings. Replace it' $T/root/logs/boot.log && [ \"\$(cat $BK)\" = \"\$(printf '[Settings]\nVolume=11')\" ]" "Back up now asks before replacing it; No keeps it"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter;66:key enter;76:key escape;90:quit" "60")
+expect "[ $rc = 0 ] && grep -q '\[ui\] message: .*has a backup from .* that this installation didn.t write .*Replace it' $T/root/logs/boot.log && [ \"\$(cat $BK)\" = \"\$(printf '[Settings]\nVolume=11')\" ]" "Back up now asks before replacing it; No is the default (Cross twice keeps it)"
 cp "$T/dump/flip00060.ppm" "$WORK/t37-replace-question.ppm" 2>/dev/null
-rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter;66:key enter;76:key enter;86:key escape;100:quit" "")
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter;64:key l1;66:key enter;76:key enter;86:key escape;100:quit" "")
 expect "[ $rc = 0 ] && cmp -s $T/root/mpc-hc.ini $BK && grep -q 'replacing another installation.s backup' $T/root/logs/boot.log && grep -q '\[ui\] message: The settings are backed up in' $T/root/logs/boot.log" "Yes: replaced by this installation's settings, and said"
 rm -rf "$D/u0/mpcps5"
 # the drive chosen on the page (Off -> USB Drive 0), OK: the backup written, the same text as mpc-hc.ini
@@ -3221,11 +3221,22 @@ expect "[ \"\$(idof $T/root/mpc-hc.ini)\" = '$ID' ] && [ \"\$(idof $BK)\" = '$ID
 expect "! grep -rqa 'secretpw\|hunter2' $T/root $D/u0" "the backup's passwords are nowhere: not in the settings, not on the drive (its copy rewritten without them)"
 expect "$CHECK $T/dump/flip00084.ppm 900 10 28 28 28 2 >/dev/null" "the imported dark theme is on at once"
 nosan "$T"
-# another installation's backup with an id: imported, its id taken over, so its backups go on there
+# another installation's backup with an id: imported, written again with this installation's id (the console that
+# wrote it, if it still runs, then finds another's there and asks), the later changes backed up there
 T=$(newroot t37adopt)
 printf '[Settings]\nVolume=55\nBackupId=0123456789abcdef0123456789abcdef\n' >"$BK"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
+ID=$(idof "$T/root/mpc-hc.ini")
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;80:cmd voldown;90:quit" "")
-expect "[ $rc = 0 ] && grep -qx 'BackupId=0123456789abcdef0123456789abcdef' $T/root/mpc-hc.ini && cmp -s $T/root/mpc-hc.ini $BK && ! grep -qx 'Volume=55' $BK" "a backup with an id: the id taken over, the later changes backed up there"
+expect "[ $rc = 0 ] && [ -n '$ID' ] && grep -qx 'BackupId=$ID' $T/root/mpc-hc.ini && cmp -s $T/root/mpc-hc.ini $BK && ! grep -q 0123456789abcdef $BK && ! grep -qx 'Volume=55' $BK" "a backup with another id: imported, this installation's id kept and written to it, the later changes backed up there"
+nosan "$T"
+# a backup that can't be read (here a folder in its place): kept, as another installation's
+T=$(newroot t37unread)
+rm -rf "$D/u0/mpcps5" && mkdir -p "$BK"
+printf '[Settings]\nBackupDrive=%s\n' "$D/u0" >"$T/root/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
+expect "[ $rc = 0 ] && [ -d $BK ] && grep -q \"can't be read (BackupId unreadable\" $T/root/logs/boot.log" "a backup that can't be read isn't replaced"
+rm -rf "$D/u0/mpcps5"
 nosan "$T"
 # no backup anywhere: said; a file that isn't a settings file: refused, nothing changed
 T=$(newroot t37none)
