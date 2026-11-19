@@ -2536,27 +2536,44 @@ void MainFrame::LoadPlaylistFile(const std::string& path)
 		return;
 	}
 	const std::string dir = ParentFolder(path);
+	// 1.6.4 (audit F2): key=value lines are a .pls's ("File1=...", "Title1=...", "NumberOfEntries=..."). Up to 1.6.3
+	// they were looked for in any list, so an .m3u entry with "=" in its name (a film "[x=1].mkv") was left out
+	std::string low = path;
+	std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c) { return char(tolower(c)); });
+	const bool pls = low.size() > 4 && low.compare(low.size() - 4, 4, ".pls") == 0;
 	std::vector<std::string> items;
 	char line[4096];
-	bool hls = false;
+	bool hls = false, first = true;
 	while (fgets(line, sizeof(line), f))
 	{
 		std::string l = line;
 		while (!l.empty() && (l.back() == '\n' || l.back() == '\r' || l.back() == ' '))
 			l.pop_back();
-		if (l.size() >= 3 && (unsigned char)l[0] == 0xef)
+		// 1.6.4 (audit F1): the UTF-8 byte order mark, at the file's start only. Up to 1.6.3 any line whose first byte
+		// was 0xEF lost three bytes: an entry starting with a character from U+F000 to U+FFFF (a fullwidth letter,
+		// halfwidth katakana) lost its first character
+		if (first && l.compare(0, 3, "\xEF\xBB\xBF") == 0)
 			l = l.substr(3);
+		first = false;
 		if (l.compare(0, 7, "#EXT-X-") == 0)
 			hls = true;
-		if (l.empty() || l[0] == '#' || l[0] == '[')
+		if (l.empty() || l[0] == '#' || (pls && l[0] == '['))
 			continue;
-		const size_t eq = l.find('=');
-		if (l.compare(0, 4, "File") == 0 && eq != std::string::npos)
+		if (pls)
+		{
+			const size_t eq = l.find('=');
+			if (l.compare(0, 4, "File") != 0 || eq == std::string::npos)
+				continue; // Title1=, Length1=, NumberOfEntries=, Version=
 			l = l.substr(eq + 1);
-		else if (eq != std::string::npos && l.find("://") == std::string::npos)
+		}
+		if (l.empty())
 			continue;
 		if (l.find("://") == std::string::npos && l[0] != '/')
+		{
+			// a path next to the list; a list made on Windows separates folders with backslashes (MPC-HC reads both)
+			std::replace(l.begin(), l.end(), '\\', '/');
 			l = dir + "/" + l;
+		}
 		items.push_back(l);
 	}
 	fclose(f);

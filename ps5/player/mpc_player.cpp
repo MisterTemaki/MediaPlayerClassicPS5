@@ -3106,12 +3106,18 @@ struct Player::Impl
 			for (size_t i = 2; i + 1 < data.size(); i += 2)
 			{
 				uint32_t cp = le ? (data[i] | (data[i + 1] << 8)) : ((data[i] << 8) | data[i + 1]);
-				if (cp >= 0xd800 && cp < 0xdc00 && i + 3 < data.size())
+				// 1.6.4 (audit D1): a pair only when the second half is a low surrogate; a half on its own is U+FFFD. Up
+				// to 1.6.3 any next unit was taken (lo - 0xdc00 wrapped round) and made bytes that aren't UTF-8.
+				const uint32_t lo = i + 3 < data.size()
+										? (le ? (data[i + 2] | (data[i + 3] << 8)) : ((data[i + 2] << 8) | data[i + 3]))
+										: 0;
+				if (cp >= 0xd800 && cp < 0xdc00 && lo >= 0xdc00 && lo < 0xe000)
 				{
-					const uint32_t lo = le ? (data[i + 2] | (data[i + 3] << 8)) : ((data[i + 2] << 8) | data[i + 3]);
 					cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00);
 					i += 2;
 				}
+				else if (cp >= 0xd800 && cp < 0xe000)
+					cp = 0xfffd;
 				if (cp < 0x80)
 					o.push_back(uint8_t(cp));
 				else if (cp < 0x800)

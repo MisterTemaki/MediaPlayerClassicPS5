@@ -349,8 +349,11 @@ bool Store::SaveLocked(const Entries& entries, std::string& error)
 }
 bool Store::CommitLocked(std::string& error)
 {
-	if (!LoadLocked(error)) return false;
+	// 1.6.4 (audit A1): nothing to add, nothing to read. Up to 1.6.3 the store was read first, so one that can't be
+	// read (its key folder missing or not private after a copy of /data/mpcps5, a damaged file) failed every Commit,
+	// and with it every Settings::Save: no setting or file position was saved again. It is still never written over.
 	if (legacy_.empty() && staged_.empty()) return true;
+	if (!LoadLocked(error)) return false;
 	SensitiveEntries merged(Merged());
 	if (!SaveLocked(merged, error)) return false;
 	Clear(entries_); entries_.swap(merged); Clear(legacy_); Clear(staged_);

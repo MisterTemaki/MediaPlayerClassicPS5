@@ -5,6 +5,7 @@
 #include "mpc_smb.h"
 #include "mpc_dialogs.h"
 
+#include "mpc_credentials.h"
 #include "mpc_settings.h"
 
 #include "mpc_i18n.h"
@@ -36,6 +37,8 @@ namespace
 struct Url
 {
 	std::string user, password, domain, server, share, path; // path without the leading /
+	// 1.6.4 (audit C1): the password wiped when the address is done with, as the credential store wipes its copies
+	~Url() { credentials::Wipe(password); }
 };
 
 std::string Decode(const std::string& s)
@@ -60,7 +63,7 @@ bool Parse(const std::string& in, Url& u)
 	if (in.compare(0, 6, "smb://") != 0)
 		return false;
 	// smb://user@server/... typed without the password: the one kept for that user and server, if any
-	const std::string url = WithStoredPassword(in);
+	std::string url = WithStoredPassword(in);
 	std::string rest = url.substr(6);
 	const size_t slash = rest.find('/');
 	std::string auth_host = rest.substr(0, slash);
@@ -80,8 +83,12 @@ bool Parse(const std::string& in, Url& u)
 		u.user = Decode(auth.substr(0, colon));
 		if (colon != std::string::npos)
 			u.password = Decode(auth.substr(colon + 1));
+		credentials::Wipe(auth);
 	}
 	u.server = auth_host;
+	// (audit C1) the copies that held the password
+	credentials::Wipe(rest);
+	credentials::Wipe(url);
 	const size_t s2 = path.find('/');
 	u.share = Decode(path.substr(0, s2));
 	u.path = s2 == std::string::npos ? "" : Decode(path.substr(s2 + 1));

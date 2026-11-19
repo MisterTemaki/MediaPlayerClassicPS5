@@ -11,6 +11,7 @@
 #include "OrbisPaths.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cerrno>
@@ -75,6 +76,15 @@ std::vector<std::string> SplitBar(const std::string& s)
 int Clamp(int v, int lo, int hi)
 {
 	return std::max(lo, std::min(hi, v));
+}
+
+// 1.6.4 (audit A2): a file position or a favorite's, in seconds: 0 unless a finite number from 0 to a year. Up to
+// 1.6.3 any atof() went to the player: "inf" or 1e300 (a file edited by hand, a backup imported from a USB drive) was
+// a seek that, in a file whose length isn't known (a stream), became an integer time out of range (undefined).
+double ValidPos(const std::string& v)
+{
+	const double p = atof(v.c_str());
+	return std::isfinite(p) && p > 0 && p < 366.0 * 24 * 3600 ? p : 0;
 }
 } // namespace
 
@@ -568,14 +578,14 @@ bool Settings::ReadFile(const std::string& path, bool migrate)
 		else if (k.compare(0, 7, "FilePos") == 0)
 		{
 			const auto parts = SplitBar(v);
-			if (parts.size() == 2)
-				positions.push_back({parts[0], atof(parts[1].c_str())});
+			if (parts.size() == 2 && ValidPos(parts[1]) > 0)
+				positions.push_back({parts[0], ValidPos(parts[1])});
 		}
 		else if (k.compare(0, 8, "Favorite") == 0)
 		{
 			const auto parts = SplitBar(v);
 			if (parts.size() == 3)
-				favorites.push_back({parts[0], parts[1], atof(parts[2].c_str())});
+				favorites.push_back({parts[0], parts[1], ValidPos(parts[2])});
 		}
 		else if (k.compare(0, 6, "Server") == 0)
 		{
@@ -713,8 +723,10 @@ bool Settings::Save() const
 	referenced.push_back(last_dir);
 	if (!credentials::Get().Retain(referenced, error))
 	{
+		// 1.6.4 (audit A1): mpc-hc.ini is saved; only the passwords no address uses any more weren't removed (the
+		// store can't be read or written now). Up to 1.6.3 this said the settings weren't saved.
 		OrbisLog("[settings] %s Legacy credentials were kept.", error.c_str());
-		return false;
+		return true;
 	}
 	// Remove old plaintext only after verified encryption and password-free settings are committed.
 	bool cleaned = true;

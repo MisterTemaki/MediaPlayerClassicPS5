@@ -2,7 +2,7 @@
 //
 // MediaPlayerClassicPS5.elf, sent with the PS5 Payload Manager / the ELF loader (port 9021), is what PS5SX2's installer and
 // helper are together:
-//   1. it installs or updates the dashboard app in /data/homebrew/PPSA99015 (eboot.bin = FCEUmm itself,
+//   1. it installs or updates the dashboard app in /data/homebrew/PPSA99015 (eboot.bin = the player itself,
 //      sce_module/libc.prx, sce_sys/param.json, icon0.png, pic0.dds, pic1.dds), built into it (install_data.cpp);
 //   2. then it stays running as the helper that lets the app out of its sandbox (ProsperoJailbreak.h), until
 //      the console is turned off. A second copy sent while one runs only installs.
