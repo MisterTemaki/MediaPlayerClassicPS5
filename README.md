@@ -15,9 +15,11 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
-**1.6.4: Stop keeps the file's position.** Up to 1.6.3, a file stopped with **Stop** and then closed (or the app
-exited) opened again from the start, because Stop goes back to the start. Now it opens again where Stop was pressed,
-as after a Pause. See the [1.6.4 release notes](docs/RELEASE-NOTES-v1.6.4.md).
+**1.6.4: Stop keeps the file's position, and an audit's fixes.** Up to 1.6.3, a file stopped with **Stop** and then
+closed (or the app exited) opened again from the start, because Stop goes back to the start. Now it opens again where
+Stop was pressed, as after a Pause. Settings are saved again when the saved network passwords can't be read (after
+a copy of `/data/mpcps5` over FTP, for instance), and playlists made elsewhere open whole. See the
+[1.6.4 release notes](docs/RELEASE-NOTES-v1.6.4.md).
 
 **1.6.3: settings backup, and the app under Media.** **View > Options > Miscellaneous > Backup** keeps a copy of
 the settings (Options, Keys, favorites, recent files, file positions, network locations) on a USB drive, written

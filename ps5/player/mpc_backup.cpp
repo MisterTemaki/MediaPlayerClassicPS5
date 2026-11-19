@@ -34,6 +34,17 @@ namespace
 // a settings file is a few KB (20 recent files, positions, favorites...): anything bigger isn't one
 constexpr long kMaxBytes = 4 << 20;
 
+// 1.6.4 (audit T1): an errno's text, safe on any thread. strerror() isn't required to be (FreeBSD's fills one static
+// buffer), and the backup and disc threads use it beside the UI thread. strerror_r has two forms (XSI: int, GNU:
+// char*); both are taken.
+[[maybe_unused]] inline const char* ErrnoTextOf(int r, const char* buf) { return r == 0 ? buf : "unknown error"; }
+[[maybe_unused]] inline const char* ErrnoTextOf(const char* r, const char*) { return r ? r : "unknown error"; }
+std::string ErrnoText(int e)
+{
+	char buf[128] = "";
+	return ErrnoTextOf(strerror_r(e, buf, sizeof(buf)), buf);
+}
+
 // made once and never destroyed: the backup thread waits on the condition variable until the process ends, and
 // destroying one with a waiter at exit() blocks for ever on glibc (the app itself ends with _exit)
 struct Shared
@@ -168,19 +179,19 @@ Status Write(const std::string& drive, const std::string& id, const std::string&
 		}
 	}
 	if (!OrbisMkdirs(folder))
-		return Note(drive, Result::Failed, Error::CantCreate, folder, strerror(errno));
+		return Note(drive, Result::Failed, Error::CantCreate, folder, ErrnoText(errno));
 	FILE* f = fopen(tmp.c_str(), "wb");
 	if (!f)
-		return Note(drive, Result::Failed, Error::CantWrite, tmp, strerror(errno));
+		return Note(drive, Result::Failed, Error::CantWrite, tmp, ErrnoText(errno));
 	bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
 	ok = fflush(f) == 0 && ok;
 	// on the disk before the rename; a drive's file system that can't (fsync refused) still gets the file
 	if (ok && fsync(fileno(f)) != 0)
-		OrbisLog("[backup] fsync of %s: %s (written without it)", tmp.c_str(), strerror(errno));
+		OrbisLog("[backup] fsync of %s: %s (written without it)", tmp.c_str(), ErrnoText(errno).c_str());
 	ok = fclose(f) == 0 && ok;
 	if (!ok)
 	{
-		const std::string reason = strerror(errno);
+		const std::string reason = ErrnoText(errno);
 		unlink(tmp.c_str());
 		return Note(drive, Result::Failed, Error::CantWrite, tmp, reason);
 	}
@@ -190,12 +201,12 @@ Status Write(const std::string& drive, const std::string& id, const std::string&
 		// new backup stays as mpc-hc.ini.tmp (said), never deleted
 		if (unlink(path.c_str()) != 0 && errno != ENOENT)
 		{
-			const std::string reason = strerror(errno);
+			const std::string reason = ErrnoText(errno);
 			unlink(tmp.c_str());
 			return Note(drive, Result::Failed, Error::CantReplace, path, reason);
 		}
 		if (rename(tmp.c_str(), path.c_str()) != 0)
-			return Note(drive, Result::Failed, Error::CantReplaceKept, path, strerror(errno), tmp);
+			return Note(drive, Result::Failed, Error::CantReplaceKept, path, ErrnoText(errno), tmp);
 	}
 	const int fd = open(folder.c_str(), O_RDONLY);
 	if (fd >= 0)

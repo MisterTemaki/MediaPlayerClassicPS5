@@ -58,6 +58,17 @@ namespace disc
 {
 namespace
 {
+// 1.6.4 (audit T1): an errno's text, safe on any thread. strerror() isn't required to be (FreeBSD's fills one static
+// buffer), and the backup and disc threads use it beside the UI thread. strerror_r has two forms (XSI: int, GNU:
+// char*); both are taken.
+[[maybe_unused]] inline const char* ErrnoTextOf(int r, const char* buf) { return r == 0 ? buf : "unknown error"; }
+[[maybe_unused]] inline const char* ErrnoTextOf(const char* r, const char*) { return r ? r : "unknown error"; }
+std::string ErrnoText(int e)
+{
+	char buf[128] = "";
+	return ErrnoTextOf(strerror_r(e, buf, sizeof(buf)), buf);
+}
+
 constexpr uint32_t kSector = 2048;
 constexpr uint32_t kChunk = 64; // sectors in a cache chunk: 128 KiB, read in one go (5S2CD reads 64 ahead too)
 constexpr size_t kChunks = 48; // 6 MiB of chunks per disc
@@ -286,7 +297,7 @@ struct DriveIO
 			if (check)
 			{
 				OrbisLog("[disc] %s: read of sectors %llu-%llu failed: %s", id.c_str(), (unsigned long long)lba,
-					(unsigned long long)(lba + count - 1), e ? strerror(e) : "end of the disc");
+					(unsigned long long)(lba + count - 1), e ? ErrnoText(e).c_str() : "end of the disc");
 				uint8_t s[kSector];
 				if (!DeviceRead(16, 1, s, false))
 				{

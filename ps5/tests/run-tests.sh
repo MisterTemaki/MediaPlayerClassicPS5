@@ -3385,8 +3385,8 @@ rc=$(run "$T" "0:0" "30:state;40:cmd exit" "" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ] && grep -q 'open .*chapters.mkv at 0.0 s' $T/root/logs/boot.log" "FilePos 'inf': not used, the file opens from its start"
 expect "! grep -q '^FilePos.*|\(inf\|nan\|-\)' $T/root/mpc-hc.ini" "... and 'inf', 'nan' and a negative position aren't written back"
 nosan "$T"
-# D1: a UTF-16 subtitle with a high surrogate not followed by a low one: U+FFFD there, the line shown (up to 1.6.3 the
-# conversion made bytes that aren't UTF-8 and FFmpeg dropped the line)
+# D1: a UTF-16 subtitle with a high surrogate not followed by a low one: U+FFFD there, the line shown. (Up to 1.6.3 the
+# conversion made a few bytes that aren't UTF-8 for that character; the line was shown too: this checks it still is.)
 T=$(newroot t39d1)
 cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
 python3 -c "import sys; d = '1\r\n00:00:00,000 --> 00:00:09,000\r\nHalf \ud800 a pair, still shown\r\n'; open(sys.argv[1], 'wb').write(b'\xff\xfe' + d.encode('utf-16-le', 'surrogatepass'))" "$T/root/media/movie.srt"
@@ -3412,6 +3412,18 @@ cp "$MEDIA/red.mp4" "$T/root/media/"
 printf '[playlist]\r\nFile1=red.mp4\r\nTitle1=Red\r\nLength1=6\r\nNumberOfEntries=1\r\nVersion=2\r\n' >"$T/root/media/list.pls"
 rc=$(run "$T" "0:0" "40:state;50:quit" "" "$T/root/media/list.pls")
 expect "[ $rc = 0 ] && grep -q 'open .*/media/red.mp4 at' $T/root/logs/boot.log && [ \"\$(field $T 1 1)\" = 2 ] && ! grep -q 'open .*Title1\|open .*Length1\|open .*NumberOfEntries\|open .*Version' $T/root/logs/boot.log" "a .pls: its File1= entry plays, its other keys are not entries"
+nosan "$T"
+# F5: the CA list (https:// streams, the updater): one cut short is written whole again; one already right isn't
+# written again (up to 1.6.3 it was rewritten in place at every start)
+T=$(newroot t39ca)
+mkdir -p "$T/root"
+printf 'cut short' >"$T/root/cacert.pem"
+rc=$(run "$T" "0:0" "20:quit" "")
+SZ=$(stat -c %s "$T/root/cacert.pem")
+expect "[ $rc = 0 ] && [ $SZ -gt 100000 ] && [ ! -e $T/root/cacert.pem.tmp ]" "a CA list cut short: written whole again ($SZ bytes)"
+touch -d '2001-01-01 00:00:00 UTC' "$T/root/cacert.pem"
+rc=$(run "$T" "0:0" "20:quit" "")
+expect "[ $rc = 0 ] && [ \"\$(stat -c %Y $T/root/cacert.pem)\" = 978307200 ]" "... one already right: not written again"
 nosan "$T"
 fi
 

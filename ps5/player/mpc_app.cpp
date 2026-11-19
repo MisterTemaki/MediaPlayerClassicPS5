@@ -3482,13 +3482,31 @@ int MainFrame::Run(const std::string& first)
 	input_.SetTouchpad(s_.touchpad_pointer);
 	OrbisLog("[ui] fonts folder: %d font(s) loaded", LoadExtraFonts(OrbisDir("fonts")));
 	SetSubtitleFont(s_.sub_font); // a file no longer there: Selawik (logged)
-	// the CA list for https:// streams
+	// the CA list for https:// streams and the updater. 1.6.4 (audit F5): written only when it differs, and whole
+	// (beside it, then renamed over it). Up to 1.6.3 it was rewritten in place at every start: a write cut short (the
+	// disk full) left part of the list, and the certificate checks of the updater and of https:// streams failed.
 	{
-		const std::string ca = OrbisRoot() + "/cacert.pem";
-		if (FILE* f = fopen(ca.c_str(), "wb"))
+		const std::string ca = OrbisRoot() + "/cacert.pem", tmp = ca + ".tmp";
+		const size_t n = size_t(mpc_cacert_end - mpc_cacert_begin);
+		std::string have;
+		if (FILE* f = fopen(ca.c_str(), "rb"))
 		{
-			fwrite(mpc_cacert_begin, 1, size_t(mpc_cacert_end - mpc_cacert_begin), f);
+			char buf[65536];
+			size_t got;
+			while ((got = fread(buf, 1, sizeof(buf), f)) > 0 && have.size() <= n)
+				have.append(buf, got);
 			fclose(f);
+		}
+		if (have.size() != n || memcmp(have.data(), mpc_cacert_begin, n) != 0)
+		{
+			FILE* f = fopen(tmp.c_str(), "wb");
+			bool ok = f && fwrite(mpc_cacert_begin, 1, n, f) == n;
+			ok = f && fclose(f) == 0 && ok;
+			if (!ok || rename(tmp.c_str(), ca.c_str()) != 0)
+			{
+				unlink(tmp.c_str());
+				OrbisLog("[ui] the CA list couldn't be written to %s: https:// and updates may not be checked", ca.c_str());
+			}
 		}
 	}
 	// updates (Help, Check for updates); once a day the app looks by itself and offers a newer version
