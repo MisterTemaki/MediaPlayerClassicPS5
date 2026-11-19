@@ -40,6 +40,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <strings.h>
 #include <ctime>
 #include <memory>
 #include <string>
@@ -1884,8 +1885,9 @@ void MainFrame::SkipBack()
 		auto it = std::find(files.begin(), files.end(), current_url_);
 		if (it != files.end() && it != files.begin())
 			Open(*(it - 1));
-		else if (player_.State() != PlayState::Stopped)
-			Seek(0); // (1.6.4 review L1: stopped, it is at the start already; a seek would forget the stopped place)
+		else if (stop_pos_ < 0)
+			Seek(0); // (1.6.4 review L1: after a Stop, paused there or not, it is at the start already; a seek would
+					 // forget the stopped place)
 	}
 }
 
@@ -2550,7 +2552,7 @@ void MainFrame::LoadPlaylistFile(const std::string& path)
 	// they were looked for in any list, so an .m3u entry with "=" in its name (a film "[x=1].mkv") was left out
 	std::string low = path;
 	std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c) { return char(tolower(c)); });
-	const bool pls = low.size() > 4 && low.compare(low.size() - 4, 4, ".pls") == 0;
+	bool pls = low.size() > 4 && low.compare(low.size() - 4, 4, ".pls") == 0;
 	std::vector<std::string> items;
 	char line[4096];
 	bool hls = false, first = true;
@@ -2564,7 +2566,11 @@ void MainFrame::LoadPlaylistFile(const std::string& path)
 		// halfwidth katakana) lost its first character
 		if (first && l.compare(0, 3, "\xEF\xBB\xBF") == 0)
 			l = l.substr(3);
-		first = false;
+		// (review L5) a .pls by its header too, whatever the file's name ends with (a .pls saved as .m3u)
+		if (first && l.size() == 10 && strncasecmp(l.c_str(), "[playlist]", 10) == 0)
+			pls = true;
+		if (!l.empty())
+			first = false;
 		if (l.compare(0, 7, "#EXT-X-") == 0)
 			hls = true;
 		if (l.empty() || l[0] == '#' || (pls && l[0] == '['))
@@ -2572,7 +2578,7 @@ void MainFrame::LoadPlaylistFile(const std::string& path)
 		if (pls)
 		{
 			const size_t eq = l.find('=');
-			if (l.compare(0, 4, "File") != 0 || eq == std::string::npos)
+			if (strncasecmp(l.c_str(), "file", 4) != 0 || eq == std::string::npos)
 				continue; // Title1=, Length1=, NumberOfEntries=, Version=
 			l = l.substr(eq + 1);
 		}

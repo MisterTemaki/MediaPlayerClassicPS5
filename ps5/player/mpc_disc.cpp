@@ -61,7 +61,7 @@ namespace
 // 1.6.4 (audit T1): an errno's text, safe on any thread. strerror() isn't required to be (FreeBSD's fills one static
 // buffer), and the backup and disc threads use it beside the UI thread. strerror_r has two forms (XSI: int, GNU:
 // char*); both are taken.
-[[maybe_unused]] inline const char* ErrnoTextOf(int r, const char* buf) { return r == 0 ? buf : "unknown error"; }
+[[maybe_unused]] inline const char* ErrnoTextOf(int r, const char* buf) { return r == 0 || buf[0] ? buf : "unknown error"; }
 [[maybe_unused]] inline const char* ErrnoTextOf(const char* r, const char*) { return r ? r : "unknown error"; }
 std::string ErrnoText(int e)
 {

@@ -742,7 +742,11 @@ bool Settings::Save() const
 		}
 	}
 	SyncFolder(OrbisRoot());
-	return cleaned;
+	// 1.6.4 (audit review L3): mpc-hc.ini is saved either way; an old plaintext password file that couldn't be removed
+	// is tried again at the next save (up to 1.6.3 this said the settings weren't saved)
+	if (!cleaned)
+		OrbisLog("[settings] an old password file is left for the next save");
+	return true;
 }
 
 void Settings::AddRecent(const std::string& url)

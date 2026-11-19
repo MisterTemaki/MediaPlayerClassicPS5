@@ -3107,7 +3107,8 @@ struct Player::Impl
 			{
 				uint32_t cp = le ? (data[i] | (data[i + 1] << 8)) : ((data[i] << 8) | data[i + 1]);
 				// 1.6.4 (audit D1): a pair only when the second half is a low surrogate; a half on its own is U+FFFD. Up
-				// to 1.6.3 any next unit was taken (lo - 0xdc00 wrapped round) and made bytes that aren't UTF-8.
+				// to 1.6.3 a high half took whatever came next (the next character swallowed, a wrong one made), and a
+				// low half on its own or one at the file's end made bytes that aren't UTF-8: FFmpeg dropped the line.
 				const uint32_t lo = i + 3 < data.size()
 										? (le ? (data[i + 2] | (data[i + 3] << 8)) : ((data[i + 2] << 8) | data[i + 3]))
 										: 0;
