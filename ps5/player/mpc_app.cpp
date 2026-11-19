@@ -273,6 +273,9 @@ private:
 	PlayState last_state_ = PlayState::Closed;
 	std::string current_url_;
 	double last_pos_save_ = 0;
+	// 1.6.4: where Stop was pressed (-1: not stopped). Stop goes back to the start, as in MPC-HC, but the file's
+	// remembered position is the place it was stopped at, until it plays again or another place is sought
+	double stop_pos_ = -1;
 	bool show_renderer_stats_ = false;
 	bool subs_enabled_ = true;
 	double rate_ = 1.0; // the playing rate (Play > Increase / Decrease / Reset Rate)
@@ -1773,6 +1776,7 @@ void MainFrame::Seek(double t)
 		t = std::min(t, dur);
 	t = std::max(0.0, t);
 	player_.Seek(t, true);
+	stop_pos_ = -1; // (stopped: the place sought is the file's position now)
 	Osd(FormatTime(t, dur >= 3600) + (dur > 0 ? " / " + FormatTime(dur, dur >= 3600) : ""));
 }
 
@@ -1850,6 +1854,7 @@ void MainFrame::TickScrub()
 	if (!player_.SeekShown() && player_.SeekTaken())
 		return;
 	player_.Seek(scrub_to_, false);
+	stop_pos_ = -1;
 	scrub_pending_ = false;
 	scrub_seeks_++;
 }
@@ -1990,6 +1995,7 @@ void MainFrame::Command(int id)
 			pl_durations_.assign(1, 0);
 			pl_cur_ = 0;
 			SavePosition();
+			stop_pos_ = -1;
 			current_url_ = f.url;
 			player_.Open(f.url, f.pos);
 			s.AddRecent(f.url);
@@ -2280,7 +2286,14 @@ void MainFrame::Command(int id)
 			if (loaded)
 			{
 				ForgetJumps();
+				// 1.6.4: up to 1.6.3 the position saved after a Stop was the start (where Stop goes back to), so the
+				// file's position was forgotten. The place it was stopped at is kept now (a second Stop keeps the
+				// first one's), and saved at once: a Stop and then closing the app from the home screen keep it too
+				if (stop_pos_ < 0)
+					stop_pos_ = player_.Position();
 				player_.Stop();
+				SavePosition();
+				s_.Save();
 				Osd(T("Stop"));
 			}
 			break;
@@ -2443,7 +2456,10 @@ void MainFrame::SavePosition()
 {
 	if (current_url_.empty() || !s_.remember_file_pos || !Loaded() || disc::IsTitleUrl(current_url_))
 		return;
-	const double pos = player_.Position(), dur = player_.Duration();
+	const PlayState st = player_.State();
+	// stopped (and maybe paused there since): the place Stop was pressed at, not the start Stop went back to
+	const double pos = stop_pos_ >= 0 && (st == PlayState::Stopped || st == PlayState::Paused) ? stop_pos_ : player_.Position();
+	const double dur = player_.Duration();
 	// near the end (or the start): forget it, as MPC-HC does at the end of a file
 	if (dur > 0 && (pos > dur - std::max(1.0, std::min(5.0, dur * 0.05)) || pos < 5))
 		s_.SetFilePos(current_url_, 0);
@@ -2464,6 +2480,7 @@ void MainFrame::Open(const std::string& url, bool use_saved_pos)
 	}
 
 	SavePosition();
+	stop_pos_ = -1;
 	MPCPS5_STAGE(Emu, "open");
 	current_url_ = url;
 	// (not for a disc's titles: dvd://cd0 names the drive, not the disc in it)
@@ -2500,6 +2517,7 @@ void MainFrame::OpenPlaylistItem(int i)
 void MainFrame::CloseMedia()
 {
 	SavePosition();
+	stop_pos_ = -1;
 	player_.Close();
 	ForgetJumps();
 	current_url_.clear();
@@ -2728,6 +2746,8 @@ void MainFrame::Tick()
 	TickScrub();
 	TickBarsHover();
 	const PlayState st = player_.State();
+	if (st == PlayState::Playing)
+		stop_pos_ = -1; // played again after a Stop: from the start, the place it plays at is the position
 	if (st != last_state_)
 	{
 		if ((st == PlayState::Playing || st == PlayState::Paused) && !opened_ok_)
@@ -2972,7 +2992,10 @@ void MainFrame::EndSeekDrag(const char* why)
 		NowSeconds() - jump_hold_t_, scrub_seeks_, (unsigned long long)(pics >= jump_pictures_ ? pics - jump_pictures_ : 0),
 		seek_drag_pos_);
 	if (Loaded())
+	{
 		player_.Seek(seek_drag_pos_, true);
+		stop_pos_ = -1;
+	}
 }
 
 void MainFrame::OnRButtonDown(int x, int y)

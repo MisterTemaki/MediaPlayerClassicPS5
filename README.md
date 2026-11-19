@@ -15,6 +15,10 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
+**1.6.4: Stop keeps the file's position.** Up to 1.6.3, a file stopped with **Stop** and then closed (or the app
+exited) opened again from the start, because Stop goes back to the start. Now it opens again where Stop was pressed,
+as after a Pause. See the [1.6.4 release notes](docs/RELEASE-NOTES-v1.6.4.md).
+
 **1.6.3: settings backup, and the app under Media.** **View > Options > Miscellaneous > Backup** keeps a copy of
 the settings (Options, Keys, favorites, recent files, file positions, network locations) on a USB drive, written
 again whenever they change, and **Import...** brings it back after a factory reset or on another PS5 (#10). The
@@ -484,7 +488,8 @@ Where:
 - **Discs** in the PS5's own drive or a USB drive: see [Discs](#discs).
 
 **Remember File position** is on (Options > Player): a file opens again where it was left (not near its start
-or its end). **After Playback** (Play menu): do nothing, play the next file in the folder, or exit. Navigate >
+or its end). **Stop** goes back to the start, as in MPC-HC, and the place it was stopped at is the one remembered
+(1.6.4): until the file plays again or another place is chosen. **After Playback** (Play menu): do nothing, play the next file in the folder, or exit. Navigate >
 Previous/Next goes by chapter, then by playlist item, then to the neighbouring file in the folder.
 
 ## Discs
