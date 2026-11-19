@@ -3317,5 +3317,73 @@ expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 6.7 0.4" "Exit while playing
 nosan "$T"
 fi
 
+
+if want 39; then
+echo "== 39. 1.6.4 audit: settings saved when the saved passwords can't be read; file positions that aren't seconds; a UTF-16 subtitle with half a surrogate pair"
+FIXTURE="$PWD/build/host/mpc-credentials-fixture"
+# A1 (a): the store's key folder gone (a copy of /data/mpcps5 that left hidden folders out): up to 1.6.3 every save
+# failed (only logged), so no setting or file position was saved again
+T=$(newroot t39a1)
+ini "$T" "Volume=50"
+printf 'MPCENC01-damaged-or-from-another-copy-0123456789-0123456789-0123456789' >"$T/root/credentials.enc"
+cp "$T/root/credentials.enc" "$T/enc.before"
+rc=$(run "$T" "0:0" "20:cmd voldown;30:cmd exit" "")
+expect "[ $rc = 0 ] && grep -qx 'Volume=45' $T/root/mpc-hc.ini" "the saved passwords can't be read (no key folder): a change is still saved (Volume 50 -> 45)"
+expect "cmp -s $T/root/credentials.enc $T/enc.before" "... and the saved passwords' file is left as it was"
+nosan "$T"
+# A1 (b): a real store whose key folder lost its private permissions (an FTP copy): the settings saved, the store and its
+# key untouched, the addresses kept
+T=$(newroot t39a1b)
+MPCPS5_TEST_FIXTURE=1 ASAN_OPTIONS=detect_leaks=0 "$FIXTURE" "$T/root" setup "smb://bob:s3cret@127.0.0.1:1/VIDEOS/red.mp4" >/dev/null 2>&1
+sed -i 's/^Volume=.*/Volume=50/' "$T/root/mpc-hc.ini"
+chmod 755 "$T/root/.credentials-device"
+cp "$T/root/credentials.enc" "$T/enc.before"
+cp "$T/root/.credentials-device/key.bin" "$T/key.before"
+rc=$(run "$T" "0:0" "20:cmd voldown;30:cmd exit" "")
+expect "[ $rc = 0 ] && grep -q 'credential key directory is not private' $T/root/logs/boot.log && grep -qx 'Volume=45' $T/root/mpc-hc.ini" "the key folder not private (0755): logged, and a change is still saved (Volume 50 -> 45)"
+expect "cmp -s $T/root/credentials.enc $T/enc.before && cmp -s $T/root/.credentials-device/key.bin $T/key.before && grep -q 'smb://bob@127.0.0.1:1/VIDEOS/red.mp4' $T/root/mpc-hc.ini && ! grep -q s3cret $T/root/mpc-hc.ini" "... the encrypted passwords and their key untouched, the address kept (without its password)"
+nosan "$T"
+# A2: a file position that isn't a number of seconds ("inf", "nan", negative): not used, not written back
+T=$(newroot t39a2)
+cp "$MEDIA/chapters.mkv" "$MEDIA/red.mp4" "$T/root/media/"
+ini "$T" "Volume=50
+[Positions]
+FilePos0=$T/root/media/chapters.mkv|inf
+FilePos1=$T/root/media/red.mp4|nan
+FilePos2=$T/root/media/other.mkv|-30"
+rc=$(run "$T" "0:0" "30:state;40:cmd exit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && grep -q 'open .*chapters.mkv at 0.0 s' $T/root/logs/boot.log" "FilePos 'inf': not used, the file opens from its start"
+expect "! grep -q '^FilePos.*|\(inf\|nan\|-\)' $T/root/mpc-hc.ini" "... and 'inf', 'nan' and a negative position aren't written back"
+nosan "$T"
+# D1: a UTF-16 subtitle with a high surrogate not followed by a low one: U+FFFD there, the line shown (up to 1.6.3 the
+# conversion made bytes that aren't UTF-8 and FFmpeg dropped the line)
+T=$(newroot t39d1)
+cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
+python3 -c "import sys; d = '1\r\n00:00:00,000 --> 00:00:09,000\r\nHalf \ud800 a pair, still shown\r\n'; open(sys.argv[1], 'wb').write(b'\xff\xfe' + d.encode('utf-16-le', 'surrogatepass'))" "$T/root/media/movie.srt"
+rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
+expect "[ $rc = 0 ] && grep -q 'subtitles loaded: .*movie.srt' $T/root/logs/boot.log && $REGION $T/dump/flip00060.ppm 148 750 1771 977 255 255 255 30 150 >/dev/null" "UTF-16 with half a surrogate pair: the line still shown"
+expect "! grep -q 'Invalid UTF-8' $T/root/logs/boot.log $T/out.txt" "... no 'Invalid UTF-8' from FFmpeg"
+nosan "$T"
+# F1, F2: an .m3u with a byte order mark: an entry starting with a fullwidth letter (its first byte 0xEF: up to 1.6.3
+# three bytes were cut off every such line), one with "=" in its name (up to 1.6.3 left out as a .pls key) in a folder
+# written with a backslash (a list made on Windows); a .pls still read by its File1= lines only
+T=$(newroot t39f)
+WIDE=$(printf '\xef\xbd\x86ilm.mp4')
+mkdir -p "$T/root/media/sub"
+cp "$MEDIA/red.mp4" "$T/root/media/$WIDE"
+cp "$MEDIA/red.mp4" "$T/root/media/sub/a=b.mp4"
+printf '\xef\xbb\xbf#EXTM3U\r\n\xef\xbd\x86ilm.mp4\r\nsub\\a=b.mp4\r\n' >"$T/root/media/list.m3u"
+rc=$(run "$T" "0:0" "40:state;50:cmd next;90:state;100:quit" "" "$T/root/media/list.m3u")
+expect "[ $rc = 0 ] && grep -q \"open .*/media/$WIDE at\" $T/root/logs/boot.log && [ \"\$(field $T 1 1)\" = 2 ]" "an .m3u with a byte order mark: the entry starting with a fullwidth letter opens and plays"
+expect "grep -q 'open .*/media/sub/a=b.mp4 at' $T/root/logs/boot.log && [ \"\$(field $T 2 1)\" = 2 ]" "... the next one, sub\\\\a=b.mp4 ('=' in its name, a backslash): opens and plays"
+nosan "$T"
+T=$(newroot t39g)
+cp "$MEDIA/red.mp4" "$T/root/media/"
+printf '[playlist]\r\nFile1=red.mp4\r\nTitle1=Red\r\nLength1=6\r\nNumberOfEntries=1\r\nVersion=2\r\n' >"$T/root/media/list.pls"
+rc=$(run "$T" "0:0" "40:state;50:quit" "" "$T/root/media/list.pls")
+expect "[ $rc = 0 ] && grep -q 'open .*/media/red.mp4 at' $T/root/logs/boot.log && [ \"\$(field $T 1 1)\" = 2 ] && ! grep -q 'open .*Title1\|open .*Length1\|open .*NumberOfEntries\|open .*Version' $T/root/logs/boot.log" "a .pls: its File1= entry plays, its other keys are not entries"
+nosan "$T"
+fi
+
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]
