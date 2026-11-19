@@ -372,6 +372,7 @@ private:
 	void OpenPlaylistItem(int i);
 	void CloseMedia();
 	void SavePosition();
+	double RememberedPos() const; // 1.6.4: where the file is, for its saved position (stopped: where Stop was pressed)
 	void Osd(const std::string& text, double seconds = 1.5);
 	void Seek(double t);
 	void SetVolume(int v);
@@ -1883,8 +1884,8 @@ void MainFrame::SkipBack()
 		auto it = std::find(files.begin(), files.end(), current_url_);
 		if (it != files.end() && it != files.begin())
 			Open(*(it - 1));
-		else
-			Seek(0);
+		else if (player_.State() != PlayState::Stopped)
+			Seek(0); // (1.6.4 review L1: stopped, it is at the start already; a seek would forget the stopped place)
 	}
 }
 
@@ -2262,6 +2263,7 @@ void MainFrame::Command(int id)
 			}
 			else if (loaded)
 			{
+				stop_pos_ = -1; // (review L5) played again: from the start, as Stop left it
 				player_.Play();
 				Osd(T("Play"));
 			}
@@ -2271,6 +2273,7 @@ void MainFrame::Command(int id)
 		case ID_PLAY_PLAY:
 			if (loaded)
 			{
+				stop_pos_ = -1; // (review L5)
 				player_.Play();
 				Osd(T("Play"));
 			}
@@ -2292,8 +2295,11 @@ void MainFrame::Command(int id)
 				if (stop_pos_ < 0)
 					stop_pos_ = player_.Position();
 				player_.Stop();
-				SavePosition();
-				s_.Save();
+				if (s_.remember_file_pos && !disc::IsTitleUrl(current_url_)) // (review L2: nothing to keep, no write)
+				{
+					SavePosition();
+					s_.Save();
+				}
 				Osd(T("Stop"));
 			}
 			break;
@@ -2407,7 +2413,7 @@ void MainFrame::Command(int id)
 					Favorite f;
 					f.name = n;
 					f.url = current_url_;
-					f.pos = remember ? player_.Position() : 0;
+					f.pos = remember ? RememberedPos() : 0; // (review L3) stopped: where Stop was pressed
 					s_.favorites.push_back(f);
 					s_.Save();
 				});
@@ -2456,15 +2462,19 @@ void MainFrame::SavePosition()
 {
 	if (current_url_.empty() || !s_.remember_file_pos || !Loaded() || disc::IsTitleUrl(current_url_))
 		return;
-	const PlayState st = player_.State();
-	// stopped (and maybe paused there since): the place Stop was pressed at, not the start Stop went back to
-	const double pos = stop_pos_ >= 0 && (st == PlayState::Stopped || st == PlayState::Paused) ? stop_pos_ : player_.Position();
-	const double dur = player_.Duration();
+	const double pos = RememberedPos(), dur = player_.Duration();
 	// near the end (or the start): forget it, as MPC-HC does at the end of a file
 	if (dur > 0 && (pos > dur - std::max(1.0, std::min(5.0, dur * 0.05)) || pos < 5))
 		s_.SetFilePos(current_url_, 0);
 	else if (dur > 0)
 		s_.SetFilePos(current_url_, pos);
+}
+
+double MainFrame::RememberedPos() const
+{
+	// stopped (and maybe paused there since): the place Stop was pressed at, not the start Stop went back to
+	const PlayState st = player_.State();
+	return stop_pos_ >= 0 && (st == PlayState::Stopped || st == PlayState::Paused) ? stop_pos_ : player_.Position();
 }
 
 void MainFrame::Open(const std::string& url, bool use_saved_pos)

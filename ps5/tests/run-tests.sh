@@ -3258,62 +3258,92 @@ fi
 
 if want 38; then
 echo "== 38. 1.6.4: Stop keeps the file's position (up to 1.6.3 a Stop and then Exit forgot it: Stop goes back to the start)"
-# chapters.mkv is 9 s long: a position from 5 s to 8 s is remembered (before 5 s, or in the last second, it is forgotten)
+# chapters.mkv is 9 s long: a position from 5 s to 8 s is remembered (before 5 s, or in the last second, it is forgotten).
+# Stop is pressed the frame after the exact seek, while its picture is awaited: the position is then the seek's target
+# exactly (review M1: pressed later, it is the target plus however long the frames took on this machine)
 pos38() { sed -n "s/^FilePos[0-9]*=.*chapters\\.mkv|\\([0-9.]*\\)\$/\\1/p" "$1/root/mpc-hc.ini" | head -1; }
+# between lo and hi seconds
+within() { python3 -c "import sys; sys.exit(0 if '$1' and $2 <= float('$1' or 0) <= $3 else 1)"; }
 T=$(newroot t38)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
-rc=$(run "$T" "0:0" "30:seek 5.5;40:state;42:cmd stop;50:state;60:cmd exit" "" "$T/root/media/chapters.mkv")
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:state;60:cmd exit" "" "$T/root/media/chapters.mkv")
 P=$(pos38 "$T")
-expect "[ $rc = 0 ] && [ \"\$(field $T 2 1)\" = 4 ] && near \"\$(field $T 2 2)\" 0 0.2" "Stop goes back to the start (stopped at 0, as in MPC-HC)"
-expect "[ -n \"$P\" ] && near \"$P\" 5.5 0.3" "Stop at 5.5 s, then Exit: the position (5.5 s) saved in mpc-hc.ini (got '$P')"
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 4 ] && near \"\$(field $T 1 2)\" 0 0.2" "Stop goes back to the start (stopped at 0, as in MPC-HC)"
+expect "[ -n \"$P\" ] && near \"$P\" 5.5 0.05" "Stop at 5.5 s, then Exit: the position (5.5 s) saved in mpc-hc.ini (got '$P')"
+nosan "$T"
 rc=$(run "$T" "0:0" "30:state;40:cmd exit" "" "$T/root/media/chapters.mkv")
-expect "[ $rc = 0 ] && grep -q 'open .*chapters.mkv at 5\\.[0-9]' $T/root/logs/boot.log && grep -q 'Resumed at 00:05' $T/root/logs/boot.log" "opened again: resumes at 5.5 s (\"Resumed at\")"
+expect "[ $rc = 0 ] && grep -q 'open .*chapters.mkv at 5\\.5' $T/root/logs/boot.log && grep -q 'Resumed at 00:05' $T/root/logs/boot.log" "opened again: resumes at 5.5 s (\"Resumed at\")"
+nosan "$T"
+# played a second, then Stop: about 1 s further on (however fast this machine draws), kept
+T=$(newroot t38p)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "30:seek 5.5;90:cmd stop;100:cmd exit" "" "$T/root/media/chapters.mkv")
+P=$(pos38 "$T")
+expect "[ $rc = 0 ] && within '$P' 5.6 7.9" "played about 1 s from 5.5 s, then Stop and Exit: where it was stopped (got '$P')"
 nosan "$T"
 # the app closed from the home screen (the process ended, no Exit): the position was written at the Stop
 T=$(newroot t38kill)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
-( MPCPS5_HOST_OFFLINE=1 MPCPS5_HOST_REALTIME=1 MPCPS5_HOST_SCRIPT="30:seek 5.5;42:cmd stop;50:state" MPCPS5_PS5_ROOT=$T/root \
+( MPCPS5_HOST_OFFLINE=1 MPCPS5_HOST_REALTIME=1 MPCPS5_HOST_SCRIPT="30:seek 5.5;31:cmd stop;50:state" MPCPS5_PS5_ROOT=$T/root \
 	MPCPS5_PS5_HOMEBREW=$T/homebrew MPCPS5_HOST_DUMP_DIR=$T/dump MPCPS5_HOST_DUMP= MPCPS5_HOST_MAX_FLIPS=3000 \
 	MPCPS5_HOST_PAD=0:0 ASAN_OPTIONS=detect_leaks=0 exec "$BIN" "$T/root/media/chapters.mkv" >"$T/out.txt" 2>&1 ) &
 KPID=$!
 for i in $(seq 1 300); do grep -q '\[test\] state' "$T/root/logs/boot.log" 2>/dev/null && break; sleep 0.1; done
 kill -KILL $KPID 2>/dev/null; wait $KPID 2>/dev/null
 P=$(pos38 "$T")
-expect "grep -q '\[test\] state' $T/root/logs/boot.log && [ -n \"$P\" ] && near \"$P\" 5.5 0.3" "Stop at 5.5 s, then the app ended without Exit: 5.5 s already in mpc-hc.ini (got '$P')"
+expect "grep -q '\[test\] state' $T/root/logs/boot.log && [ -n \"$P\" ] && near \"$P\" 5.5 0.05" "Stop at 5.5 s, then the app ended without Exit: 5.5 s already in mpc-hc.ini (got '$P')"
 # stopped, then paused there; a second Stop: still the place of the first
 T=$(newroot t38b)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
-rc=$(run "$T" "0:0" "30:seek 5.5;42:cmd stop;50:cmd pause;60:cmd stop;70:cmd exit" "" "$T/root/media/chapters.mkv")
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:cmd pause;60:cmd stop;70:cmd exit" "" "$T/root/media/chapters.mkv")
 P=$(pos38 "$T")
-expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.3" "Stop, Pause, Stop again, Exit: still 5.5 s (got '$P')"
+expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.05" "Stop, Pause, Stop again, Exit: still 5.5 s (got '$P')"
+nosan "$T"
 # stopped, then another place chosen: that place
 T=$(newroot t38c)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
-rc=$(run "$T" "0:0" "30:seek 5.5;42:cmd stop;50:seek 7;60:cmd exit" "" "$T/root/media/chapters.mkv")
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:seek 7;60:cmd exit" "" "$T/root/media/chapters.mkv")
 P=$(pos38 "$T")
-expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 7 0.3" "Stop at 5.5 s, then Go To 7 s while stopped, Exit: 7 s (got '$P')"
-# stopped, then played again (from the start): where it plays is the position (here under 5 s: forgotten)
+expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 7 0.05" "Stop at 5.5 s, then Go To 7 s while stopped, Exit: 7 s (got '$P')"
+nosan "$T"
+# stopped, then played again (from the start): where it plays is the position (here under 5 s: forgotten); the same when
+# it is paused there (review M2: the stopped place is let go as it plays, not only when it is still playing at the exit)
 T=$(newroot t38d)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
-rc=$(run "$T" "0:0" "30:seek 5.5;42:cmd stop;50:cmd play;80:state;84:cmd exit" "" "$T/root/media/chapters.mkv")
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:cmd play;80:state;84:cmd exit" "" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ] && [ -z \"\$(pos38 $T)\" ]" "Stop, then Play (from the start), Exit at about 0.5 s: no position kept, as before"
+nosan "$T"
+T=$(newroot t38h)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "30:seek 7;31:cmd stop;50:cmd play;80:cmd pause;90:state;100:cmd exit" "" "$T/root/media/chapters.mkv")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 3 ] && [ -z \"\$(pos38 $T)\" ]" "Stop at 7 s, Play (from the start), Pause at about 0.5 s, Exit: not 7 s (the place Play let go of)"
+nosan "$T"
+# stopped, then Previous at the first file (review L1): nothing to go back to, the stopped place kept
+T=$(newroot t38i)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:cmd prev;60:cmd exit" "" "$T/root/media/chapters.mkv")
+P=$(pos38 "$T")
+expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.05" "Stop, then Previous with no file before it: 5.5 s still kept (got '$P')"
+nosan "$T"
 # stopped, then File > Close: kept; another file opened after a Stop: kept for the first one
 T=$(newroot t38e)
-cp "$MEDIA/chapters.mkv" "$MEDIA/red.mp4" "$T/root/media/"
-rc=$(run "$T" "0:0" "30:seek 5.5;42:cmd stop;50:cmd close;60:cmd exit" "" "$T/root/media/chapters.mkv")
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:cmd close;60:cmd exit" "" "$T/root/media/chapters.mkv")
 P=$(pos38 "$T")
-expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.3" "Stop, then File > Close: 5.5 s kept (got '$P')"
+expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.05" "Stop, then File > Close: 5.5 s kept (got '$P')"
+nosan "$T"
 T=$(newroot t38f)
 cp "$MEDIA/chapters.mkv" "$MEDIA/red.mp4" "$T/root/media/"
-rc=$(run "$T" "0:0" "30:seek 5.5;42:cmd stop;50:open $T/root/media/red.mp4;80:state;90:cmd exit" "" "$T/root/media/chapters.mkv")
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:open $T/root/media/red.mp4;80:state;90:cmd exit" "" "$T/root/media/chapters.mkv")
 P=$(pos38 "$T")
-expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.3 && grep -q 'open .*red.mp4 at 0\\.0' $T/root/logs/boot.log" "Stop, then another file opened: 5.5 s kept for the first, the other from its start (got '$P')"
-# Pause and Exit, and Exit while playing, as before
+expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.05 && grep -q 'open .*red.mp4 at 0\\.0' $T/root/logs/boot.log" "Stop, then another file opened: 5.5 s kept for the first, the other from its start (got '$P')"
+nosan "$T"
+# Exit while playing, as before (Pause and Exit: group 5)
 T=$(newroot t38g)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
 rc=$(run "$T" "0:0" "30:seek 6.5;42:cmd exit" "" "$T/root/media/chapters.mkv")
 P=$(pos38 "$T")
-expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 6.7 0.4" "Exit while playing (about 6.7 s): kept, as before (got '$P')"
+expect "[ $rc = 0 ] && within '$P' 6.5 7.9" "Exit while playing (from 6.5 s): kept, as before (got '$P')"
 nosan "$T"
 fi
 

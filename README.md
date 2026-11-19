@@ -484,13 +484,15 @@ Where:
   (guest access is off by default there); a NAS or Samba share may allow guest.
 - **The Internet**: `http://` and `https://` (certificates checked against Mozilla's list), HLS (`.m3u8`),
   `rtmp://`, `rtsp://`, `udp://`. Type the address in File > Open File.
-- **Playlists**: `.m3u`, `.m3u8`, `.pls`.
+- **Playlists**: `.m3u`, `.m3u8`, `.pls`. Relative paths are next to the list, with `/` or `\` between folders
+  (a list made on Windows).
 - **Discs** in the PS5's own drive or a USB drive: see [Discs](#discs).
 
 **Remember File position** is on (Options > Player): a file opens again where it was left (not near its start
 or its end). **Stop** goes back to the start, as in MPC-HC, and the place it was stopped at is the one remembered
-(1.6.4): until the file plays again or another place is chosen. **After Playback** (Play menu): do nothing, play the next file in the folder, or exit. Navigate >
-Previous/Next goes by chapter, then by playlist item, then to the neighbouring file in the folder.
+(1.6.4), written to `mpc-hc.ini` at once: until the file plays again or another place is chosen. **After
+Playback** (Play menu): do nothing, play the next file in the folder, or exit. Navigate > Previous/Next goes by
+chapter, then by playlist item, then to the neighbouring file in the folder.
 
 ## Discs
 
