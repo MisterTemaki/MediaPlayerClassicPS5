@@ -3325,6 +3325,12 @@ rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:cmd prev;60:cmd exit" "" "$T/roo
 P=$(pos38 "$T")
 expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.05" "Stop, then Previous with no file before it: 5.5 s still kept (got '$P')"
 nosan "$T"
+T=$(newroot t38j)
+cp "$MEDIA/chapters.mkv" "$T/root/media/"
+rc=$(run "$T" "0:0" "30:seek 5.5;31:cmd stop;50:cmd pause;60:cmd prev;70:cmd exit" "" "$T/root/media/chapters.mkv")
+P=$(pos38 "$T")
+expect "[ $rc = 0 ] && [ -n \"$P\" ] && near \"$P\" 5.5 0.05" "Stop, Pause, then Previous with no file before it: 5.5 s still kept (got '$P')"
+nosan "$T"
 # stopped, then File > Close: kept; another file opened after a Stop: kept for the first one
 T=$(newroot t38e)
 cp "$MEDIA/chapters.mkv" "$T/root/media/"
@@ -3373,6 +3379,15 @@ rc=$(run "$T" "0:0" "20:cmd voldown;30:cmd exit" "")
 expect "[ $rc = 0 ] && grep -q 'credential key directory is not private' $T/root/logs/boot.log && grep -qx 'Volume=45' $T/root/mpc-hc.ini" "the key folder not private (0755): logged, and a change is still saved (Volume 50 -> 45)"
 expect "cmp -s $T/root/credentials.enc $T/enc.before && cmp -s $T/root/.credentials-device/key.bin $T/key.before && grep -q 'smb://bob@127.0.0.1:1/VIDEOS/red.mp4' $T/root/mpc-hc.ini && ! grep -q s3cret $T/root/mpc-hc.ini" "... the encrypted passwords and their key untouched, the address kept (without its password)"
 nosan "$T"
+# A1 (c): a damaged credentials.enc beside a good key folder: the settings saved, the damaged file kept as it is
+T=$(newroot t39a1c)
+MPCPS5_TEST_FIXTURE=1 ASAN_OPTIONS=detect_leaks=0 "$FIXTURE" "$T/root" setup "smb://bob:s3cret@127.0.0.1:1/VIDEOS/red.mp4" >/dev/null 2>&1
+sed -i 's/^Volume=.*/Volume=50/' "$T/root/mpc-hc.ini"
+python3 -c "import sys; p = sys.argv[1]; d = bytearray(open(p, 'rb').read()); d[-1] ^= 1; open(p, 'wb').write(d)" "$T/root/credentials.enc"
+cp "$T/root/credentials.enc" "$T/enc.before"
+rc=$(run "$T" "0:0" "20:cmd voldown;30:cmd exit" "")
+expect "[ $rc = 0 ] && grep -q 'could not be decrypted' $T/root/logs/boot.log && grep -qx 'Volume=45' $T/root/mpc-hc.ini && cmp -s $T/root/credentials.enc $T/enc.before" "a damaged credentials.enc (its key fine): logged, a change still saved, the file kept as it is"
+nosan "$T"
 # A2: a file position that isn't a number of seconds ("inf", "nan", negative): not used, not written back
 T=$(newroot t39a2)
 cp "$MEDIA/chapters.mkv" "$MEDIA/red.mp4" "$T/root/media/"
@@ -3380,18 +3395,21 @@ ini "$T" "Volume=50
 [Positions]
 FilePos0=$T/root/media/chapters.mkv|inf
 FilePos1=$T/root/media/red.mp4|nan
-FilePos2=$T/root/media/other.mkv|-30"
+FilePos2=$T/root/media/other.mkv|-30
+[Favorites]
+Favorite0=Fav|$T/root/media/red.mp4|inf"
 rc=$(run "$T" "0:0" "30:state;40:cmd exit" "" "$T/root/media/chapters.mkv")
 expect "[ $rc = 0 ] && grep -q 'open .*chapters.mkv at 0.0 s' $T/root/logs/boot.log" "FilePos 'inf': not used, the file opens from its start"
 expect "! grep -q '^FilePos.*|\(inf\|nan\|-\)' $T/root/mpc-hc.ini" "... and 'inf', 'nan' and a negative position aren't written back"
+expect "grep -q '^Favorite0=Fav|.*red.mp4|0.000$' $T/root/mpc-hc.ini" "... a favorite's position 'inf': 0 (from the start)"
 nosan "$T"
-# D1: a UTF-16 subtitle with a high surrogate not followed by a low one: U+FFFD there, the line shown. (Up to 1.6.3 the
-# conversion made a few bytes that aren't UTF-8 for that character; the line was shown too: this checks it still is.)
+# D1: a UTF-16 subtitle with a low surrogate on its own: U+FFFD there, the line shown. (Up to 1.6.3 it became bytes that
+# aren't UTF-8, and FFmpeg dropped the whole line as invalid UTF-8.)
 T=$(newroot t39d1)
 cp "$MEDIA/grey.mp4" "$T/root/media/movie.mp4"
-python3 -c "import sys; d = '1\r\n00:00:00,000 --> 00:00:09,000\r\nHalf \ud800 a pair, still shown\r\n'; open(sys.argv[1], 'wb').write(b'\xff\xfe' + d.encode('utf-16-le', 'surrogatepass'))" "$T/root/media/movie.srt"
+python3 -c "import sys; d = '1\r\n00:00:00,000 --> 00:00:09,000\r\nHalf \udc00 a pair, still shown\r\n'; open(sys.argv[1], 'wb').write(b'\xff\xfe' + d.encode('utf-16-le', 'surrogatepass'))" "$T/root/media/movie.srt"
 rc=$(run "$T" "0:0" "60:state;80:quit" "60" "$T/root/media/movie.mp4")
-expect "[ $rc = 0 ] && grep -q 'subtitles loaded: .*movie.srt' $T/root/logs/boot.log && $REGION $T/dump/flip00060.ppm 148 750 1771 977 255 255 255 30 150 >/dev/null" "UTF-16 with half a surrogate pair: the line still shown"
+expect "[ $rc = 0 ] && grep -q 'subtitles loaded: .*movie.srt' $T/root/logs/boot.log && $REGION $T/dump/flip00060.ppm 148 750 1771 977 255 255 255 30 150 >/dev/null" "UTF-16 with a low surrogate on its own: the line shown"
 expect "! grep -q 'Invalid UTF-8' $T/root/logs/boot.log $T/out.txt" "... no 'Invalid UTF-8' from FFmpeg"
 nosan "$T"
 # F1, F2: an .m3u with a byte order mark: an entry starting with a fullwidth letter (its first byte 0xEF: up to 1.6.3
@@ -3412,6 +3430,12 @@ cp "$MEDIA/red.mp4" "$T/root/media/"
 printf '[playlist]\r\nFile1=red.mp4\r\nTitle1=Red\r\nLength1=6\r\nNumberOfEntries=1\r\nVersion=2\r\n' >"$T/root/media/list.pls"
 rc=$(run "$T" "0:0" "40:state;50:quit" "" "$T/root/media/list.pls")
 expect "[ $rc = 0 ] && grep -q 'open .*/media/red.mp4 at' $T/root/logs/boot.log && [ \"\$(field $T 1 1)\" = 2 ] && ! grep -q 'open .*Title1\|open .*Length1\|open .*NumberOfEntries\|open .*Version' $T/root/logs/boot.log" "a .pls: its File1= entry plays, its other keys are not entries"
+nosan "$T"
+T=$(newroot t39g2)
+cp "$MEDIA/red.mp4" "$T/root/media/"
+printf '[playlist]\r\nfile1=red.mp4\r\nTitle1=Red\r\nNumberOfEntries=1\r\n' >"$T/root/media/saved.m3u"
+rc=$(run "$T" "0:0" "40:state;50:quit" "" "$T/root/media/saved.m3u")
+expect "[ $rc = 0 ] && grep -q 'open .*/media/red.mp4 at' $T/root/logs/boot.log && [ \"\$(field $T 1 1)\" = 2 ] && ! grep -q 'open .*playlist\]\|open .*Title1' $T/root/logs/boot.log" "a .pls saved as .m3u (its [playlist] header; file1= in small letters): read as a .pls"
 nosan "$T"
 # F5: the CA list (https:// streams, the updater): one cut short is written whole again; one already right isn't
 # written again (up to 1.6.3 it was rewritten in place at every start)
