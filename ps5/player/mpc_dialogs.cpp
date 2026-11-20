@@ -1696,46 +1696,45 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	// (docs/POST-PROCESSING.md). A preset, or Custom's own controls; the colour controls with any preset but Off.
 	p = d->NewPage("Shaders", 1);
 	d->Group(p, "Video post-processing (GPU renderer)", 5, 5, 286, 46);
-	d->Text(p, "Preset:", 10, 18, 40, 8);
-	ComboBox* preset = d->Combo(p, 52, 16, 234, 13,
+	d->Text(p, "Preset:", 10, 18, 62, 8);
+	ComboBox* preset = d->Combo(p, 74, 16, 212, 13,
 		{"Off (one pass, as 1.6)", "Performance: FSR 1", "Quality: debanding, deblocking, FSR 1",
 			"Experimental: Quality and motion smoothing", "Custom"},
 		s.post_preset);
-	d->Text(p, s.video_renderer == 0 ? "For the video only. View > Renderer Settings > Display Statistics shows each pass's time."
-									 : "Needs the GPU renderer (Output).",
+	d->Text(p, s.video_renderer == 0 ? "For the video only. View > Statistics shows each pass's time." : "Needs the GPU renderer (Output).",
 		10, 34, 276, 14);
-	d->Group(p, "Custom", 5, 54, 286, 98);
-	CheckBox* deband = d->Check(p, "Debanding", 10, 66, 135, 8, s.post_deband);
-	d->Text(p, "Strength:", 150, 66, 48, 8);
-	NumberBox* debs = d->Number(p, 200, 63, 60, 14, s.post_deband_strength, 50, 300, 10, " %");
-	CheckBox* deblock = d->Check(p, "Deblocking (light)", 10, 82, 135, 8, s.post_deblock);
-	d->Text(p, "Strength:", 150, 82, 48, 8);
-	NumberBox* debl = d->Number(p, 200, 79, 60, 14, s.post_deblock_strength, 50, 300, 10, " %");
-	d->Text(p, "Scaler:", 10, 98, 38, 8);
-	ComboBox* scaler = d->Combo(p, 50, 96, 95, 13, {"FSR 1", "Lanczos", "Bicubic", "Bilinear"}, s.post_scaler);
-	d->Text(p, "Sharpening:", 150, 98, 48, 8);
-	NumberBox* sharpen = d->Number(p, 200, 95, 60, 14, s.post_sharpen, 0, 100, 5, " %");
-	CheckBox* motion = d->Check(p, "Motion smoothing (experimental)", 10, 114, 135, 8, s.post_motion);
-	d->Text(p, "Scene cut:", 150, 114, 48, 8);
-	NumberBox* scene = d->Number(p, 200, 111, 60, 14, s.post_scene, 1, 50, 1, " %");
-	d->Text(p, "Motion smoothing makes pictures between the film's own for the screen's 60 a second; a cut (the "
-			   "pictures more different than the scene cut) is never blended.",
-		10, 128, 276, 20);
-	d->Group(p, "Colour controls", 5, 155, 286, 58);
-	d->Text(p, "Brightness:", 10, 168, 50, 8);
-	NumberBox* bright = d->Number(p, 62, 165, 56, 14, s.post_brightness, -100, 100, 5);
-	d->Text(p, "Contrast:", 126, 168, 40, 8);
-	NumberBox* contrast = d->Number(p, 168, 165, 56, 14, s.post_contrast, 0, 200, 5, " %");
-	d->Text(p, "Saturation:", 10, 185, 50, 8);
-	NumberBox* sat = d->Number(p, 62, 182, 56, 14, s.post_saturation, 0, 200, 5, " %");
-	Button* creset = d->P(p, new Button, 168, 182, 56, 14);
+	d->Group(p, "Custom", 5, 54, 286, 122);
+	CheckBox* deband = d->Check(p, "Debanding", 10, 66, 136, 8, s.post_deband);
+	d->Text(p, "Strength:", 150, 66, 54, 8);
+	NumberBox* debs = d->Number(p, 206, 63, 58, 14, s.post_deband_strength, 50, 300, 10, " %");
+	CheckBox* deblock = d->Check(p, "Deblocking (light)", 10, 82, 136, 8, s.post_deblock);
+	d->Text(p, "Strength:", 150, 82, 54, 8);
+	NumberBox* debl = d->Number(p, 206, 79, 58, 14, s.post_deblock_strength, 50, 300, 10, " %");
+	d->Text(p, "Scaler:", 10, 98, 56, 8);
+	ComboBox* scaler = d->Combo(p, 66, 96, 80, 13, {"FSR 1", "Lanczos", "Bicubic", "Bilinear"}, s.post_scaler);
+	d->Text(p, "Sharpening:", 150, 98, 54, 8);
+	NumberBox* sharpen = d->Number(p, 206, 95, 58, 14, s.post_sharpen, 0, 100, 5, " %");
+	CheckBox* motion = d->Check(p, "Motion smoothing", 10, 114, 276, 8, s.post_motion);
+	d->Text(p, "Scene cut:", 22, 130, 180, 8);
+	NumberBox* scene = d->Number(p, 206, 127, 58, 14, s.post_scene, 1, 50, 1, " %");
+	d->Text(p, "Motion smoothing makes pictures between the film's own for the 60 Hz screen. A cut (pictures more "
+			   "different than the scene cut) is never blended.",
+		10, 144, 276, 28);
+	d->Group(p, "Colour controls", 5, 179, 286, 57);
+	d->Text(p, "Brightness:", 10, 192, 50, 8);
+	NumberBox* bright = d->Number(p, 62, 189, 56, 14, s.post_brightness, -100, 100, 5);
+	d->Text(p, "Contrast:", 126, 192, 40, 8);
+	NumberBox* contrast = d->Number(p, 168, 189, 56, 14, s.post_contrast, 0, 200, 5, " %");
+	d->Text(p, "Saturation:", 10, 209, 50, 8);
+	NumberBox* sat = d->Number(p, 62, 206, 56, 14, s.post_saturation, 0, 200, 5, " %");
+	Button* creset = d->P(p, new Button, 168, 206, 56, 14);
 	creset->text = T("Reset");
 	creset->on_click = [bright, contrast, sat] {
 		bright->value = 0;
 		contrast->value = 100;
 		sat->value = 100;
 	};
-	d->Text(p, "With any preset but Off.", 10, 200, 276, 8);
+	d->Text(p, "With any preset but Off.", 10, 224, 276, 8);
 	// a preset shows its values in Custom's controls (greyed); Custom shows its own, kept while another is chosen
 	struct CustomValues
 	{

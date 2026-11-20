@@ -1099,7 +1099,7 @@ srt22 $T "iiiiiiiiiiiiiiiiiiii"
 ( for i in $(seq 1 100); do grep -q 'fonts folder: 0 font(s) loaded' $T/root/logs/boot.log 2>/dev/null && break; sleep 0.1; done; cp $MONO $T/root/fonts/mono.ttf ) &
 CP=$!
 P="200:cmd options"
-for f in 210 213 216 219 222 225; do P="$P;$f:key down"; done
+for f in 210 213 216 219 222 225 228; do P="$P;$f:key down"; done # (1.7: Shaders before Fullscreen)
 rc=$(run "$T" "0:0" "$P;235:key r1;240:key right;243:key right;250:key menu;290:state;300:quit" "247,290" "$T/root/media/movie.mp4")
 wait $CP
 expect "[ $rc = 0 ] && grep -q 'Default Style fonts: 1 in .*/fonts (1 new)' $T/root/logs/boot.log" "a font copied in after the start: read when Options opens"
@@ -1176,7 +1176,7 @@ ini "$T" "SubFont=aa-cut681.ttf"
 ( for i in $(seq 1 200); do grep -q 'Default Style fonts:' $T/root/logs/boot.log 2>/dev/null && break; sleep 0.1; done
   sleep 1.2; cp $SERIF $T/root/fonts/zz-partial.ttf ) &
 CP=$!
-rc=$(run "$T" "0:0" "60:state;70:cmd options;80:key down;83:key down;86:key down;89:key down;92:key down;95:key down;110:key escape;260:cmd options;275:key escape;300:quit" "60" "$T/root/media/movie.mp4")
+rc=$(run "$T" "0:0" "60:state;70:cmd options;80:key down;83:key down;86:key down;89:key down;92:key down;95:key down;98:key down;110:key escape;260:cmd options;275:key escape;300:quit" "60" "$T/root/media/movie.mp4")
 wait $CP
 expect "[ $rc = 0 ] && ! grep -q 'runtime error\|AddressSanitizer\|SEGV' $T/out.txt" "the app runs on: no crash, no sanitizer report"
 for f in aa-cut681.ttf ab-cut100.ttf ac-cut5000.ttf ad-cut-half.ttf ae-namepast.ttf ah-tiny.ttc ai-junk.otf zz-partial.ttf; do
@@ -1233,7 +1233,7 @@ expect "[ $rc = 0 ] && ! grep -q '^Retardo' $T/missing.txt" "Spanish: 'Retardo +
 # h: Options > Miscellaneous > Debug logs (off by default): turned on, saved as debug_logs=1, the log written at once
 T=$(newroot t23h)
 P="20:cmd options"
-f=30; for i in $(seq 1 8); do P="$P;$f:key down"; f=$((f + 3)); done
+f=30; for i in $(seq 1 9); do P="$P;$f:key down"; f=$((f + 3)); done
 rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "$P;60:key r1;63:key r1;66:key r1;70:key enter;80:key menu;100:cmd volup;120:quit" "75")
 expect "[ $rc = 0 ] && grep -q '^debug_logs=1$' $T/root/mpc-hc.ini" "the Debug logs box on, OK: debug_logs=1 in mpc-hc.ini"
 expect "grep -q '\[log\] debug logs turned on' $T/root/logs/boot.log && grep -q '\[osd\] Volume: 100%' $T/root/logs/boot.log && ! grep -q 'fonts folder:' $T/root/logs/boot.log" "boot.log written from then on, at once (nothing from before it was on)"
@@ -1345,7 +1345,7 @@ for L in 0 1 2 3 4; do
 	T=$(newroot t24f_$L)
 	ini "$T" "Language=$L"
 	P="20:cmd options"
-	f=30; for i in $(seq 1 7); do P="$P;$f:key down"; f=$((f + 3)); done
+	f=30; for i in $(seq 1 8); do P="$P;$f:key down"; f=$((f + 3)); done
 	P="$P;60:key r1;66:key enter;72:key r1;75:key right;78:key right;84:key r1;90:key enter;100:key menu;120:quit"
 	rc=$(MPCPS5_HOST_I18N_MISSING=$T/missing.txt run "$T" "0:0" "$P" "58,96")
 	expect "[ $rc = 0 ] && grep -q '^AudioNormalize=1$' $T/root/mpc-hc.ini && grep -q '^AudioMaxNormFactor=420$' $T/root/mpc-hc.ini && grep -q '^AudioNormalizeRecover=0$' $T/root/mpc-hc.ini" "language $L: Normalize on, 420 %, Regain volume off, OK: saved"
@@ -1355,8 +1355,8 @@ done
 T=$(newroot t24g)
 cp "$MEDIA/norm.mkv" "$T/root/media/"
 P="5:cmd options"
-f=8; for i in $(seq 1 7); do P="$P;$f:key down"; f=$((f + 3)); done
-P="$P;29:key r1;32:key enter;35:key menu;300:quit"
+f=8; for i in $(seq 1 8); do P="$P;$f:key down"; f=$((f + 3)); done
+P="$P;32:key r1;35:key enter;38:key menu;300:quit"
 rc=$(MPCPS5_HOST_AUDIO_DUMP=$T/live run "$T" "0:0" "$P" "" "$T/root/media/norm.mkv")
 # where it took effect: the block the player logs (its time in the stream; the dump's first sound is the stream's
 # start). In 50 ms windows: as it is (463) before that, 4x (1852) after it up to the burst -- or, when the pad's way
@@ -3136,7 +3136,7 @@ rm -rf "$D" && mkdir -p "$D/u0"
 DRIVES="$D/u0:$D/u1"
 BK=$D/u0/mpcps5/backup/mpc-hc.ini
 TO_BACKUP=""
-for frame in 20 22 24 26 28 30 32 34 36; do TO_BACKUP="$TO_BACKUP;$frame:key down"; done # Player .. Backup, the tree's tenth page
+for frame in 20 22 24 26 28 30 32 34 36 38; do TO_BACKUP="$TO_BACKUP;$frame:key down"; done # Player .. Backup, the tree's eleventh page (1.7: Shaders)
 idof() { sed -n 's/^BackupId=//p' "$1"; }
 # a fresh install (no drive chosen) never touches a backup that is there
 T=$(newroot t37fresh)
@@ -3175,9 +3175,9 @@ expect "[ $rc = 0 ] && cmp -s $T/root/mpc-hc.ini $BK && grep -q 'backed up to' $
 ID=$(idof "$T/root/mpc-hc.ini")
 BKSUM=$(sha256sum <"$BK")
 TO_MISC=""
-for frame in 20 22 24 26 28 30 32 34; do TO_MISC="$TO_MISC;$frame:key down"; done
+for frame in 20 22 24 26 28 30 32 34 36; do TO_MISC="$TO_MISC;$frame:key down"; done
 RESET_TABS=""
-for frame in 40 42 44 46 48 50 52; do RESET_TABS="$RESET_TABS;$frame:key r1"; done
+for frame in 40 42 44 46 48 50 52 54; do RESET_TABS="$RESET_TABS;$frame:key r1"; done # (1.7: the home screen's box before it)
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd options$TO_MISC$RESET_TABS;56:key enter;66:key enter;90:quit" "60")
 expect "[ $rc = 0 ] && grep -q '\[ui\] message: Restore all the settings to their defaults' $T/root/logs/boot.log && grep -qx 'BackupDrive=' $T/root/mpc-hc.ini && [ \"\$(idof $T/root/mpc-hc.ini)\" = '$ID' ] && [ \"\$(sha256sum <$BK)\" = '$BKSUM' ]" "Reset: backup Off, the same installation id, the backup on the drive untouched"
 # the chosen drive isn't connected: nothing written, said in the log; the page shows it as not connected, Back up now says why
@@ -3449,6 +3449,126 @@ touch -d '2001-01-01 00:00:00 UTC' "$T/root/cacert.pem"
 rc=$(run "$T" "0:0" "20:quit" "")
 expect "[ $rc = 0 ] && [ \"\$(stat -c %Y $T/root/cacert.pem)\" = 978307200 ]" "... one already right: not written again"
 nosan "$T"
+fi
+
+if want 40; then
+echo "== 40. 1.7 (suggested by Cris Valente): Options > Output > Shaders, the GPU's post-processing of the video (presets, Custom, the colour controls, motion smoothing, the statistics); Options > Miscellaneous: the home screen's category"
+GM=$MEDIA/gpu
+[ -f "$GM/x_320x180_1.5.24fps.yuv" ] || bash tests/make_gpu_media.sh "$GM" >/dev/null
+COMPARE="python3 $PWD/tests/compare_ppm.py"
+# a 5 fps film of moving test patterns (motion smoothing has pictures to make between them even at the host's rate)
+[ -f "$GM/motion5.mp4" ] || ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=5:duration=12" -c:v libx264 \
+	-pix_fmt yuv420p -g 10 "$GM/motion5.mp4"
+SHOT40="30:cmd pause;32:seek 0.5;60:state;61:shaders;62:quit"
+# a: off by default: 1.6's single pass, nothing of the passes made
+T=$(newroot t40a)
+cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "$SHOT40" "55" "$T/root/media/fmt_yuv420p.nut")
+expect "[ $rc = 0 ] && state $T 1 | grep -q ' gpu 1 ' && grep -q '\[test\] shaders \[\] \[\] motion 0' $T/root/logs/boot.log && ! grep -q 'post-processing: ' $T/root/logs/boot.log" "off (the default): the single pass, nothing of the passes made"
+expect "grep -qx 'PostPreset=0' $T/root/mpc-hc.ini && grep -qx 'PostSharpen=88' $T/root/mpc-hc.ini && grep -qx 'HomeScreenCategory=0' $T/root/mpc-hc.ini" "the settings written with their defaults (PostPreset=0, PostSharpen=88, HomeScreenCategory=0)"
+[ -f "$T/dump/flip00055.ppm" ] && mv "$T/dump/flip00055.ppm" "$WORK/t40-off.ppm"
+nosan "$T"
+# b: each preset draws the picture as the single pass does (the same paused picture; FSR 1 and the debanding change
+# it a little)
+for pr in 1 2 3 4; do
+	T=$(newroot t40b$pr)
+	ini "$T" "PostPreset=$pr"
+	cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
+	rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "$SHOT40" "55" "$T/root/media/fmt_yuv420p.nut")
+	r=$($COMPARE "$WORK/t40-off.ppm" "$T/dump/flip00055.ppm" 0 130 1920 976 4 40)
+	expect "[ $rc = 0 ] && $COMPARE $WORK/t40-off.ppm $T/dump/flip00055.ppm 0 130 1920 976 4 40 >/dev/null && grep -q '\[test\] shaders \[FSR 1; prep .* ms, motion .* ms, scale .* ms, final .* ms; half precision\] \[shaders .* ms\]' $T/root/logs/boot.log" "preset $pr: the picture through the passes, FSR 1, as the single pass draws it ($r); the statistics say so"
+	expect "grep -q '\[gpu\] post-processing: ready (half-precision builds' $T/root/logs/boot.log && grep -q '\[gpu\] shaders: on' $T/root/logs/boot.log" "... the passes made at the first picture (half precision on lavapipe)"
+	nosan "$T"
+done
+# c: Play > Shaders: a preset chosen applies at once, said on the OSD and kept
+T=$(newroot t40c)
+cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "30:cmd pause;32:cmd shaders2;50:shaders;52:cmd shaders0;70:shaders;72:quit" "" "$T/root/media/fmt_yuv420p.nut")
+expect "[ $rc = 0 ] && grep -q '\[osd\] Shaders: Quality' $T/root/logs/boot.log && grep -q '\[osd\] Shaders: Off' $T/root/logs/boot.log" "Play > Shaders: Quality, then Off, said on the OSD"
+expect "[ \"\$(grep '\[test\] shaders' $T/root/logs/boot.log | head -1 | grep -c 'FSR 1')\" = 1 ] && grep '\[test\] shaders' $T/root/logs/boot.log | tail -1 | grep -q 'shaders \[\] \[\]'" "... the passes at once, and off again at once"
+expect "grep -qx 'PostPreset=0' $T/root/mpc-hc.ini && grep -q '\[gpu\] shaders: on' $T/root/logs/boot.log && grep -q '\[gpu\] shaders: off' $T/root/logs/boot.log" "... kept in mpc-hc.ini (PostPreset)"
+nosan "$T"
+# d: Options > Output > Shaders: the page (Play > Shaders > Shader Options... opens it), a preset chosen with the pad (Options, the menu key, is OK)
+T=$(newroot t40d)
+cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "30:cmd pause;32:cmd shaderoptions;44:key r1;48:key right;52:key right;56:key menu;80:shaders;82:quit" "46,58" "$T/root/media/fmt_yuv420p.nut")
+expect "[ $rc = 0 ] && grep -q '\[ui\] Options at \"Shaders\"' $T/root/logs/boot.log" "Shader Options... opens Options at Output > Shaders"
+expect "grep -qx 'PostPreset=2' $T/root/mpc-hc.ini && grep '\[test\] shaders' $T/root/logs/boot.log | grep -q 'FSR 1'" "the preset chosen on the page (Quality), OK: applied and kept"
+cp "$T/dump/flip00046.ppm" "$WORK/t40-shaders-page.ppm" 2>/dev/null
+cp "$T/dump/flip00058.ppm" "$WORK/t40-shaders-page-quality.ppm" 2>/dev/null
+nosan "$T"
+# Custom's own values and the colour controls from mpc-hc.ini: a saturation of 0 makes the picture grey
+T=$(newroot t40e)
+ini "$T" "PostPreset=4
+PostDeband=0
+PostDeblock=0
+PostScaler=3
+PostSaturation=0
+PostContrast=100"
+cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "$SHOT40" "55" "$T/root/media/fmt_yuv420p.nut")
+GREY=$(python3 -c "
+from PIL import Image
+im = Image.open('$T/dump/flip00055.ppm').convert('RGB')
+worst = 0
+for y in range(200, 900, 37):
+    for x in range(300, 1600, 41):
+        r, g, b = im.getpixel((x, y))
+        worst = max(worst, max(r, g, b) - min(r, g, b))
+print(worst)")
+expect "[ $rc = 0 ] && [ $GREY -le 3 ] && grep -q '\[test\] shaders \[bilinear;' $T/root/logs/boot.log" "Custom: bilinear, saturation 0: the picture grey (the most a pixel's channels differ: $GREY)"
+nosan "$T"
+# f: motion smoothing (Experimental): the pictures between the film's own; paused: the picture itself
+T=$(newroot t40f)
+ini "$T" "PostPreset=3"
+cp "$GM/motion5.mp4" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:shaders;50:shaders;60:shaders;62:cmd pause;80:shaders;82:quit" "" "$T/root/media/motion5.mp4")
+expect "[ $rc = 0 ] && grep '\[test\] shaders' $T/root/logs/boot.log | head -3 | grep -q 'FSR 1, motion smoothing; ' && grep -q 'motion smoothing.s images: 3 pyramid levels, 80x45 to 20x12' $T/root/logs/boot.log" "Experimental: motion smoothing makes the pictures between (its images: 3 pyramid levels for 320x180)"
+expect "grep '\[test\] shaders' $T/root/logs/boot.log | tail -1 | grep -q 'shaders \[FSR 1; '" "... paused: the picture itself"
+nosan "$T"
+# g: the software renderer: Play > Shaders greyed, nothing of the passes made
+T=$(newroot t40g)
+ini "$T" "PostPreset=2
+VideoRenderer=1"
+cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "$SHOT40" "" "$T/root/media/fmt_yuv420p.nut")
+expect "[ $rc = 0 ] && state $T 1 | grep -q ' gpu 0 ' && ! grep -q 'post-processing: \|\[gpu\] shaders: on' $T/root/logs/boot.log" "the software renderer: the shaders aren't used"
+nosan "$T"
+# h: the home screen's category (param.json's applicationCategoryType): Games from mpc-hc.ini at the start, into the
+# app's copy and the home screen's; already so the next time; Media again from Options > Miscellaneous
+T=$(newroot t40h)
+mkdir -p "$T/homebrew/PPSA99015/sce_sys" "$T/appmeta/PPSA99015"
+cp app/sce_sys/param.json "$T/homebrew/PPSA99015/sce_sys/"
+cp app/sce_sys/param.json "$T/appmeta/PPSA99015/"
+ini "$T" "HomeScreenCategory=1"
+rc=$(MPCPS5_PS5_APPMETA=$T/appmeta run "$T" "0:0" "20:quit" "")
+expect "[ $rc = 0 ] && grep -q '\"applicationCategoryType\": 0,' $T/homebrew/PPSA99015/sce_sys/param.json && grep -q '\"applicationCategoryType\": 0,' $T/appmeta/PPSA99015/param.json && grep -q '\[home\] Games: param.json written (the home screen.s copy: written)' $T/root/logs/boot.log" "Games: the app's param.json and the home screen's copy say 0 (written at the start)"
+expect "[ \"\$(sed 's/\"applicationCategoryType\": 0,/\"applicationCategoryType\": 65536,/' $T/homebrew/PPSA99015/sce_sys/param.json)\" = \"\$(cat app/sce_sys/param.json)\" ]" "... nothing else of param.json changed"
+rc=$(MPCPS5_PS5_APPMETA=$T/appmeta run "$T" "0:0" "20:quit" "")
+expect "[ $rc = 0 ] && grep -q '\[home\] Games: param.json already says so (the home screen.s copy: the same)' $T/root/logs/boot.log" "the next start: already so, nothing written"
+TO_MISC40=""
+for frame in 20 22 24 26 28 30 32 34 36; do TO_MISC40="$TO_MISC40;$frame:key down"; done # Player .. Miscellaneous: the tenth page
+rc=$(MPCPS5_PS5_APPMETA=$T/appmeta run "$T" "0:0" "10:cmd options$TO_MISC40;44:key r1;46:key r1;48:key r1;50:key r1;52:key left;56:key menu;70:key enter;90:quit" "54,64")
+expect "[ $rc = 0 ] && grep -qx 'HomeScreenCategory=0' $T/root/mpc-hc.ini && grep -q '\"applicationCategoryType\": 65536,' $T/homebrew/PPSA99015/sce_sys/param.json && grep -q '\[ui\] message: The app.s param.json now says Media. The PS5 reads it when it adds the app' $T/root/logs/boot.log" "Options > Miscellaneous: Media chosen, OK: param.json says 65536 again, and a message says what follows"
+cp "$T/dump/flip00054.ppm" "$WORK/t40-misc-page.ppm" 2>/dev/null
+cp "$T/dump/flip00064.ppm" "$WORK/t40-home-message.ppm" 2>/dev/null
+nosan "$T"
+# no app folder to write: changed in Options, the message says it couldn't (the setting is kept)
+T=$(newroot t40h2)
+rc=$(run "$T" "0:0" "10:cmd options$TO_MISC40;44:key r1;46:key r1;48:key r1;50:key r1;52:key right;56:key menu;70:key enter;90:quit" "")
+expect "[ $rc = 0 ] && grep -qx 'HomeScreenCategory=1' $T/root/mpc-hc.ini && grep -q '\[ui\] message: The app.s param.json couldn.t be changed: the app.s param.json isn.t there' $T/root/logs/boot.log" "no param.json to write: the message says so; the setting is kept"
+nosan "$T"
+# the installer follows it: Games written into what it installs (and the home screen's copy); sent again, nothing
+T=$(newroot t40i)
+ini "$T" "HomeScreenCategory=1"
+mkdir -p "$T/appmeta/PPSA99015"
+inst40() { MPCPS5_PS5_ROOT=$1/root MPCPS5_PS5_HOMEBREW=$1/homebrew MPCPS5_PS5_APPMETA=$1/appmeta ASAN_OPTIONS=detect_leaks=0 timeout 60 "$INSTALLER" >>"$1/inst.txt" 2>&1; }
+stop_helpers
+inst40 "$T" &
+expect "waitfor $T/root/logs/installer.log 'listening on 127.0.0.1' && grep -q '\"applicationCategoryType\": 0,' $T/homebrew/PPSA99015/sce_sys/param.json && grep -q '\"applicationCategoryType\": 0,' $T/appmeta/PPSA99015/param.json" "the installer: Games written into the app's param.json and the home screen's copy"
+inst40 "$T"
+expect "! grep -q 'wrote .*param.json' $T/root/logs/installer.log && grep -q 'is up to date' $T/root/logs/installer.log" "... sent again: nothing written (not the Media copy each time)"
+stop_helpers
 fi
 
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"

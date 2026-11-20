@@ -1,7 +1,8 @@
 # Video post-processing on the GPU (1.7)
 
-Suggested by Cris Valente. View > Options > Playback > **Shaders** turns on, for the video only (never the window, the
-menus or the subtitles), a chain of compute passes between the decoder's picture and the screen:
+Suggested by Cris Valente. **View > Options > Output > Shaders** (or **Play > Shaders**) turns on, for the video only
+(never the window, the menus or the subtitles), a chain of compute passes between the decoder's picture and the
+screen. It needs the GPU renderer (Options > Output).
 
 ```
 decoder planes ──► 1 prep ──► src ring ──► 2 motion smoothing ──► 3 scale ──► 4 final pass ──► display (4K on a 4K TV)
@@ -79,19 +80,30 @@ film at 60 Hz, cost the final pass alone.
 
 ## Timings
 
-Each pass is bracketed by timestamp queries; View > Statistics (and the OSD statistics, R3 + Square) shows the GPU
-milliseconds of prep, motion smoothing, scale and final per frame. On the console these are the numbers to watch:
+Each pass is bracketed by timestamp queries; View > Statistics (its "Shaders" line) shows the GPU milliseconds of
+prep, motion smoothing, scale and final per frame, and the OSD statistics (View > Renderer Settings > Display
+Statistics, R3 + Square) their sum. On the console these are the numbers to watch:
 a 60 Hz display leaves 16.7 ms for all of it, the UI included.
 
 ## Presets
 
-| | prep | motion smoothing | scale | sharpening |
+| | prep | motion smoothing | scale | sharpening (RCAS) |
 |---|---|---|---|---|
 | Off | — (1.6's single pass) | — | — | — |
-| Performance | — | — | FSR 1 | 0.5 |
-| Quality | deband, deblock | — | FSR 1 | 0.25 |
-| Experimental | deband, deblock | on | FSR 1 | 0.25 |
+| Performance | — | — | FSR 1 | 75 % (0.5 stops) |
+| Quality | deband, deblock | — | FSR 1 | 88 % (0.24 stops) |
+| Experimental | deband, deblock | on | FSR 1 | 88 % |
 | Custom | as set | as set | as set | as set |
+
+Sharpening in percent: 100 % is RCAS at 0 stops (the most), 0 % at 2 stops. FSR 1 enlarges; a picture made smaller
+is scaled bicubic. The colour controls (brightness −100..100, contrast and saturation 0..200 %) apply with any preset
+but Off.
+
+## Settings (mpc-hc.ini)
+
+`PostPreset` (0 Off .. 4 Custom), and Custom's `PostDeband`, `PostDebandStrength` (50..300 %), `PostDeblock`,
+`PostDeblockStrength`, `PostScaler` (0 FSR 1, 1 Lanczos, 2 bicubic, 3 bilinear), `PostSharpen` (0..100 %),
+`PostMotion`, `PostSceneThreshold` (1..50 %); `PostBrightness`, `PostContrast`, `PostSaturation`.
 
 ## Not done, and why
 

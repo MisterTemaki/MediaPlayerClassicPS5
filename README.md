@@ -15,6 +15,15 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
+**1.7.0: video post-processing on the GPU, suggested by Cris Valente.** **View > Options > Output > Shaders** (or
+**Play > Shaders**) runs the video through compute passes before it reaches the screen: **Performance** (FSR 1
+upscaling and sharpening), **Quality** (debanding and light deblocking, then FSR 1), **Experimental** (Quality and
+motion smoothing, pictures made between the film's own for the 60 Hz screen) or **Custom**, with brightness,
+contrast and saturation controls. **Off** (the default) draws the video as 1.6 does. **View > Options >
+Miscellaneous** now also chooses whether the home screen lists the app under **Media** or **Games**. 1.7.0 includes
+1.6.4's fixes below (1.6.4 wasn't released on its own). See [Shaders](#shaders-17), the
+[design notes](docs/POST-PROCESSING.md) and the [1.7.0 release notes](docs/RELEASE-NOTES-v1.7.0.md).
+
 **1.6.4: Stop keeps the file's position, and an audit's fixes.** Up to 1.6.3, a file stopped with **Stop** and then
 closed (or the app exited) opened again from the start, because Stop goes back to the start. Now it opens again where
 Stop was pressed, as after a Pause. Settings are saved again when the saved network passwords can't be read (after
@@ -653,6 +662,34 @@ keep sound and picture together (to be confirmed on a console). `boot.log` has
 `[gpu]` lines (the device, the output size, the self-test at start) and, with debug logs on, `[pacing]` lines: how
 many screen refreshes each picture stayed on (a 24 fps film on 60 Hz: 2 and 3 in turn).
 
+### Shaders (1.7)
+
+**View > Options > Output > Shaders**, suggested by Cris Valente: a chain of GPU compute passes for the video only
+(never the window, the menus or the subtitles), with the GPU renderer. **Play > Shaders** switches between the
+presets at once and **Shader Options...** opens the page.
+
+| Preset | Debanding, deblocking | Motion smoothing | Scaler | Sharpening |
+|---|---|---|---|---|
+| Off (default) | -- | -- | 1.6's single pass | -- |
+| Performance | -- | -- | FSR 1 | 75 % |
+| Quality | on | -- | FSR 1 | 88 % |
+| Experimental | on | on | FSR 1 | 88 % |
+| Custom | as set, with a strength | as set, with the scene cut | FSR 1, Lanczos, bicubic or bilinear | as set |
+
+- **FSR 1** is AMD FidelityFX Super Resolution 1.0 (EASU, then RCAS sharpening; MIT, vendored unchanged). It
+  enlarges; a picture made smaller is scaled bicubic.
+- **Debanding** follows libplacebo's and f3kdb's approach; **deblocking** softens 8×8 block edges with H.264's rule
+  and keeps pixels by strong edges within their neighbours' range.
+- **Motion smoothing** (experimental) computes each pair of pictures' optical flow both ways and shows the picture at
+  the display's time between them, while playing. A cut is never blended, and where the motion is too large for the
+  flow the nearer picture is shown, never a double image.
+- **Colour controls:** brightness, contrast and saturation, with any preset but Off.
+- **View > Statistics** shows each pass's GPU time per frame (its **Shaders** line); the statistics over the video
+  (R3 + Square) show their sum. Half-precision arithmetic is used where the GPU has it.
+- HDR10 and HLG go through the passes in their own signal; tone mapping or the HDR10 output comes after.
+- Settings: `PostPreset` and the other `Post*` keys of `mpc-hc.ini`
+  ([design notes](docs/POST-PROCESSING.md)).
+
 **Surround.** With Audio Renderer on surround, 5.1 and 7.1 tracks go to the console's 8-channel output
 (L R C LFE Ls Rs Lb Rb); the console mixes it down itself for a stereo TV. 5.1 fills the first six, 7.1's side
 channels go to Ls/Rs and its back channels to Lb/Rb. Stereo tracks stay on the stereo output.
@@ -814,7 +851,10 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
                              AudioNormalize, AudioMaxNormFactor, AudioNormalizeRecover...), the keys ([Keys]),
                              TouchpadPointer, where Options was moved (OptionsX / OptionsY), when the hidden
                              fullscreen controls show (HideFullscreenControlsPolicy: 2 the pointer moves, 1 over them),
-                             Recent Files, file positions, Favorites, network locations (without passwords)
+                             Recent Files, file positions, Favorites, network locations (without passwords);
+                             1.7: Options > Output > Shaders (PostPreset and the other Post* keys) and the home
+                             screen's category (HomeScreenCategory: 0 Media, 1 Games: written into the app's
+                             sce_sys/param.json at every start)
 /data/mpcps5/credentials.enc encrypted network credentials
 /data/mpcps5/.credentials-device/key.bin private local encryption key
 /data/mpcps5/media           a place for media on the console's storage

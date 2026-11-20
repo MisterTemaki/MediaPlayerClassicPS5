@@ -1545,36 +1545,34 @@ const Entry kTable[] = {
 	{"Experimental: Quality and motion smoothing", "Experimental: Calidad y suavizado de movimiento",
 		"Experimental: Qualidade e suavização de movimento", "Expérimental : Qualité et lissage du mouvement",
 		"Experimentell: Qualität und Bewegungsglättung"},
-	{"For the video only. View > Renderer Settings > Display Statistics shows each pass's time.",
-		"Solo para el vídeo. Ver > Ajustes del renderizador > Mostrar estadísticas muestra el tiempo de cada pasada.",
-		"Só para o vídeo. Exibir > Configurações do renderizador > Mostrar estatísticas mostra o tempo de cada passada.",
-		"Pour la vidéo seulement. Affichage > Paramètres du rendu > Afficher les statistiques montre le temps de chaque "
-		"passe.",
-		"Nur für das Video. Ansicht > Renderer-Einstellungen > Statistiken anzeigen zeigt die Zeit jedes Durchgangs."},
+	{"For the video only. View > Statistics shows each pass's time.",
+		"Solo para el vídeo. Ver > Estadísticas muestra el tiempo de cada pasada.",
+		"Só para o vídeo. Visualizar > Estatísticas mostra o tempo de cada passada.",
+		"Pour la vidéo seulement. Affichage > Statistiques montre le temps de chaque passe.",
+		"Nur für das Video. Ansicht > Statistiken zeigt die Zeit jedes Durchgangs."},
 	{"Needs the GPU renderer (Output).", "Necesita el renderizador GPU (Salida).", "Precisa do renderizador GPU (Saída).",
 		"Nécessite le rendu GPU (Sortie).", "Braucht den GPU-Renderer (Ausgabe)."},
 	{"Debanding", "Debanding", "Debanding", "Debanding", "Debanding"},
 	{"Strength:", "Intensidad:", "Intensidade:", "Intensité :", "Stärke:"},
 	{"Deblocking (light)", "Deblocking (suave)", "Deblocking (leve)", "Deblocking (léger)", "Deblocking (leicht)"},
-	{"Scaler:", "Escalador:", "Escalonador:", "Mise à l'échelle :", "Skalierer:"},
+	{"Scaler:", "Escalador:", "Escalonador:", "Échelle :", "Skalierer:"},
 	{"FSR 1", "FSR 1", "FSR 1", "FSR 1", "FSR 1"},
 	{"Lanczos", "Lanczos", "Lanczos", "Lanczos", "Lanczos"},
 	{"Bicubic", "Bicúbico", "Bicúbico", "Bicubique", "Bikubisch"},
 	{"Bilinear", "Bilineal", "Bilinear", "Bilinéaire", "Bilinear"},
 	{"Sharpening:", "Nitidez:", "Nitidez:", "Netteté :", "Schärfe:"},
-	{"Motion smoothing (experimental)", "Suavizado de movimiento (experimental)", "Suavização de movimento (experimental)",
-		"Lissage du mouvement (expérimental)", "Bewegungsglättung (experimentell)"},
+	{"Motion smoothing", "Suavizado de movimiento", "Suavização de movimento", "Lissage du mouvement", "Bewegungsglättung"},
 	{"Scene cut:", "Corte de escena:", "Corte de cena:", "Changement de plan :", "Szenenschnitt:"},
-	{"Motion smoothing makes pictures between the film's own for the screen's 60 a second; a cut (the pictures more "
-	 "different than the scene cut) is never blended.",
-		"El suavizado de movimiento crea imágenes entre las de la película para las 60 por segundo de la pantalla; un "
-		"corte (imágenes más distintas que el corte de escena) nunca se mezcla.",
-		"A suavização de movimento cria imagens entre as do filme para as 60 por segundo da tela; um corte (imagens mais "
+	{"Motion smoothing makes pictures between the film's own for the 60 Hz screen. A cut (pictures more different than "
+	 "the scene cut) is never blended.",
+		"El suavizado de movimiento crea imágenes entre las de la película para la pantalla de 60 Hz. Un corte (imágenes "
+		"más distintas que el corte de escena) nunca se mezcla.",
+		"A suavização de movimento cria imagens entre as do filme para a tela de 60 Hz. Um corte (imagens mais "
 		"diferentes que o corte de cena) nunca é misturado.",
-		"Le lissage du mouvement crée des images entre celles du film pour les 60 par seconde de l'écran ; un changement "
-		"de plan (des images plus différentes que le seuil) n'est jamais mélangé.",
-		"Die Bewegungsglättung erzeugt Bilder zwischen denen des Films für die 60 pro Sekunde des Bildschirms; ein "
-		"Schnitt (Bilder, die sich stärker als der Szenenschnitt unterscheiden) wird nie überblendet."},
+		"Le lissage du mouvement crée des images entre celles du film pour l'écran à 60 Hz. Un changement de plan (des "
+		"images plus différentes que le seuil) n'est jamais mélangé.",
+		"Die Bewegungsglättung erzeugt Bilder zwischen denen des Films für den 60-Hz-Bildschirm. Ein Schnitt (Bilder, "
+		"die sich stärker als der Szenenschnitt unterscheiden) wird nie überblendet."},
 	{"Colour controls", "Controles de color", "Controles de cor", "Réglages des couleurs", "Farbregler"},
 	{"Brightness:", "Brillo:", "Brilho:", "Luminosité :", "Helligkeit:"},
 	{"Contrast:", "Contraste:", "Contraste:", "Contraste :", "Kontrast:"},

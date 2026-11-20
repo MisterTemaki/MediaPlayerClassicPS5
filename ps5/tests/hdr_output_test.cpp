@@ -97,6 +97,27 @@ int main()
 	ps5gpu::SetVideo(frame, view);
 	ps5gpu::Present(ui.data(), {}, false);
 	check(ps5gpu::HdrOutputActive(), "a later compatible HDR session can enable output again");
+	// 1.7: the post-processing's passes into the HDR10 target: PQ as it comes (10 bits between the passes), HLG to PQ,
+	// the UI's white as before
+	ps5gpu::VideoPost post;
+	post.on = true;
+	post.scaler = ps5gpu::VideoScaler::Bilinear;
+	ps5gpu::SetVideoPost(post);
+	ps5gpu::TakePostStatus();
+	for (double nits : {100.0, 1000.0, 4000.0})
+	{
+		std::fill(plane.begin(), plane.end(), uint16_t(std::lround(pq(nits) * 1023)));
+		check(ps5gpu::SetVideo(frame, view) && ps5gpu::Present(ui.data(), {}, false) && ps5gpu::HdrOutputActive() &&
+			near(8, 8, pq(nits)) && near(0, 0, pq(203)),
+			"post-processing on the HDR10 output: PQ passes as it comes, the UI white at 203 nits");
+	}
+	check(ps5gpu::TakePostStatus().active, "... the pictures went through the passes");
+	frame.transfer = ps5gpu::VideoTransfer::Hlg;
+	std::fill(plane.begin(), plane.end(), 767);
+	check(ps5gpu::SetVideo(frame, view) && ps5gpu::Present(ui.data(), {}, false) && near(8, 8, pq(1000 * pow(scene, 1.2))),
+		"post-processing on the HDR10 output: HLG to PQ");
+	frame.transfer = ps5gpu::VideoTransfer::Pq;
+	ps5gpu::SetVideoPost(ps5gpu::VideoPost());
 	const int before_shutdown = off_calls;
 	ps5gpu::Shutdown();
 	check(off_calls == before_shutdown + 1, "shutdown restores SDR before releasing VideoOut resources");

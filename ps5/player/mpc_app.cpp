@@ -3707,7 +3707,10 @@ int MainFrame::Run(const std::string& first)
 					{"close", ID_FILE_CLOSE_AND_RESTORE}, {"saveimage", ID_FILE_SAVE_IMAGE}, {"next", ID_NAVIGATE_SKIPFORWARD},
 					{"prev", ID_NAVIGATE_SKIPBACK}, {"addfav", ID_FAVORITES_ADD}, {"loadsub", ID_FILE_SUBTITLES_LOAD},
 					{"opendir", ID_FILE_OPENDIRECTORY}, {"opendvdbd", ID_FILE_OPENDVDBD}, {"disc0", ID_DISC_FIRST},
-					{"disc1", ID_DISC_FIRST + 1}, {"title1", ID_TITLE_FIRST}, {"title2", ID_TITLE_FIRST + 1}, {"exit", ID_FILE_EXIT}};
+					{"disc1", ID_DISC_FIRST + 1}, {"title1", ID_TITLE_FIRST}, {"title2", ID_TITLE_FIRST + 1}, {"exit", ID_FILE_EXIT},
+					{"shaders0", ID_SHADERS_OFF}, {"shaders1", ID_SHADERS_PERFORMANCE}, {"shaders2", ID_SHADERS_QUALITY},
+					{"shaders3", ID_SHADERS_EXPERIMENTAL}, {"shaders4", ID_SHADERS_CUSTOM}, {"shaderoptions", ID_SHADERS_OPTIONS},
+					{"osdstats", ID_VIEW_DISPLAY_RENDERER_STATS}};
 				if (c.compare(0, 4, "cmd ") == 0)
 				{
 					int id = atoi(c.c_str() + 4);
@@ -3772,7 +3775,8 @@ int MainFrame::Run(const std::string& first)
 					disc::HostEject(c.substr(c.find(' ') + 1), c[0] == 'e'); // a disc taken out / put back (host tests)
 #endif
 				else if (c == "shaders") // 1.7: the post-processing's line (View > Statistics')
-					OrbisLog("[test] shaders [%s] motion %d", gpu::PostStats().c_str(), int(gpu::MotionSmoothing()));
+					OrbisLog("[test] shaders [%s] [%s] motion %d", gpu::PostStats().c_str(), gpu::PostShortStats().c_str(),
+						int(gpu::MotionSmoothing()));
 				else if (c == "state")
 				{
 					const PlayerStats ps = player_.Stats();
