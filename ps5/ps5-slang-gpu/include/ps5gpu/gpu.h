@@ -88,7 +88,8 @@ struct Config
 	int (*set_hdr_output)(bool on, int width, int height) = nullptr;
 	int (*hdr_output_range)() = nullptr;
 	// 1.2 (MPC 1.7): the post-processing's half-precision builds (VideoPost) when the device has shaderFloat16 and
-	// shaderInt16; false: the FP32 builds always (host tests compare both)
+	// shaderInt16; false: the FP32 builds always (host tests compare both), and neither VK_KHR_shader_float16_int8,
+	// the float16 / int16 device features nor (for them) VK_KHR_get_physical_device_properties2 is asked for
 	bool post_fp16 = true;
 };
 // Before Init (a later call changes nothing of a running renderer but the log).
@@ -359,10 +360,12 @@ struct PostStatus
 	// GPU milliseconds per drawn frame since the last call (0: not measured)
 	double prep_ms = 0, motion_ms = 0, scale_ms = 0, final_ms = 0;
 	std::string why_off; // why the passes aren't used although asked for ("" when they are, or not asked)
+	std::string motion_why_off; // why motion smoothing isn't, although asked for ("" when it is, or not asked)
 };
 PostStatus TakePostStatus();
-// The post-processing holds this picture (an earlier SetVideo's id, prepared at a Present since): motion smoothing can
-// start from it (VideoView::motion_from). From the thread that calls Present.
+// Motion smoothing can start from this picture (VideoView::motion_from): the passes and motion smoothing are asked for
+// (SetVideoPost), its images could be made, and the passes hold the picture (an earlier SetVideo's id, prepared at a
+// Present since). False otherwise: the program shows its pictures as they come. From the thread that calls Present.
 bool PostHolds(uint64_t id);
 
 // ---- genplus's shelf: textured quads under the surface (Config::scene) -----------------------------------------------

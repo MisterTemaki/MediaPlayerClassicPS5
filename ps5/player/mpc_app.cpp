@@ -1615,7 +1615,9 @@ std::vector<MenuItem> MainFrame::PlayMenu() const
 std::vector<MenuItem> MainFrame::ShadersMenu() const
 {
 	using M = MenuItem;
-	const bool on_gpu = gpu::Active(); // (review L13: not when the GPU didn't start, whatever the setting)
+	// (review L13, N4) not when the GPU didn't start, whatever the setting, nor after Options chose the software renderer
+	// (from the next start; SetPost turns the passes off at once)
+	const bool on_gpu = gpu::Active() && s_.video_renderer == 0;
 	const int p = s_.post_preset;
 	return {M::Cmd("&Off", ID_SHADERS_OFF).Radio(p == 0).Enable(on_gpu),
 		M::Cmd("&Performance (FSR 1)", ID_SHADERS_PERFORMANCE).Radio(p == 1).Enable(on_gpu),

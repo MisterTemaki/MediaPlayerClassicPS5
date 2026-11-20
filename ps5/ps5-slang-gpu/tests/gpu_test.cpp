@@ -1720,6 +1720,18 @@ int PostFail()
 	const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
 	Check(!st.active && !st.why_off.empty(), "on, but the passes failed: not active, why: " + st.why_off);
 	CheckBars("... the single pass draws the picture", p, false, ps5gpu::ColorMatrix::BT709, 2);
+	const char* e = getenv("PS5GPU_TEST_POST_FAIL");
+	if (e && *e == '2') // (review N3) the memory back: the same sizes aren't tried at every frame, but again once turned off and on
+	{
+		unsetenv("PS5GPU_TEST_POST_FAIL");
+		Present();
+		Check(!ps5gpu::TakePostStatus().active, "the same sizes again: not tried at every frame");
+		ps5gpu::SetVideoPost(ps5gpu::VideoPost());
+		Present();
+		ps5gpu::SetVideoPost(PostOn());
+		Present(2);
+		Check(ps5gpu::TakePostStatus().active, "turned off and on: the images are made again, the passes active");
+	}
 	ps5gpu::Shutdown();
 	return g_fail;
 }
@@ -1746,8 +1758,10 @@ int PostMotionFail()
 	ps5gpu::SetVideo(Luma(kOutW, kOutH, yb, uvb, 12), v);
 	Present();
 	const int g = At(100, 60).g;
-	Check(g < 40 && !ps5gpu::TakePostStatus().motion, "no memory for motion smoothing: at t 0.5 the picture before (" +
-														  std::to_string(g) + "), not the next one early");
+	const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+	Check(g < 40 && !st.motion, "no memory for motion smoothing: at t 0.5 the picture before (" + std::to_string(g) +
+									"), not the next one early");
+	Check(st.active && st.motion_why_off == "no memory for its images", "... the status says why: " + st.motion_why_off);
 	Check(!ps5gpu::PostHolds(11) && !ps5gpu::PostHolds(12), "... and PostHolds says no: the pictures as they come");
 	post.motion = false;
 	ps5gpu::SetVideoPost(post);

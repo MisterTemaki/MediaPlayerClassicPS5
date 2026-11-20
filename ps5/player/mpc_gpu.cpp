@@ -367,6 +367,8 @@ void PostLines(const ps5gpu::PostStatus& st, std::string* text, std::string* bri
 		std::string(st.scaler) == "none" ? "not scaled" : st.scaler, st.motion ? ", motion smoothing" : "", st.prep_ms,
 		st.motion_ms, st.scale_ms, st.final_ms, st.fp16 ? "half precision" : "32-bit");
 	*text = b;
+	if (!st.motion && !st.motion_why_off.empty())
+		*text += "; motion smoothing off: " + st.motion_why_off;
 	snprintf(b, sizeof(b), "shaders %.1f ms", total);
 	*brief = b;
 }

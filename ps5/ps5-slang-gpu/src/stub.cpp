@@ -63,11 +63,13 @@ HostMemory* ImportHostMemory(void*, size_t) { return nullptr; }
 void ReleaseHostMemory(HostMemory*) {}
 VideoStats TakeVideoStats() { return VideoStats(); }
 // 1.2 (MPC 1.7): the post-processing: nothing to run it on
-void SetVideoPost(const VideoPost&) {}
+static bool post_asked = false;
+void SetVideoPost(const VideoPost& p) { post_asked = p.on; }
 PostStatus TakePostStatus()
 {
 	PostStatus s;
-	s.why_off = "no GPU in this build";
+	if (post_asked) // ("" when not asked for, as the GPU build)
+		s.why_off = "no GPU in this build";
 	return s;
 }
 bool PostHolds(uint64_t) { return false; }

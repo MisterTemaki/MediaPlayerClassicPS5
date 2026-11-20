@@ -3541,6 +3541,24 @@ cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
 rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "$SHOT40" "" "$T/root/media/fmt_yuv420p.nut")
 expect "[ $rc = 0 ] && state $T 1 | grep -q ' gpu 0 ' && ! grep -q 'post-processing: \|\[gpu\] shaders: on' $T/root/logs/boot.log" "the software renderer: the shaders aren't used"
 nosan "$T"
+# i: motion smoothing through a change of the pictures' size mid-stream (two TS parts without B-frames, the second's
+# times following on: 320x180 from 0 to 2.8 s, 256x144 from 3 s), played through: the passes' images are made once for
+# each size (review N2: not again for the first), and the second size is smoothed too. (The early picture of N2 didn't
+# show on the host before the fix either; NextPicture's size check is there for the console's timings.)
+if [ ! -f "$GM/sizes5.ts" ]; then
+	ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=320x180:rate=5:duration=3" -c:v libx264 -pix_fmt yuv420p -g 10 \
+		-bf 0 -f mpegts "$WORK/sizes5-a.ts" &&
+		ffmpeg -loglevel error -y -f lavfi -i "testsrc2=size=256x144:rate=5:duration=8" -c:v libx264 -pix_fmt yuv420p -g 10 \
+			-bf 0 -output_ts_offset 3 -f mpegts "$WORK/sizes5-b.ts" &&
+		cat "$WORK/sizes5-a.ts" "$WORK/sizes5-b.ts" >"$GM/sizes5.ts"
+fi
+T=$(newroot t40i)
+ini "$T" "PostPreset=3"
+cp "$GM/sizes5.ts" "$T/root/media/"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:shaders;50:shaders;60:shaders;70:shaders;80:shaders;82:quit" "" "$T/root/media/sizes5.ts")
+n=$(grep -c 'post-processing: images for ' $T/root/logs/boot.log)
+expect "[ $rc = 0 ] && [ $n = 2 ] && grep 'images for ' $T/root/logs/boot.log | head -1 | grep -q '320x180 pictures' && grep 'images for ' $T/root/logs/boot.log | tail -1 | grep -q '256x144 pictures' && sed -n '/images for 256x144/,\$p' $T/root/logs/boot.log | grep -q 'motion smoothing.s images: 3 pyramid levels, 64x36' && sed -n '/images for 256x144/,\$p' $T/root/logs/boot.log | grep -q 'shaders \[FSR 1, motion smoothing; '" "Experimental, the pictures' size changes mid-stream: the images made once for each size ($n times), the second size smoothed too"
+nosan "$T"
 # the library's own tests of the passes (ps5-slang-gpu 1.2 on lavapipe: every layout through prep and each scaler,
 # debanding, deblocking, RCAS, the colour controls, HDR, motion smoothing and a cut, a frame not submitted; the 32-bit
 # builds; the failures), and the HDR10 output with the passes

@@ -7,9 +7,9 @@ screen. It needs the GPU renderer (Options > Output).
 ```
 decoder planes ──► 1 prep ──► src ring ──► 2 motion smoothing ──► 3 scale ──► 4 final pass ──► display (4K on a 4K TV)
  (Y'CbCr / RGB)    convert,   (RGB10A2,   (Experimental: flow,    (FSR 1      (RCAS sharpening,
-                   deband,    by picture)  warp, occlusion)        EASU,       colour controls,
-                   deblock                                         Lanczos,    tone mapping / HDR10
-                                                                   bicubic,    out, under the UI)
+                   deband,    by picture)  warp, occlusion)        EASU,       tone mapping / HDR10
+                   deblock                                         Lanczos,    out, colour controls,
+                                                                   bicubic,    under the UI)
                                                                    bilinear)
 ```
 
@@ -31,9 +31,12 @@ With **Shaders: Off** (the default) nothing of it is made: the picture is drawn 
 - **Half precision.** The passes that do the most arithmetic (flow, warp, FSR 1's EASU, and the final pass) are
   built twice, with and without `GL_EXT_shader_explicit_arithmetic_types_float16`; prep, the pyramid and the other
   scalers are 32-bit only. The FP16 builds are used when the device has `shaderFloat16` (`VK_KHR_shader_float16_int8`;
-  RDNA 2 does, at twice the FP32 rate) and `shaderInt16`, the 32-bit ones otherwise; the log and View > Statistics
-  say which. The device is made with those features, and with `shaderStorageImageExtendedFormats` (the passes write
-  A2B10G10R10, R16G16 and R16 storage images), when it has them; one that refuses them is made again without.
+  RDNA 2 does, at twice the FP32 rate) and `shaderInt16`, and the GPU was started the usual way, the one that reads
+  the decoder's pictures where they are (`host_import`); the 32-bit ones otherwise, and on the other ways of starting
+  it (the fallbacks tried after a failed start) the 16-bit features aren't even asked for. The log and
+  View > Statistics say which builds run. The device is made with those features, and with
+  `shaderStorageImageExtendedFormats` (the passes write A2B10G10R10, R16G16 and R16 storage images), when it has them,
+  whatever the preset (Off included); one that refuses them is made again without.
 - **Descriptor sets.** One set layout per pass, and one set per dispatch of a frame (the pyramids and the flows have
   14 each), written as the frame is recorded (the frame before is done); the parameters in push constants
   (≤ 128 bytes): no uniform buffer to keep in step with the frame in flight.
@@ -54,13 +57,14 @@ With **Shaders: Off** (the default) nothing of it is made: the picture is drawn 
    Written to the **src ring**: three pictures, keyed by the player's picture id.
 2. **motion smoothing** (Experimental, off by default; the picture between two decoded ones at the display's
    refresh):
-   - the **pyramid**: each picture's luma at ¼ of its size (at most 960 wide), then halved while that leaves 16 pixels
-     or more (at most seven levels: 960 to 15 for a 4K picture);
+   - the **pyramid**: each picture's luma at ¼ of its size (at most 960 wide), then halved while that leaves 15 pixels
+     or more across and 8 down (at most seven levels: 960 to 15 for a 16:9 4K picture; a 2.39:1 one, 3840×1600, has
+     six, 960×400 to 30×13);
    - the **flow**, coarse to fine, both ways (N → N+1 and N+1 → N): at each level each pixel starts from the coarser
      level's vector, doubled, taken as the median of five around it (a stray vector doesn't spread); it is refined by
      a ±1-pixel search with a 5×5 patch's sum of absolute differences (with a small pull towards the starting vector,
      so flat areas keep it) and a parabola through the best cost and its neighbours (sub-pixel). Seven levels reach 127
-     pixels at the finest level, 508 of a 4K picture's (1080p: six levels, 252 pixels). A pair's flows are made once;
+     pixels at the finest level, 508 of a 4K picture's (1080p, or a 2.39:1 4K picture: six levels, 252 pixels). A pair's flows are made once;
    - the **warp** at the picture's size, at the display's time t between N and N+1: each pixel's vectors to N and to
      N+1 approximated from the two flows (`F(t→0) = −(1−t)·t·F01 + t²·F10`, `F(t→1) = (1−t)²·F01 − t·(1−t)·F10`), each
      picture sampled there, and blended by t and by **occlusion**: where a vector and the other way's vector at its
@@ -83,8 +87,9 @@ Nothing is made again that hasn't changed: a picture is prepared once (again whe
 is shown), the scaler runs only when its input or the rectangle changes. Without motion smoothing, a paused picture
 and the repeats of a 24 fps film at 60 Hz cost the final pass alone; with it, the warp and the scaler run at every
 refresh (t changes), the flows once per pair. When motion smoothing's images can't be made (no memory), the pictures
-are shown as they come, and the program is told so (`PostHolds`). Pictures that come as often as the screen
-refreshes, or more (60 fps, or 30 fps at twice the speed), aren't smoothed.
+are shown as they come, the program is told so (`PostHolds`), and View > Statistics says why. Pictures that come 50
+times a second or more (50 or 60 fps, or 25 or 30 fps at twice the speed) aren't smoothed, nor across a change of size
+mid-stream (the new picture is shown when its time comes).
 
 ## Timings
 

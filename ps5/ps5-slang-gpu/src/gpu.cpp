@@ -2907,6 +2907,9 @@ struct PostGpu
 	bool queries_written = false;
 	// the images, for pictures of pw x ph and the output's size
 	int pw = 0, ph = 0;
+	// (review L8, N3) the sizes whose images couldn't be made: not tried again at every frame; forgotten when the sizes
+	// change, when the passes are turned off, and in FreePost
+	int failed_w = 0, failed_h = 0, failed_ow = 0, failed_oh = 0;
 	PostSlot ring[kPostRing];
 	Image big; // the scaler's output: the visible part of the rectangle, at the image's corner (the output's size)
 	PostBigKey big_key;
@@ -2927,7 +2930,7 @@ struct PostGpu
 	int vx0 = 0, vy0 = 0, vx1 = 0, vy1 = 0;
 	PostFinalPc final_pc = {};
 	// the status since the last TakePostStatus
-	bool st_active = false, st_motion = false, st_fp16 = false;
+	bool st_active = false, st_motion = false, st_fp16 = false, st_motion_failed = false;
 	const char* st_scaler = "none";
 	std::string st_why;
 	double st_ms[4] = {};
@@ -3174,6 +3177,7 @@ void FreePostPipes()
 // everything (FreeVideo); the program's settings and the status stay
 void FreePost()
 {
+	pv.failed_w = pv.failed_h = 0;
 	if (!g.device)
 		return;
 	FreePostImages();
@@ -3298,9 +3302,7 @@ bool PostImages(int pw, int ph)
 {
 	if (pv.pw == pw && pv.ph == ph && pv.big.img && pv.big.w == g.out_w && pv.big.h == g.out_h)
 		return true;
-	// (review L8) the sizes whose images couldn't be made: not tried again at every frame (until the sizes change)
-	static int failed_w = 0, failed_h = 0, failed_ow = 0, failed_oh = 0;
-	if (failed_w == pw && failed_h == ph && failed_ow == g.out_w && failed_oh == g.out_h)
+	if (pv.failed_w == pw && pv.failed_h == ph && pv.failed_ow == g.out_w && pv.failed_oh == g.out_h)
 		return false;
 	FreePostImages();
 	const VkImageUsageFlags use = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -3315,13 +3317,13 @@ bool PostImages(int pw, int ph)
 	{
 		FreePostImages();
 		internal::Log("[gpu] post-processing: no memory for %dx%d pictures' images", pw, ph);
-		failed_w = pw;
-		failed_h = ph;
-		failed_ow = g.out_w;
-		failed_oh = g.out_h;
+		pv.failed_w = pw;
+		pv.failed_h = ph;
+		pv.failed_ow = g.out_w;
+		pv.failed_oh = g.out_h;
 		return false;
 	}
-	failed_w = failed_h = 0;
+	pv.failed_w = pv.failed_h = 0;
 	pv.pw = pw;
 	pv.ph = ph;
 	internal::Log("[gpu] post-processing: images for %dx%d pictures, %dx%d output", pw, ph, g.out_w, g.out_h);
@@ -3566,6 +3568,7 @@ void PostStatusSet(bool active, bool motion, const char* scaler, const std::stri
 	pv.st_motion = motion;
 	pv.st_scaler = scaler;
 	pv.st_why = why;
+	pv.st_motion_failed = pv.motion_failed; // (the Present thread's flag, copied under the lock for TakePostStatus)
 }
 
 // The passes for this frame's picture (before the final render pass; Present waited for the frame before). Nothing is
@@ -3582,10 +3585,14 @@ void RecordPost(VkCommandBuffer cmd)
 	{
 		if (pv.pw)
 			FreePostImages(); // (off: the pipelines kept, no image)
+		pv.failed_w = pv.failed_h = 0; // (review N3: turned on again, the images are tried again)
 		return PostStatusSet(false, false, "none", "");
 	}
 	if (!gv.ok || !gv.show || !gv.picture || gv.nplanes == 0)
+	{
+		pv.failed_w = pv.failed_h = 0; // (review N3: no picture, the film closed: the next one tries again)
 		return PostStatusSet(false, false, "none", "");
+	}
 	// the picture's rectangle on the output, in whole pixels (as video.frag's scissor), and its part on the output
 	const Rect d = gv.view.dst;
 	if (d.w <= 0 || d.h <= 0)
@@ -4157,6 +4164,8 @@ PostStatus TakePostStatus()
 		s.final_ms = pv.st_ms[3] / pv.st_frames;
 	}
 	s.why_off = pv.st_why;
+	if (pv.st_active && pv.want.motion && pv.st_motion_failed)
+		s.motion_why_off = "no memory for its images";
 	for (double& m : pv.st_ms)
 		m = 0;
 	pv.st_frames = 0;
