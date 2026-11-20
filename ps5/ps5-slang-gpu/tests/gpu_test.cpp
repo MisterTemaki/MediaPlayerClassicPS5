@@ -1247,6 +1247,481 @@ int VideoKeep()
 	ps5gpu::Shutdown();
 	return g_fail;
 }
+
+// ---- 1.2 (MPC 1.7): the video's post-processing (SetVideoPost) ---------------------------------------------------------
+ps5gpu::VideoPost PostOn(ps5gpu::VideoScaler s = ps5gpu::VideoScaler::Fsr)
+{
+	ps5gpu::VideoPost p;
+	p.on = true;
+	p.scaler = s;
+	return p;
+}
+
+// a flat 8-bit 4:2:0 picture of Y codes (chroma neutral), its planes in `y` / `uv`
+ps5gpu::VideoFrame Luma(int w, int h, std::vector<uint8_t>& y, std::vector<uint8_t>& uv, uint64_t id = 0)
+{
+	uv.assign(size_t(w) * ((h + 1) / 2), 128);
+	ps5gpu::VideoFrame f;
+	f.width = w;
+	f.height = h;
+	f.layout = ps5gpu::VideoLayout::SemiPlanarUV;
+	f.plane[0] = {y.data(), w};
+	f.plane[1] = {uv.data(), w};
+	f.id = id;
+	return f;
+}
+
+// the green of a row's pixels x0..x1-1
+std::vector<int> Row(int y, int x0, int x1)
+{
+	std::vector<int> v;
+	for (int x = x0; x < x1; x++)
+		v.push_back(At(x, y).g);
+	return v;
+}
+
+// the passes' core checks, on whichever build the device and Config::post_fp16 give
+int Post(bool fp16)
+{
+	ps5gpu::Config c = BaseConfig();
+	c.video = true;
+	c.post_fp16 = fp16;
+	if (!StartOffscreen(kOutW, kOutH, c))
+		return g_fail;
+	using L = ps5gpu::VideoLayout;
+	using M = ps5gpu::ColorMatrix;
+	using S = ps5gpu::VideoScaler;
+	std::fill(g_ui.begin(), g_ui.end(), 0u);
+	ps5gpu::TakePostStatus();
+	// off (the default): 1.1's single pass, nothing reported
+	{
+		Pic p;
+		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
+		ps5gpu::SetVideo(p.f, FullView());
+		Present();
+		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+		Check(!st.active && st.why_off.empty() && std::string(st.scaler) == "none", "off: the single pass, the status says so");
+	}
+	// on: every layout through prep and each scaler (bars 4x upscaled: their middles flat), against the reference
+	{
+		struct Case
+		{
+			const char* name;
+			L layout;
+			int bits;
+			bool msb;
+			int sx, sy;
+			M m;
+			bool full;
+		};
+		const Case cases[] = {
+			{"yuv420p", L::Planar, 8, false, 1, 1, M::BT709, false},
+			{"yuvj420p (BT.601, full)", L::Planar, 8, false, 1, 1, M::BT601, true},
+			{"yuv444p12le", L::Planar, 12, false, 0, 0, M::BT709, false},
+			{"nv12", L::SemiPlanarUV, 8, false, 1, 1, M::BT709, false},
+			{"nv21", L::SemiPlanarVU, 8, false, 1, 1, M::BT709, false},
+			{"p010le (BT.2020)", L::SemiPlanarUV, 10, true, 1, 1, M::BT2020, false},
+			{"gray10le", L::Gray, 10, false, 0, 0, M::BT709, false},
+			{"gbrp10le", L::PlanarGBR, 10, false, 0, 0, M::BT709, true},
+		};
+		const S scalers[4] = {S::Fsr, S::Lanczos, S::Bicubic, S::Bilinear};
+		const char* sname[4] = {"FSR 1", "Lanczos", "bicubic", "bilinear"};
+		for (int k = 0; k < 4; k++)
+		{
+			ps5gpu::SetVideoPost(PostOn(scalers[k]));
+			for (const Case& cs : cases)
+			{
+				Pic p;
+				Fill(p, cs.layout, cs.bits, cs.msb, cs.sx, cs.sy, kBars8);
+				p.f.matrix = cs.m;
+				p.f.full_range = cs.full;
+				ps5gpu::SetVideo(p.f, FullView());
+				Present();
+				CheckBars((std::string("post, ") + sname[k] + ": " + cs.name).c_str(), p, cs.full, cs.m, 3);
+			}
+			const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+			Check(st.active && st.why_off.empty() && std::string(st.scaler) == sname[k] && !st.motion,
+				std::string("... the status: active, scaled by ") + st.scaler + (st.fp16 ? ", half precision" : ", 32-bit"));
+			if (k == 0)
+				Check(st.fp16 == fp16, std::string("... the ") + (fp16 ? "half-precision" : "32-bit") + " builds, as asked");
+		}
+		ps5gpu::SetVideoPost(PostOn());
+		for (int order = 0; order < 2; order++)
+		{
+			Pic p;
+			Fill(p, L::Packed, 8, false, 0, 0, kBars8);
+			if (order == 1)
+			{
+				p.f.rgb_index[0] = 2, p.f.rgb_index[2] = 0;
+				for (size_t i = 0; i + 3 < p.store[0].size(); i += 4)
+					std::swap(p.store[0][i], p.store[0][i + 2]);
+			}
+			ps5gpu::SetVideo(p.f, FullView());
+			Present();
+			CheckBars(order ? "post: bgra" : "post: rgba", p, true, M::BT709, 3);
+		}
+	}
+	// the picture at its own size: not scaled; at its size partly off the screen: the visible part, in place
+	{
+		const int w = kOutW, h = kOutH;
+		std::vector<uint8_t> y(size_t(w) * h), uv;
+		for (int j = 0; j < h; j++)
+			for (int i = 0; i < w; i++)
+				y[size_t(j) * w + i] = uint8_t(((i / 4) & 1) ? 200 : 40); // 4-pixel stripes
+		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
+		ps5gpu::SetVideo(f, FullView());
+		Present();
+		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+		const Rgb a = At(1, 50), b = At(5, 50), e = At(4, 50);
+		Check(std::string(st.scaler) == "none" && a.g < 35 && b.g > 205 && e.g > 205,
+			"the picture at its own size: not scaled (stripes exact: " + Str(a) + " " + Str(e) + " " + Str(b) + ")");
+		ps5gpu::VideoView v;
+		v.dst = {-6, -10, w, h}; // the stripes 6 pixels to the left: x 0 shows the picture's x 6 (a 200 stripe)
+		ps5gpu::SetVideoView(v);
+		Present();
+		Check(At(0, 50).g > 205 && At(2, 50).g < 35 && At(kOutW - 1, 50).g < 5,
+			"partly off the screen: the visible part in place, black past the picture (" + Str(At(0, 50)) + " " + Str(At(2, 50)) +
+				" " + Str(At(kOutW - 1, 50)) + ")");
+	}
+	// shrinking: a 1-pixel checkerboard at half size is grey with every scaler (FSR 1 shrinks bicubic)
+	{
+		const int w = 512, h = 256;
+		std::vector<uint8_t> y(size_t(w) * h), uv;
+		for (int j = 0; j < h; j++)
+			for (int i = 0; i < w; i++)
+				y[size_t(j) * w + i] = ((i ^ j) & 1) ? 235 : 16;
+		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
+		const S scalers[4] = {S::Fsr, S::Lanczos, S::Bicubic, S::Bilinear};
+		const char* want[4] = {"bicubic", "Lanczos", "bicubic", "bilinear"};
+		for (int k = 0; k < 4; k++)
+		{
+			ps5gpu::SetVideoPost(PostOn(scalers[k]));
+			ps5gpu::SetVideo(f, FullView());
+			Present();
+			int lo = 255, hi = 0;
+			for (int j = 20; j < 100; j += 7)
+				for (int i = 20; i < 230; i += 5)
+				{
+					lo = std::min(lo, At(i, j).g);
+					hi = std::max(hi, At(i, j).g);
+				}
+			const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+			Check(lo >= 118 && hi <= 138 && std::string(st.scaler) == want[k],
+				std::string("shrunk by ") + st.scaler + ": a 1-pixel checkerboard at half size is grey (" + std::to_string(lo) + ".." +
+					std::to_string(hi) + ")");
+		}
+	}
+	// enlarging a black / white step 16x: bilinear ramps; bicubic, Lanczos and FSR 1 are sharper; RCAS sharpens more at 0
+	{
+		std::vector<uint8_t> y(16 * 8), uv;
+		for (int j = 0; j < 8; j++)
+			for (int i = 0; i < 16; i++)
+				y[j * 16 + i] = i < 8 ? 16 : 235;
+		ps5gpu::VideoFrame f = Luma(16, 8, y, uv);
+		auto at = [&](S s, float sharp) {
+			ps5gpu::VideoPost p = PostOn(s);
+			p.sharpness = sharp;
+			ps5gpu::SetVideoPost(p);
+			ps5gpu::SetVideo(f, FullView());
+			Present();
+			return At(128 - 4, 64).g;
+		};
+		const int bl = at(S::Bilinear, 0.25f), bc = at(S::Bicubic, 0.25f), lz = at(S::Lanczos, 0.25f), fsr = at(S::Fsr, 0.25f);
+		Check(bl > 40 && bl < 128 && bc < bl && lz < bl && fsr < bl,
+			"a step enlarged 16x, 4 pixels before it: bilinear " + std::to_string(bl) + ", bicubic " + std::to_string(bc) +
+				", Lanczos " + std::to_string(lz) + ", FSR 1 " + std::to_string(fsr) + " (sharper than bilinear)");
+		int lo = 255, hi = 0;
+		for (int x = 0; x < kOutW; x++)
+		{
+			lo = std::min(lo, At(x, 64).g);
+			hi = std::max(hi, At(x, 64).g);
+		}
+		Check(lo <= 2 && hi >= 253, "... FSR 1 and RCAS keep within black and white (" + std::to_string(lo) + ".." + std::to_string(hi) + ")");
+		// RCAS at 2x (as 1080p on a 4K screen): a grey step's two pixels across the edge, sharpness 0 (most) and 2
+		std::vector<uint8_t> y2(128 * 64), uv2;
+		for (int j = 0; j < 64; j++)
+			for (int i = 0; i < 128; i++)
+				y2[j * 128 + i] = i < 64 ? 80 : 160;
+		ps5gpu::VideoFrame f2 = Luma(128, 64, y2, uv2);
+		int across[2];
+		for (int k = 0; k < 2; k++)
+		{
+			ps5gpu::VideoPost p = PostOn();
+			p.sharpness = k == 0 ? 0.0f : 2.0f;
+			ps5gpu::SetVideoPost(p);
+			ps5gpu::SetVideo(f2, FullView());
+			Present();
+			across[k] = At(128, 64).g - At(127, 64).g;
+		}
+		Check(across[0] > across[1] && across[1] > 0, "RCAS: a step enlarged 2x is steeper at sharpness 0 (" + std::to_string(across[0]) +
+														  ") than at 2 (" + std::to_string(across[1]) + ")");
+	}
+	// colour controls: brightness, contrast, saturation on the codes (as MPC-HC's)
+	{
+		Pic p;
+		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
+		double ref[4][3];
+		for (int i = 0; i < 4; i++)
+			Reference(p.bars[i].y, p.bars[i].cb, p.bars[i].cr, 8, false, M::BT709, ref[i]);
+		struct Cc
+		{
+			const char* name;
+			float b, c, s;
+		};
+		const Cc cases[] = {{"brightness +0.2", 0.2f, 1, 1}, {"contrast 1.5", 0, 1.5f, 1}, {"saturation 0 (grey)", 0, 1, 0},
+			{"all three (-0.1, 0.8, 1.4)", -0.1f, 0.8f, 1.4f}};
+		for (const Cc& cc : cases)
+		{
+			ps5gpu::VideoPost pp = PostOn();
+			pp.brightness = cc.b;
+			pp.contrast = cc.c;
+			pp.saturation = cc.s;
+			ps5gpu::SetVideoPost(pp);
+			ps5gpu::SetVideo(p.f, FullView());
+			Present();
+			int worst = 0;
+			std::string detail;
+			for (int i = 0; i < 4; i++)
+			{
+				const double yl = 0.2126 * ref[i][0] + 0.7152 * ref[i][1] + 0.0722 * ref[i][2];
+				int want[3];
+				for (int k = 0; k < 3; k++)
+				{
+					double v = yl + (ref[i][k] - yl) * cc.s;
+					v = (v - 0.5) * cc.c + 0.5 + cc.b;
+					want[k] = int(std::lround(std::min(1.0, std::max(0.0, v)) * 255));
+				}
+				const Rgb got = BarAt(i);
+				worst = std::max({worst, std::abs(got.r - want[0]), std::abs(got.g - want[1]), std::abs(got.b - want[2])});
+				detail += " " + Str(got) + "/" + std::to_string(want[0]) + "," + std::to_string(want[1]) + "," + std::to_string(want[2]);
+			}
+			Check(worst <= 3, std::string("colour: ") + cc.name + ": worst " + std::to_string(worst) + " (got/want" + detail + ")");
+		}
+		ps5gpu::VideoPost pp = PostOn();
+		pp.brightness = std::nanf("");
+		pp.contrast = 9;
+		ps5gpu::SetVideoPost(pp); // NaN: the default (0); 9: the most (2)
+		ps5gpu::SetVideo(p.f, FullView());
+		Present();
+		const double v = std::min(1.0, std::max(0.0, (ref[3][1] - 0.5) * 2 + 0.5));
+		Check(std::abs(BarAt(3).g - int(std::lround(v * 255))) <= 3, "colour: out-of-range settings are kept in range (" + Str(BarAt(3)) + ")");
+	}
+	// HDR: PQ and HLG bars, each tone mapping, through the passes (10-bit codes between them)
+	{
+		ps5gpu::SetVideoPost(PostOn());
+		const Ycc hdr8[4] = {{180, 110, 160}, {120, 150, 100}, {200, 128, 128}, {60, 128, 128}};
+		const char* names[4] = {"off", "BT.2390", "Hable", "Reinhard"};
+		for (int hlg = 0; hlg < 2; hlg++)
+			for (int mode = 0; mode < 4; mode++)
+			{
+				Pic p;
+				Fill(p, L::SemiPlanarUV, 10, true, 1, 1, hdr8);
+				p.f.matrix = M::BT2020;
+				p.f.transfer = hlg ? ps5gpu::VideoTransfer::Hlg : ps5gpu::VideoTransfer::Pq;
+				p.f.peak_nits = 4000;
+				ps5gpu::VideoView v = FullView();
+				v.tone_map = ps5gpu::ToneMap(mode);
+				v.white_nits = 203;
+				ps5gpu::SetVideo(p.f, v);
+				Present();
+				CheckBars((std::string("post: ") + (hlg ? "HLG" : "PQ, peak 4000") + ", tone mapping " + names[mode]).c_str(), p,
+					false, M::BT2020, 4, mode, hlg != 0, 4000, 203);
+			}
+	}
+	// debanding: a gentle ramp in 8 steps; turned on while the picture is paused, it is prepared again
+	{
+		const int w = kOutW, h = kOutH;
+		std::vector<uint8_t> y(size_t(w) * h), uv;
+		for (int j = 0; j < h; j++)
+			for (int i = 0; i < w; i++)
+				y[size_t(j) * w + i] = uint8_t(i < w / 2 ? 100 + i * 8 / (w / 2) : (i < w * 3 / 4 ? 16 : 235));
+		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
+		// the ramp's largest step between neighbouring columns, each column averaged over the rows (what the eye sees of
+		// dithered steps), and its mean
+		auto ramp = [&](double* mean) {
+			std::vector<double> col(size_t(w / 2), 0.0);
+			for (int x = 0; x < w / 2; x++)
+			{
+				for (int yy = 8; yy < h - 8; yy++)
+					col[size_t(x)] += At(x, yy).g;
+				col[size_t(x)] /= double(h - 16);
+			}
+			double jump = 0, sum = 0;
+			for (int x = 4; x < w / 2 - 5; x++)
+				jump = std::max(jump, std::abs(col[size_t(x) + 1] - col[size_t(x)]));
+			for (double v : col)
+				sum += v;
+			*mean = sum / col.size();
+			return jump;
+		};
+		ps5gpu::SetVideoPost(PostOn());
+		ps5gpu::SetVideo(f, FullView());
+		Present();
+		double m0, m1;
+		const double before = ramp(&m0);
+		const std::vector<int> edge0 = Row(64, w * 3 / 4 - 24, w * 3 / 4 + 24);
+		ps5gpu::VideoPost pp = PostOn();
+		pp.deband = true;
+		ps5gpu::SetVideoPost(pp);
+		Present(); // (no new picture)
+		const double after = ramp(&m1);
+		const std::vector<int> edge1 = Row(64, w * 3 / 4 - 24, w * 3 / 4 + 24);
+		char buf[160];
+		snprintf(buf, sizeof(buf), "(the largest step %.2f -> %.2f, mean %.2f -> %.2f)", before, after, m0, m1);
+		Check(before >= 1.0 && after < before * 0.6 && std::abs(m1 - m0) < 1.0,
+			std::string("debanding (turned on over a paused picture): the ramp's 8 steps smoothed ") + buf);
+		int moved = 0;
+		for (size_t i = 0; i < edge0.size(); i++)
+			moved = std::max(moved, std::abs(edge0[i] - edge1[i]));
+		Check(moved <= 2, "... a hard edge kept (at most " + std::to_string(moved) + " apart: the grain)");
+	}
+	// deblocking: 8x8 blocks two codes apart get a softer step at their edges; a strong edge stays
+	{
+		const int w = kOutW, h = kOutH;
+		std::vector<uint8_t> y(size_t(w) * h), uv;
+		for (int j = 0; j < h; j++)
+			for (int i = 0; i < w; i++)
+				y[size_t(j) * w + i] = uint8_t(i >= 192 ? (i < 224 ? 30 : 220) : (((i / 8) + (j / 8)) & 1) ? 122 : 118);
+		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
+		auto steps = [&](int* strong) {
+			int worst = 0;
+			for (int x = 7; x < 184; x += 8)
+				worst = std::max(worst, std::abs(At(x + 1, 61).g - At(x, 61).g));
+			*strong = At(224, 61).g - At(223, 61).g;
+			return worst;
+		};
+		ps5gpu::SetVideoPost(PostOn());
+		ps5gpu::SetVideo(f, FullView());
+		Present();
+		int s0, s1;
+		const int before = steps(&s0);
+		ps5gpu::VideoPost pp = PostOn();
+		pp.deblock = true;
+		ps5gpu::SetVideoPost(pp);
+		Present();
+		const int after = steps(&s1);
+		Check(before >= 4 && after <= before / 2 && s1 == s0,
+			"deblocking: the steps at the 8x8 edges " + std::to_string(before) + " -> " + std::to_string(after) +
+				", the strong edge kept (" + std::to_string(s0) + " / " + std::to_string(s1) + ")");
+	}
+	// motion smoothing: a square moving 24 pixels; between the two pictures it is half way, not a cross-fade
+	{
+		const int w = 512, h = 256;
+		auto square = [&](std::vector<uint8_t>& y, int x0, uint8_t bg, uint8_t fg) {
+			y.assign(size_t(w) * h, bg);
+			for (int j = 96; j < 160; j++)
+				for (int i = x0; i < x0 + 64; i++)
+					y[size_t(j) * w + i] = fg;
+		};
+		std::vector<uint8_t> ya, yb, yc, uva, uvb, uvc;
+		square(ya, 200, 40, 200);
+		square(yb, 224, 40, 200);
+		square(yc, 224, 200, 40); // a cut: another scene
+		ps5gpu::VideoPost pp = PostOn();
+		pp.motion = true;
+		ps5gpu::SetVideoPost(pp);
+		// at its own size, centred: the output shows the picture's x 128..383, y 64..191
+		ps5gpu::VideoView v;
+		v.dst = {-128, -64, w, h};
+		ps5gpu::SetVideo(Luma(w, h, ya, uva, 1001), v);
+		Present();
+		const int a_left = At(90, 64).g, a_right = At(154, 64).g;
+		v.motion_from = 1001;
+		v.motion_t = 0.5;
+		ps5gpu::SetVideo(Luma(w, h, yb, uvb, 1002), v);
+		Present();
+		const int m_left = At(90, 64).g, m_right = At(154, 64).g; // the square at 212..275: x 90 in, x 154 out
+		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+		Check(st.motion && m_left > 170 && m_right < 70,
+			"motion smoothing at t 0.5: the square half way (" + std::to_string(m_left) + " inside, " + std::to_string(m_right) +
+				" outside; a cross-fade would be grey at both)");
+		v.motion_t = 1;
+		ps5gpu::SetVideoView(v);
+		Present();
+		const int b_left = At(90, 64).g, b_right = At(154, 64).g;
+		v.motion_t = 0;
+		ps5gpu::SetVideoView(v);
+		Present();
+		const int z_left = At(90, 64).g, z_right = At(154, 64).g;
+		Check(b_left < 40 && b_right > 200 && z_left > 200 && z_right < 40 && a_left > 200 && a_right < 40,
+			"... at t 1 the picture itself, at t 0 the one before (" + std::to_string(b_left) + "/" + std::to_string(b_right) + ", " +
+				std::to_string(z_left) + "/" + std::to_string(z_right) + ")");
+		v.motion_t = 0.25;
+		ps5gpu::SetVideoView(v);
+		Present();
+		const int q = At(84, 64).g; // the square at 206..269 at t 0.25: x 84 (the picture's 212) in it
+		Check(q > 170, "... at t 0.25 (the flows kept, the warp made again): " + std::to_string(q));
+		// a cut: never blended, the nearer picture
+		v.motion_from = 1002;
+		v.motion_t = 0.4;
+		ps5gpu::SetVideo(Luma(w, h, yc, uvc, 1003), v);
+		Present();
+		const int c4 = At(20, 10).g;
+		v.motion_t = 0.6;
+		ps5gpu::SetVideoView(v);
+		Present();
+		const int c6 = At(20, 10).g;
+		Check(c4 < 40 && c6 > 200, "a cut: at t 0.4 the picture before (" + std::to_string(c4) + "), at t 0.6 the new one (" +
+									   std::to_string(c6) + "), no blend");
+		// motion_from no longer in the ring: the picture as it is
+		v.motion_from = 999;
+		v.motion_t = 0.5;
+		ps5gpu::SetVideoView(v);
+		Present();
+		Check(At(20, 10).g > 200 && !ps5gpu::TakePostStatus().motion, "a picture before that isn't kept: this one as it is");
+	}
+	// a frame not submitted: its passes never ran; the next one draws the picture again
+	{
+		ps5gpu::SetVideoPost(PostOn());
+		Pic p;
+		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
+		ps5gpu::SetVideo(p.f, FullView());
+		setenv("PS5GPU_TEST_SUBMIT_FAIL", "1", 1);
+		const bool failed = !ps5gpu::Present(g_ui.data(), {0, 0, kOutW, kOutH}, false);
+		unsetenv("PS5GPU_TEST_SUBMIT_FAIL");
+		Check(failed, "a frame's submit failed (injected)");
+		Present();
+		CheckBars("... the next frame: the picture through the passes again", p, false, M::BT709, 3);
+	}
+	// timings and off again
+	{
+		ps5gpu::TakePostStatus();
+		Pic p;
+		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
+		ps5gpu::SetVideo(p.f, FullView());
+		Present(3);
+		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+		Check(st.prep_ms >= 0 && st.motion_ms >= 0 && st.scale_ms >= 0 && st.final_ms > 0,
+			"the passes' GPU times: prep " + std::to_string(st.prep_ms) + ", motion " + std::to_string(st.motion_ms) + ", scale " +
+				std::to_string(st.scale_ms) + ", final " + std::to_string(st.final_ms) + " ms");
+		ps5gpu::SetVideoPost(ps5gpu::VideoPost());
+		Present();
+		CheckBars("turned off again: the single pass", p, false, M::BT709, 2);
+		Check(!ps5gpu::TakePostStatus().active, "... not active");
+	}
+	ps5gpu::Shutdown();
+	return g_fail;
+}
+
+// the passes can't be made (PS5GPU_TEST_POST_FAIL=1) or have no memory (=2): the single pass draws, the status says why
+int PostFail()
+{
+	ps5gpu::Config c = BaseConfig();
+	c.video = true;
+	if (!StartOffscreen(kOutW, kOutH, c))
+		return g_fail;
+	std::fill(g_ui.begin(), g_ui.end(), 0u);
+	ps5gpu::SetVideoPost(PostOn());
+	Pic p;
+	Fill(p, ps5gpu::VideoLayout::Planar, 8, false, 1, 1, kBars8);
+	ps5gpu::SetVideo(p.f, FullView());
+	Present();
+	const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+	Check(!st.active && !st.why_off.empty(), "on, but the passes failed: not active, why: " + st.why_off);
+	CheckBars("... the single pass draws the picture", p, false, ps5gpu::ColorMatrix::BT709, 2);
+	ps5gpu::Shutdown();
+	return g_fail;
+}
 } // namespace vt
 
 int main(int argc, char** argv)
@@ -1274,6 +1749,13 @@ int main(int argc, char** argv)
 		return vt::VideoImageFail();
 	if (mode == "video-keep")
 		return vt::VideoKeep();
-	fprintf(stderr, "usage: gpu-test unit|presets|formats|ui-straight|damaged <preset>|init|guard <marker>|params <file> set|get\n");
+	if (mode == "post") // 1.2: the video's post-processing (half precision where the device has it)
+		return vt::Post(true);
+	if (mode == "post-fp32")
+		return vt::Post(false);
+	if (mode == "post-fail") // with PS5GPU_TEST_POST_FAIL=1 or 2
+		return vt::PostFail();
+	fprintf(stderr, "usage: gpu-test unit|presets|formats|ui-straight|damaged <preset>|init|guard <marker>|params <file> set|get|"
+					"video|video-image-fail|video-keep|post|post-fp32|post-fail\n");
 	return 2;
 }

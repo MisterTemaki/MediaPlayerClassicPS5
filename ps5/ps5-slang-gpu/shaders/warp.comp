@@ -1,0 +1,98 @@
+// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): motion smoothing's picture between two decoded ones, at the display's
+// time t (0: picture A, 1: picture B), at the pictures' own size (docs/POST-PROCESSING.md).
+//   - Each pixel's vectors to A and to B, from the two flows at its place (the linear approximation of Super SloMo, Jiang
+//     et al. 2018): F(t->0) = -(1 - t) t F01 + t^2 F10, F(t->1) = (1 - t)^2 F01 - t (1 - t) F10.
+//   - A and B sampled where those vectors point, blended by t and by occlusion: where a vector and the other way's
+//     vector at its end don't cancel (forward-backward consistency), that picture is mostly left out.
+//   - A scene change (the coarsest level's mean difference above the threshold): no blend, the nearer picture.
+//
+// SPDX-License-Identifier: MIT
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D I0;   // picture A (A2B10G10R10), linear, clamped
+layout(set = 0, binding = 1) uniform sampler2D I1;   // picture B
+layout(set = 0, binding = 2) uniform sampler2D F01;  // A -> B, the finest level (its pixels), linear
+layout(set = 0, binding = 3) uniform sampler2D F10;  // B -> A
+layout(set = 0, binding = 4) uniform sampler2D LowA; // the coarsest luma level of A
+layout(set = 0, binding = 5) uniform sampler2D LowB; // ... of B
+layout(set = 0, binding = 6, rgb10_a2) uniform writeonly image2D Dst;
+
+layout(push_constant) uniform Pc
+{
+	vec4 tune;  // t, the scene change threshold (mean luma difference), the occlusion's scale (flow pixels), 0
+	ivec4 size; // the pictures' width and height, the flow's width and height
+}
+pc;
+
+shared float sDiff[64];
+
+float SceneDiff()
+{
+	const ivec2 ls = textureSize(LowA, 0);
+	const int n = ls.x * ls.y;
+	float acc = 0.0;
+	for (int i = int(gl_LocalInvocationIndex); i < n; i += 64)
+	{
+		const ivec2 q = ivec2(i % ls.x, i / ls.x);
+		acc += abs(texelFetch(LowA, q, 0).r - texelFetch(LowB, q, 0).r);
+	}
+	sDiff[gl_LocalInvocationIndex] = acc;
+	barrier();
+	for (uint s = 32u; s > 0u; s >>= 1)
+	{
+		if (gl_LocalInvocationIndex < s)
+			sDiff[gl_LocalInvocationIndex] += sDiff[gl_LocalInvocationIndex + s];
+		barrier();
+	}
+	return sDiff[0] / float(max(n, 1));
+}
+
+// a vector at a place given in flow pixels
+vec2 Flow(sampler2D f, vec2 q, vec2 fsize)
+{
+	return textureLod(f, q / fsize, 0.0).rg;
+}
+
+void main()
+{
+	// every invocation takes part in the scene's reduction (barrier) before any returns
+	const float diff = SceneDiff();
+	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	const ivec2 size = pc.size.xy;
+	if (p.x >= size.x || p.y >= size.y)
+		return;
+	const float t = pc.tune.x;
+	const vec2 inv = 1.0 / vec2(size);
+	const vec2 pc_ = vec2(p) + 0.5;
+	if (diff > pc.tune.y)
+	{
+		imageStore(Dst, p, t < 0.5 ? textureLod(I0, pc_ * inv, 0.0) : textureLod(I1, pc_ * inv, 0.0));
+		return;
+	}
+	const vec2 fsize = vec2(pc.size.zw);
+	const vec2 to_flow = fsize / vec2(size), to_src = vec2(size) / fsize;
+	const vec2 q = pc_ * to_flow;
+	const vec2 f01 = Flow(F01, q, fsize), f10 = Flow(F10, q, fsize);
+	const vec2 ft0 = (-(1.0 - t) * t * f01 + t * t * f10);
+	const vec2 ft1 = ((1.0 - t) * (1.0 - t) * f01 - t * (1.0 - t) * f10);
+	// where the pixel comes from in A and in B (flow pixels), and how well each way's vectors agree there
+	const vec2 q0 = q + ft0, q1 = q + ft1;
+	const vec2 a01 = Flow(F01, q0, fsize), a10 = Flow(F10, q1, fsize);
+	const float e0 = length(a01 + Flow(F10, q0 + a01, fsize));
+	const float e1 = length(a10 + Flow(F01, q1 + a10, fsize));
+	const hf sigma = hf(pc.tune.z);
+	const hf v0 = hf(1.0) / (hf(1.0) + hf(e0) * hf(e0) / (sigma * sigma));
+	const hf v1 = hf(1.0) / (hf(1.0) + hf(e1) * hf(e1) / (sigma * sigma));
+	const hf w0 = hf(1.0 - t) * v0, w1 = hf(t) * v1;
+	const hf3 c0 = hf3(textureLod(I0, (q0 * to_src) * inv, 0.0).rgb);
+	const hf3 c1 = hf3(textureLod(I1, (q1 * to_src) * inv, 0.0).rgb);
+	hf3 c;
+	if (w0 + w1 < hf(1e-3))
+		c = mix(c0, c1, hf(t));
+	else
+		c = (c0 * w0 + c1 * w1) / (w0 + w1);
+	imageStore(Dst, p, vec4(vec3(c), 1.0));
+}

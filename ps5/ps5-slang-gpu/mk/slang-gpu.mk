@@ -18,6 +18,7 @@
 #   SLANG_GPU_INC                       -I for ps5gpu/gpu.h
 #   SLANG_GPU_TABLES                    the two generated tables (built-in presets; the shipped presets' manifest)
 #   SLANG_GPU_VIDEO_SPV                 1.1: the video pass's SPIR-V header (glslangValidator, from shaders/video.*)
+#   SLANG_GPU_POST_SPV                  1.2: the video post-processing's SPIR-V header (shaders/*.comp, post.frag)
 #   SLANG_GPU_VENDOR_OK                 a stamp: the copy checked (every object and table depends on it)
 #   $(call SLANG_GPU_OBJECTS,<dir>,<c++>,<flags>,<glslang flags>)  the GPU build's objects under <dir>, rules defined
 #   $(call SLANG_GPU_STUB_OBJECTS,<dir>,<c++>,<flags>)              the CPU-only build's (common.cpp + stub.cpp)
@@ -91,12 +92,34 @@ $(SLANG_GPU_VIDEO_SPV): $(SLANG_GPU)/shaders/video.vert $(SLANG_GPU)/shaders/vid
 	$(SLANG_GPU_GLSLANG_VALIDATOR) -V --target-env vulkan1.0 --vn kVideoVs -o $@.vs $(SLANG_GPU)/shaders/video.vert >/dev/null
 	$(SLANG_GPU_GLSLANG_VALIDATOR) -V --target-env vulkan1.0 --vn kVideoFs -o $@.fs $(SLANG_GPU)/shaders/video.frag >/dev/null
 	cat $@.vs $@.fs >$@.part && rm -f $@.vs $@.fs && mv $@.part $@
+# 1.2 (Media Player Classic PS5 1.7): the video post-processing's passes (docs/POST-PROCESSING.md in the player's
+# repository): each compute shader, and post.frag; flow, warp, easu and post twice, the second with POST_FP16 (the
+# device's shaderFloat16 and shaderInt16), "H" at the end of its name
+SLANG_GPU_POST_SRC := $(addprefix $(SLANG_GPU)/shaders/,post_common.glsl prep.comp pyr.comp flow.comp warp.comp scale.comp \
+	easu.comp post.frag) $(SLANG_GPU)/third_party/ffx-fsr1/ffx_a.h $(SLANG_GPU)/third_party/ffx-fsr1/ffx_fsr1.h
+SLANG_GPU_POST_SPV := $(SLANG_GPU_GEN)/post_spv.h
+SLANG_GPU_POST_GLSLANG = $(SLANG_GPU_GLSLANG_VALIDATOR) -V --target-env vulkan1.0 -I$(SLANG_GPU)/shaders
+$(SLANG_GPU_POST_SPV): $(SLANG_GPU_POST_SRC) $(SLANG_GPU_VENDOR_OK)
+	@mkdir -p $(dir $@)
+	rm -f $@.part
+	for s in prep:Prep pyr:Pyr flow:Flow warp:Warp scale:Scale easu:Easu; do \
+		$(SLANG_GPU_POST_GLSLANG) -S comp --vn k$${s#*:}Cs -o $@.one $(SLANG_GPU)/shaders/$${s%%:*}.comp >/dev/null && \
+		cat $@.one >>$@.part || exit 1; \
+	done
+	for s in flow:Flow warp:Warp easu:Easu; do \
+		$(SLANG_GPU_POST_GLSLANG) -DPOST_FP16 -S comp --vn k$${s#*:}CsH -o $@.one $(SLANG_GPU)/shaders/$${s%%:*}.comp >/dev/null && \
+		cat $@.one >>$@.part || exit 1; \
+	done
+	$(SLANG_GPU_POST_GLSLANG) -S frag --vn kPostFs -o $@.one $(SLANG_GPU)/shaders/post.frag >/dev/null && cat $@.one >>$@.part
+	$(SLANG_GPU_POST_GLSLANG) -DPOST_FP16 -S frag --vn kPostFsH -o $@.one $(SLANG_GPU)/shaders/post.frag >/dev/null && \
+		cat $@.one >>$@.part
+	rm -f $@.one && mv $@.part $@
 
 # ---- objects ------------------------------------------------------------------------------------------------------------
 # $(1) the folder, $(2) the C++ compiler, $(3) the library's flags (optimisation, -fPIC, -march, sanitizers, the Vulkan
 # headers' -isystem), $(4) glslang's and the tables' (no sanitizer needed)
 define SLANG_GPU_RULES
-$(1)/lib/%.o: $(SLANG_GPU)/src/%.cpp $(SLANG_GPU_HEADERS) $(SLANG_GPU_VENDOR_OK) $(SLANG_GPU_VIDEO_SPV)
+$(1)/lib/%.o: $(SLANG_GPU)/src/%.cpp $(SLANG_GPU_HEADERS) $(SLANG_GPU_VENDOR_OK) $(SLANG_GPU_VIDEO_SPV) $(SLANG_GPU_POST_SPV)
 	@mkdir -p $$(dir $$@)
 	$(2) -std=c++17 $(3) $(SLANG_GPU_WARN) $(SLANG_GPU_INC) -I$(SLANG_GPU_GLSLANG) -I$(SLANG_GPU_GEN) -c -o $$@ $$<
 $(1)/glslang/%.o: $(SLANG_GPU_GLSLANG)/%.cpp $(SLANG_GPU_VENDOR_OK)
@@ -126,7 +149,8 @@ SLANG_GPU_IMPORT_ALLOW := --allow libSceAgc.sprx --allow libSceAgcDriver.sprx
 SLANG_GPU_LIBC_ALLOWED = $(shell sed -n 's/^\([A-Za-z0-9_]*\.o\)[ \t].*/\1/p' $(SLANG_GPU_MITRT)/platform/libc-allow.txt)
 SLANG_GPU_NOTICES := "ps5-slang-gpu: the GPU renderer (MIT)=$(SLANG_GPU)/LICENSE" \
 	"glslang (BSD-3-Clause and others)=$(SLANG_GPU_GLSLANG)/LICENSE.txt" \
-	"stb_image 2.30 in ps5-slang-gpu (public domain, or MIT)=$(SLANG_GPU)/third_party/stb/LICENSE"
+	"stb_image 2.30 in ps5-slang-gpu (public domain, or MIT)=$(SLANG_GPU)/third_party/stb/LICENSE" \
+	"AMD FidelityFX Super Resolution 1.0 in ps5-slang-gpu (MIT)=$(SLANG_GPU)/third_party/ffx-fsr1/LICENSE.txt"
 
 # $(1) the link's --trace output, $(2) the linked PIE. Each line fails the recipe (and removes the PIE) when its check does.
 define SLANG_GPU_LINK_CHECKS

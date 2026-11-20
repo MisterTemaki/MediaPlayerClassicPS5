@@ -1,0 +1,46 @@
+// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): motion smoothing's pyramid (docs/POST-PROCESSING.md). One level of a
+// picture's luma pyramid: from the picture itself (mode 0: its luma averaged over each output pixel's footprint, about a
+// quarter of its size, at most 960 pixels wide) or from the level above (mode 1: halved, a 2x2 average). R16_SFLOAT.
+//
+// SPDX-License-Identifier: MIT
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D Src; // linear filtering, clamped
+layout(set = 0, binding = 1, r16f) uniform writeonly image2D Dst;
+
+layout(push_constant) uniform Pc
+{
+	ivec4 mode; // 0: from the picture, 1: from the level above; the output's width and height
+}
+pc;
+
+void main()
+{
+	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	const ivec2 out_size = pc.mode.yz;
+	if (p.x >= out_size.x || p.y >= out_size.y)
+		return;
+	const vec2 in_size = vec2(textureSize(Src, 0));
+	const vec2 f = in_size / vec2(out_size); // input pixels per output pixel
+	float acc = 0.0;
+	if (pc.mode.x == 1)
+		acc = textureLod(Src, (vec2(p) + 0.5) / vec2(out_size), 0.0).r; // the 2x2 under it, through the bilinear tap
+	else
+	{
+		// N x N bilinear taps over the footprint, each the average of the 2x2 texels around it
+		const ivec2 n = clamp(ivec2(ceil(f * 0.5)), ivec2(1), ivec2(4));
+		const vec2 step_ = f / vec2(n);
+		const vec2 base = vec2(p) * f;
+		for (int j = 0; j < n.y; j++)
+			for (int i = 0; i < n.x; i++)
+			{
+				const vec2 c = base + (vec2(i, j) + 0.5) * step_;
+				acc += dot(textureLod(Src, c / in_size, 0.0).rgb, kLuma);
+			}
+		acc /= float(n.x * n.y);
+	}
+	imageStore(Dst, p, vec4(acc, 0.0, 0.0, 0.0));
+}

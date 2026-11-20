@@ -87,6 +87,9 @@ struct Config
 	bool hdr_output = false;
 	int (*set_hdr_output)(bool on, int width, int height) = nullptr;
 	int (*hdr_output_range)() = nullptr;
+	// 1.2 (MPC 1.7): the post-processing's half-precision builds (VideoPost) when the device has shaderFloat16 and
+	// shaderInt16; false: the FP32 builds always (host tests compare both)
+	bool post_fp16 = true;
 };
 // Before Init (a later call changes nothing of a running renderer but the log).
 void Configure(const Config& config);
@@ -268,6 +271,9 @@ struct VideoFrame
 	// has read it, at a later Present, HideVideo or Shutdown), on the thread that called that.
 	void (*release)(void* ctx) = nullptr;
 	void* release_ctx = nullptr;
+	// 1.2: the picture's identity (the program's, never 0 for two different pictures; 0: one is made): motion smoothing
+	// (VideoView::motion_from) names the picture before it by this
+	uint64_t id = 0;
 };
 // Where and how the picture is drawn; changes at each Present without a new picture.
 struct VideoView
@@ -276,6 +282,11 @@ struct VideoView
 	ToneMap tone_map = ToneMap::Bt2390;
 	double white_nits = 250; // the picture's white after tone mapping
 	VideoFilter filter = VideoFilter::Bilinear;
+	// 1.2 (VideoPost::motion): what is shown is the picture motion_t of the way from the picture motion_from (an
+	// earlier SetVideo's id, still in the post-processing's ring) to this one: 0 that one, 1 this one. 0 (no id): this
+	// picture as it is.
+	uint64_t motion_from = 0;
+	double motion_t = 1;
 };
 // The video pipeline is there (Config::video, the GPU on, its self-test passed).
 bool VideoAvailable();
@@ -309,6 +320,47 @@ struct VideoStats
 	double wait_ms = 0;    // per Present, waiting for the GPU and the display
 };
 VideoStats TakeVideoStats();
+// ---- 1.2 (Media Player Classic PS5 1.7): the video's post-processing --------------------------------------------------
+// Compute passes between the picture's planes and the screen (docs/POST-PROCESSING.md in the player's repository):
+// prep (the conversion, debanding, deblocking) into a ring of pictures, motion smoothing (optical flow, warping), a
+// scaler (FSR 1 EASU, Lanczos, bicubic, bilinear), then the final pass (FSR 1 RCAS, tone mapping or HDR10 out, colour
+// controls) under the UI surface. Off: 1.1's single pass, nothing of this made. Made on its first use; when anything of
+// it fails (an image, a pipeline), the single pass draws and PostStatus says why.
+enum class VideoScaler
+{
+	Bilinear,
+	Bicubic,
+	Lanczos,
+	Fsr, // FSR 1 EASU when the picture is made larger (with RCAS), bicubic when it is made smaller
+};
+struct VideoPost
+{
+	bool on = false;
+	bool deband = false;
+	float deband_strength = 1.0f; // 0.5 .. 3: the threshold and the grain, times this
+	bool deblock = false;
+	float deblock_strength = 1.0f; // 0.5 .. 3
+	VideoScaler scaler = VideoScaler::Fsr;
+	float sharpness = 0.25f; // RCAS, in stops: 0 the strongest, 2 hardly any
+	bool motion = false;     // motion smoothing (VideoView::motion_from / motion_t)
+	float scene_threshold = 0.12f; // the mean luma difference above which two pictures aren't blended (a cut)
+	float brightness = 0.0f;       // -1 .. 1, added to the codes
+	float contrast = 1.0f;         // 0 .. 2
+	float saturation = 1.0f;       // 0 .. 2
+};
+// For the next Presents (the program's options); no GPU work until a picture is drawn with it.
+void SetVideoPost(const VideoPost& p);
+struct PostStatus
+{
+	bool active = false; // the last picture went through the passes
+	bool fp16 = false;   // their half-precision builds
+	const char* scaler = "";  // what scaled the last picture: "FSR 1", "Lanczos", "bicubic", "bilinear", "none"
+	bool motion = false;      // the last picture was one made between two
+	// GPU milliseconds per drawn frame since the last call (0: not measured)
+	double prep_ms = 0, motion_ms = 0, scale_ms = 0, final_ms = 0;
+	std::string why_off; // why the passes aren't used although asked for ("" when they are, or not asked)
+};
+PostStatus TakePostStatus();
 
 // ---- genplus's shelf: textured quads under the surface (Config::scene) -----------------------------------------------
 // Coordinates are the surface's; w is each corner's distance from the eye, so the textures are mapped in perspective.

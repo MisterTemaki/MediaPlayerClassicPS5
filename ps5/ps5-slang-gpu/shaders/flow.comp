@@ -1,0 +1,103 @@
+// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): motion smoothing's optical flow, one level of the pyramid, one way
+// (docs/POST-PROCESSING.md). Coarse to fine: each pixel's vector from picture A to picture B starts from the coarser
+// level's (doubled, the median of five around it: a stray vector doesn't spread), or from this level's last pass, or
+// from zero at the coarsest; it is then refined by a +-1 pixel search around it, a 5x5 patch's sum of absolute
+// differences (with a small pull towards the starting vector, so flat areas keep it), and a parabola through the best
+// cost and its neighbours for the sub-pixel part. Vectors in this level's pixels, R16G16_SFLOAT.
+//
+// SPDX-License-Identifier: MIT
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D A;    // this level, linear, clamped
+layout(set = 0, binding = 1) uniform sampler2D B;    // this level of the other picture
+layout(set = 0, binding = 2) uniform sampler2D Prev; // the starting vectors (the coarser level, or this one)
+layout(set = 0, binding = 3, rg16f) uniform writeonly image2D Dst;
+
+layout(push_constant) uniform Pc
+{
+	ivec4 mode; // 0: from zero, 1: from the coarser level (doubled), 2: from this level's last pass; width, height
+	vec4 tune;  // the pull towards the starting vector (per pixel of difference), 0, 0, 0
+}
+pc;
+
+hf Sad(vec2 pa, vec2 pb, vec2 inv)
+{
+	hf s = hf(0.0);
+	for (int j = -2; j <= 2; j++)
+		for (int i = -2; i <= 2; i++)
+		{
+			const vec2 o = vec2(i, j);
+			s += abs(hf(textureLod(A, (pa + o) * inv, 0.0).r) - hf(textureLod(B, (pb + o) * inv, 0.0).r));
+		}
+	return s;
+}
+
+float Med3(float a, float b, float c)
+{
+	return max(min(a, b), min(max(a, b), c));
+}
+
+// the median of five values
+float Med5(float a, float b, float c, float d, float e)
+{
+	const float f = max(min(a, b), min(c, d));
+	const float g = min(max(a, b), max(c, d));
+	return Med3(e, f, g);
+}
+
+vec2 Start(ivec2 p, ivec2 size)
+{
+	if (pc.mode.x == 0)
+		return vec2(0.0);
+	const ivec2 psize = textureSize(Prev, 0);
+	const float k = pc.mode.x == 1 ? 2.0 : 1.0;
+	const vec2 c = (vec2(p) + 0.5) / k; // where this pixel falls in the starting level
+	vec2 v[5];
+	const vec2 offs[5] = vec2[5](vec2(0, 0), vec2(-1, 0), vec2(1, 0), vec2(0, -1), vec2(0, 1));
+	for (int n = 0; n < 5; n++)
+		v[n] = textureLod(Prev, (c + offs[n]) / vec2(psize), 0.0).rg;
+	return k * vec2(Med5(v[0].x, v[1].x, v[2].x, v[3].x, v[4].x), Med5(v[0].y, v[1].y, v[2].y, v[3].y, v[4].y));
+}
+
+void main()
+{
+	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	const ivec2 size = pc.mode.yz;
+	if (p.x >= size.x || p.y >= size.y)
+		return;
+	const vec2 inv = 1.0 / vec2(size);
+	const vec2 pa = vec2(p) + 0.5;
+	const vec2 v0 = Start(p, size);
+	const hf pull = hf(pc.tune.x);
+	hf cost[9];
+	int best = 4;
+	for (int j = -1; j <= 1; j++)
+		for (int i = -1; i <= 1; i++)
+		{
+			const int k = (j + 1) * 3 + (i + 1);
+			cost[k] = Sad(pa, pa + v0 + vec2(i, j), inv) + pull * hf(abs(i) + abs(j));
+			if (cost[k] < cost[best])
+				best = k;
+		}
+	const int bi = best % 3 - 1, bj = best / 3 - 1;
+	vec2 d = vec2(bi, bj);
+	// the sub-pixel part: a parabola through the best cost and its two neighbours, each way, when both are there
+	if (bi == 0)
+	{
+		const float l = float(cost[best - 1]), c = float(cost[best]), r = float(cost[best + 1]);
+		const float den = l - 2.0 * c + r;
+		if (den > 1e-6)
+			d.x += clamp(0.5 * (l - r) / den, -0.5, 0.5);
+	}
+	if (bj == 0)
+	{
+		const float u = float(cost[best - 3]), c = float(cost[best]), w = float(cost[best + 3]);
+		const float den = u - 2.0 * c + w;
+		if (den > 1e-6)
+			d.y += clamp(0.5 * (u - w) / den, -0.5, 0.5);
+	}
+	imageStore(Dst, p, vec4(v0 + d, 0.0, 0.0));
+}

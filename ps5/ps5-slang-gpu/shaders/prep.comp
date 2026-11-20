@@ -1,0 +1,153 @@
+// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): pass 1 of the video post-processing, "prep" (docs/POST-PROCESSING.md
+// in the player's repository). Each pixel of a decoded picture, at the picture's own size:
+//   1. its planes read at their texel centres (the chroma bilinear where the stream sites it), the codes normalised;
+//   2. light deblocking and deringing of the luma (Options: Deblocking): across the 8x8 grid, a step between two blocks
+//      smaller than the texture around it smoothed (H.264's normal-strength rule: |p0 - q0| < alpha, |p1 - p0| < beta,
+//      |q1 - q0| < beta, the change at most tc); a pixel next to a strong edge kept within its neighbours' range;
+//   3. debanding (Options: Debanding): the approach of libplacebo's and f3kdb's (reimplemented, not copied): twice, the
+//      average of four pixels at a random angle and a growing radius taken where it differs from the pixel by less than
+//      the threshold, each component on its own; then a little noise to hide what is left of the steps;
+//   4. the colour matrix to R'G'B' (the stream's transfer and primaries kept: gamma, PQ or HLG codes), clipped to 0..1,
+//      written to the picture's slot of the ring (A2B10G10R10).
+// The same layouts and numbers as video.frag.
+//
+// SPDX-License-Identifier: MIT
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D P0;
+layout(set = 0, binding = 1) uniform sampler2D P1;
+layout(set = 0, binding = 2) uniform sampler2D P2;
+layout(set = 0, binding = 3, rgb10_a2) uniform writeonly image2D Dst;
+
+layout(push_constant) uniform Pc
+{
+	vec4 norm;       // Y = v * norm.x + norm.y; C = v * norm.z + norm.w (v: the texture's value)
+	vec4 m0, m1, m2; // R', G', B' = dot(mN.xyz, (Y, Cb, Cr))
+	vec4 chroma;     // chroma texels per luma pixel (x, y), the chroma siting's offset in chroma texels (x, y)
+	ivec4 mode;      // layout, flags (1 deband, 2 deblock), packed RGB's swizzle (r | g << 2 | b << 4), the picture's number
+	vec4 band;       // deband threshold and grain (normalised codes), its radius (pixels), deblocking strength
+}
+pc;
+
+const int kPlanar = 0, kSemiUV = 1, kSemiVU = 2, kPacked = 3, kGray = 4, kPlanarGBR = 5;
+
+ivec2 gLsize, gCsize;
+
+vec4 Tex(sampler2D t, ivec2 p, ivec2 size)
+{
+	return texelFetch(t, clamp(p, ivec2(0), size - 1), 0);
+}
+
+// a chroma plane at a luma pixel's centre: bilinear between the chroma texels around it
+vec4 Chroma(sampler2D t, ivec2 p)
+{
+	const vec2 c = (vec2(p) + 0.5) * pc.chroma.xy + pc.chroma.zw - 0.5;
+	const vec2 f = fract(c);
+	const ivec2 i = ivec2(floor(c));
+	return mix(mix(Tex(t, i, gCsize), Tex(t, i + ivec2(1, 0), gCsize), f.x),
+		mix(Tex(t, i + ivec2(0, 1), gCsize), Tex(t, i + ivec2(1, 1), gCsize), f.x), f.y);
+}
+
+// the picture's three components at a pixel, normalised: (Y, Cb, Cr), or (R, G, B) for packed and planar GBR
+vec3 Codes(ivec2 p)
+{
+	const int lay = pc.mode.x;
+	const vec4 a = Tex(P0, p, gLsize);
+	if (lay == kPacked)
+	{
+		const int s = pc.mode.z;
+		return vec3(a[s & 3], a[(s >> 2) & 3], a[(s >> 4) & 3]);
+	}
+	if (lay == kPlanarGBR)
+		return clamp(vec3(Chroma(P2, p).r, a.r, Chroma(P1, p).r) * pc.norm.x + pc.norm.y, 0.0, 1.0);
+	vec2 cbcr = vec2(0.0);
+	if (lay == kPlanar)
+		cbcr = vec2(Chroma(P1, p).r, Chroma(P2, p).r);
+	else if (lay == kSemiUV || lay == kSemiVU)
+	{
+		const vec2 uv = Chroma(P1, p).rg;
+		cbcr = lay == kSemiUV ? uv : uv.yx;
+	}
+	return vec3(a.r * pc.norm.x + pc.norm.y, lay == kGray ? vec2(0.0) : cbcr * pc.norm.z + pc.norm.w);
+}
+
+float Luma(ivec2 p)
+{
+	return Tex(P0, p, gLsize).r * pc.norm.x + pc.norm.y;
+}
+
+// one block edge's filter for the pixel at index k (0..3 of p1 p0 | q0 q1); only p0 and q0 change
+float EdgeFilter(float p1, float p0, float q0, float q1, int k, float s)
+{
+	const float alpha = 0.06 * s, beta = 0.016 * s, tc = 0.02 * s;
+	if (k == 0 || k == 3 || abs(p0 - q0) >= alpha || abs(p1 - p0) >= beta || abs(q1 - q0) >= beta)
+		return k == 0 ? p1 : k == 1 ? p0 : k == 2 ? q0 : q1;
+	const float delta = clamp(((q0 - p0) * 4.0 + (p1 - q1)) / 8.0, -tc, tc);
+	return k == 1 ? p0 + delta : q0 - delta;
+}
+
+// the luma deblocked across the block edge beside it (each way), then kept within its neighbours' range near a strong edge
+float Deblock(ivec2 p, float y)
+{
+	const float s = pc.band.w;
+	for (int axis = 0; axis < 2; axis++)
+	{
+		const int c = axis == 0 ? p.x : p.y;
+		const int bx = c & 7;
+		if (bx != 7 && bx != 0)
+			continue;
+		const int b = bx == 0 ? c : c + 1; // the first pixel after the edge
+		if (b <= 0 || b >= (axis == 0 ? gLsize.x : gLsize.y))
+			continue;
+		const ivec2 d = axis == 0 ? ivec2(1, 0) : ivec2(0, 1);
+		const ivec2 o = axis == 0 ? ivec2(b, p.y) : ivec2(p.x, b);
+		y = EdgeFilter(Luma(o - 2 * d), Luma(o - d), Luma(o), Luma(o + d), bx == 7 ? 1 : 2, s) + (y - Luma(p));
+	}
+	// deringing: near a strong edge (the neighbours' range above 0.2), a lone overshoot is cut to that range
+	float lo = 1.0, hi = 0.0;
+	for (int j = -1; j <= 1; j++)
+		for (int i = -1; i <= 1; i++)
+			if (i != 0 || j != 0)
+			{
+				const float v = Luma(p + ivec2(i, j));
+				lo = min(lo, v);
+				hi = max(hi, v);
+			}
+	return hi - lo > 0.2 * s ? clamp(y, lo, hi) : y;
+}
+
+vec3 Deband(ivec2 p, vec3 c)
+{
+	const float thr = pc.band.x, radius = pc.band.z;
+	const uint seed = uint(pc.mode.w);
+	for (int it = 1; it <= 2; it++)
+	{
+		const float r = radius * float(it) * 0.5 * (0.25 + 0.75 * PostRand(uvec3(p, seed * 8u + uint(it))));
+		const float a = 6.2831853 * PostRand(uvec3(p, seed * 8u + uint(it) + 4u));
+		const ivec2 o1 = ivec2(round(vec2(cos(a), sin(a)) * r)), o2 = ivec2(-o1.y, o1.x);
+		const vec3 avg = (Codes(p + o1) + Codes(p - o1) + Codes(p + o2) + Codes(p - o2)) * 0.25;
+		c = mix(avg, c, greaterThanEqual(abs(avg - c), vec3(thr)));
+	}
+	return c + (PostRand(uvec3(p, seed * 8u + 7u)) - 0.5) * pc.band.y;
+}
+
+void main()
+{
+	gLsize = textureSize(P0, 0);
+	gCsize = textureSize(P1, 0);
+	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	if (p.x >= gLsize.x || p.y >= gLsize.y)
+		return;
+	const int lay = pc.mode.x;
+	const bool ycc = lay != kPacked && lay != kPlanarGBR;
+	vec3 c = Codes(p);
+	if ((pc.mode.y & 2) != 0 && ycc)
+		c.x = Deblock(p, c.x);
+	if ((pc.mode.y & 1) != 0)
+		c = Deband(p, c);
+	vec3 rgb = ycc ? vec3(dot(pc.m0.xyz, c), dot(pc.m1.xyz, c), dot(pc.m2.xyz, c)) : c;
+	imageStore(Dst, p, vec4(clamp(rgb, 0.0, 1.0), 1.0));
+}

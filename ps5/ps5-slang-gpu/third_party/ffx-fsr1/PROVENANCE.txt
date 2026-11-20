@@ -1,0 +1,9 @@
+AMD FidelityFX Super Resolution 1.0 (FSR 1): EASU (edge-adaptive spatial upsampling) and RCAS (robust contrast-adaptive
+sharpening), the shader headers only, unchanged.
+
+Source:  https://github.com/GPUOpen-Effects/FidelityFX-FSR
+Commit:  a21ffb8f6c13233ba336352bdff293894c706575 (2021-11-15)
+Files:   ffx-fsr/ffx_a.h, ffx-fsr/ffx_fsr1.h (as they are); license.txt as LICENSE.txt
+Licence: MIT, Copyright (c) 2021 Advanced Micro Devices, Inc. (LICENSE.txt; the program's NOTICES.txt carries it)
+
+Used by shaders/easu.comp and shaders/post.frag (Media Player Classic PS5 1.7, docs/POST-PROCESSING.md).

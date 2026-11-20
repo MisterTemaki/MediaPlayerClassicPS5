@@ -17,7 +17,7 @@
 
 namespace ps5gpu
 {
-const char* const kVersion = "1.1";
+const char* const kVersion = "1.2"; // 1.2: MPC 1.7's video post-processing (local patch)
 
 namespace
 {

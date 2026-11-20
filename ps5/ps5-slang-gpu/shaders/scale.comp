@@ -1,0 +1,81 @@
+// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): the video post-processing's scaler other than FSR 1 (docs/
+// POST-PROCESSING.md): the picture to its rectangle on the display, bilinear (a tent), bicubic (Catmull-Rom) or Lanczos
+// (3 lobes), each widened by the shrink factor when the picture is made smaller (as video.frag does), the weights
+// normalised. Only the rectangle's part on the display is made (the output image's origin is that part's corner).
+//
+// SPDX-License-Identifier: MIT
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D Src; // A2B10G10R10, nearest or linear: read at texel centres
+layout(set = 0, binding = 1, rgb10_a2) uniform writeonly image2D Dst;
+
+layout(push_constant) uniform Pc
+{
+	vec4 map;   // source pixels per output pixel (x, y); the visible part's corner in the rectangle (output pixels)
+	ivec4 mode; // 0 bilinear, 1 bicubic, 2 Lanczos; the visible part's width and height
+}
+pc;
+
+const float kPi = 3.14159265;
+
+float Kernel(float x, int m)
+{
+	x = abs(x);
+	if (m == 0)
+		return max(0.0, 1.0 - x);
+	if (m == 1)
+	{
+		if (x < 1.0)
+			return (1.5 * x - 2.5) * x * x + 1.0;
+		if (x < 2.0)
+			return ((-0.5 * x + 2.5) * x - 4.0) * x + 2.0;
+		return 0.0;
+	}
+	if (x < 1e-5)
+		return 1.0;
+	if (x >= 3.0)
+		return 0.0;
+	const float a = kPi * x;
+	return 3.0 * sin(a) * sin(a / 3.0) / (a * a);
+}
+
+void main()
+{
+	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	if (p.x >= pc.mode.y || p.y >= pc.mode.z)
+		return;
+	const int m = pc.mode.x;
+	const ivec2 size = textureSize(Src, 0);
+	const vec2 r = max(pc.map.xy, vec2(1.0)); // the kernel's widening when shrinking
+	const float support = m == 0 ? 1.0 : m == 1 ? 2.0 : 3.0;
+	// where this output pixel's centre falls in the source (texel centres at i + 0.5)
+	const vec2 c = (vec2(p) + pc.map.zw + 0.5) * pc.map.xy - 0.5;
+	const vec2 rr = min(r, vec2(m == 2 ? 2.0 : 4.0));
+	const vec2 lo = floor(c - support * rr) + 1.0, hi = floor(c + support * rr);
+	vec3 acc = vec3(0.0);
+	float wsum = 0.0;
+	for (int j = 0; j < 25; j++)
+	{
+		const float y = lo.y + float(j);
+		if (y > hi.y)
+			break;
+		const float wy = Kernel((y - c.y) / rr.y, m);
+		if (wy == 0.0)
+			continue;
+		for (int i = 0; i < 25; i++)
+		{
+			const float x = lo.x + float(i);
+			if (x > hi.x)
+				break;
+			const float w = Kernel((x - c.x) / rr.x, m) * wy;
+			if (w == 0.0)
+				continue;
+			acc += w * texelFetch(Src, clamp(ivec2(x, y), ivec2(0), size - 1), 0).rgb;
+			wsum += w;
+		}
+	}
+	imageStore(Dst, p, vec4(clamp(wsum != 0.0 ? acc / wsum : vec3(0.0), 0.0, 1.0), 1.0));
+}

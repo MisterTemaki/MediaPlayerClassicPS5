@@ -1,14 +1,19 @@
 # Base commit below, with MPC local patches; hashes pin the delivered modified copy.
-# Patches: native HDR10 target, VideoOut callbacks, PQ/HLG output, HDR UI and enumeration errors.
-# See docs/GPU-HDR-CHANGES.md and docs/patches/gpu-hdr.diff (repository root); this is not an untouched upstream checkout.
+# Patches: native HDR10 target, VideoOut callbacks, PQ/HLG output, HDR UI and enumeration errors (MPC 1.6);
+# the video post-processing (SetVideoPost: shaders/prep, pyr, flow, warp, scale, easu .comp, post.frag; FSR 1 vendored
+# in third_party/ffx-fsr1, MIT) and its device features (MPC 1.7).
+# See docs/GPU-HDR-CHANGES.md, docs/POST-PROCESSING.md, docs/patches/gpu-hdr.diff and docs/patches/gpu-post.diff
+# (repository root); this is not an untouched upstream checkout.
 commit 5531e732bc76b4eb1c1165f3044e5c0471fe44fa
 181314065df2f2fdaf920b1a8b5311daa216a2d6489a06ada5b49cc514d89417  .gitignore
 4e35910329ed8442c5babfee979c4e200c884c08553b357e763e6cc82e115b6a  LICENSE
 1587364aac37a209d58e1dbb6ffba553b1bab1aec6850d00cf23a139aa4c4742  Makefile
 8fe3b51d67e5263b74d92e0b60ff9f7e2c2bf737da09533a538e475e901ac880  README.md
-1f06b548b31269c163030c380d3e0124dfc9dd1275fdc1c71d72092de7df91f2  include/ps5gpu/gpu.h
+5c22cc026da384915a5e5b511a2d6215432a1e2762430d19fc76d0cd95658670  include/ps5gpu/gpu.h
 4de96dc35f156214e3838ada0c6b0555efdf1a7df22eaf980339ef3a37241c1e  include/ps5gpu/slang.h
-bcac6cc54216262f1276dfd054e49909f17fb0e393dff13dd3b1af09006d1aaf  mk/slang-gpu.mk
+ae0b02d23fca332d7419d9d46526a2da179127d5d81b2940738cd0682804d9a9  mk/slang-gpu.mk
+cd16749a3712a53f0ff82e2d5c70e427799580ddb9f7dfbc635db56310009f03  shaders/easu.comp
+abc6743ad7483dc99a8445e162742115d952463614e589e63225467c1129d6fa  shaders/flow.comp
 8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643  shaders/licences/GPL-2.0.txt
 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  shaders/licences/GPL-3.0.txt
 c145eefda6620bd9b95df7f18465616c3ed547d2f98b140fb6ed0cf64a04bcf9  shaders/own/crt-blurPi-sharp.slangp
@@ -20,7 +25,12 @@ c145eefda6620bd9b95df7f18465616c3ed547d2f98b140fb6ed0cf64a04bcf9  shaders/own/cr
 13d5d4696dd36c95d18afd5062dc4729bb8893358a0f3bfa8452b9030eab87eb  shaders/own/monoCRT.slangp
 d66d6c591757eadfd18aca81ce3d4498deca257d6c84d17ad9902d16d84efaaa  shaders/own/newpixie-mini.slangp
 2515791adcef326bbd695a39f207fed50421956d79a30ff12e3877d5c39c064e  shaders/plain.slang
+2a69553768b1e0d7f692ddebecf69cba649b2aa94a6ab030babef4bfd00a00e9  shaders/post.frag
+e19c5120d4bc4a41b3cf93882de0885d4a73576ea5bfece0a47872b3db461c38  shaders/post_common.glsl
+f1a140cf6fc5d140a62ada2027e26dc17001674e8e70bb70a94d6fa75b9ada7c  shaders/prep.comp
 2a275c31dbf128deccb4f14bfd5e0414ae3004640401824004b5eb899d3fc35b  shaders/presets.txt
+ffe9911e791358b29fe5906d467b6c28ed7dca4671a0c74e07fb9cc592cd3279  shaders/pyr.comp
+20fbe2bb0bc9d37022afc19da10df525cc1a6d589319960088ff9dd06f055897  shaders/scale.comp
 8eeb3017876565e681daf2e7ea4271034f9a1a07a7910abe17da4e581191596a  shaders/slang/REVISION
 a15d749abba5b84898ebefec04cae2037ef9ca0177d218150c69f7c084fc8099  shaders/slang/bezel/Mega_Bezel/Presets/Base_CRT_Presets/MBZ__3__STD__GDV.slangp
 2eb089ad0d52d3c7a499fac3981df52522dcb7444eb8535c47fd4771a44dd688  shaders/slang/bezel/Mega_Bezel/Presets/Base_CRT_Presets/MBZ__5__POTATO__GDV-MINI.slangp
@@ -289,15 +299,20 @@ fa7d346e3706a351aa77dc8e77bd049b8bfde635baf4376fedcf81f38d9a4008  shaders/slang/
 54183a847e747bacd4b4ca5e5a3f2951960126ca48c4f372c0a4ac5435805925  shaders/ui.slang
 fcf83d9a5add36a7e6bccc007da5a7587da12fd8d0209adc8b20730440552c38  shaders/video.frag
 1e510fdd5b0837d1d5d73e66898c87de847de080e62d86c4fe6edc4756f64e36  shaders/video.vert
-f343f0208a6078d45f764abb47932fb7a14a4bb37faa9151e95fb90635e641c4  src/common.cpp
-aa816c91ffc392c6c5532a215d5bccf56baec2196c69bf487efd866545d40591  src/gpu.cpp
+c621ab21d63efb9ed4751569792c2d3919aa989231f302c4eeb15bc05e066b44  shaders/warp.comp
+cd52c87107bec3309bae8a2ddeef4e7d2ed43d6d325e53a42233b3afa6d20c4b  src/common.cpp
+2af6f5710625587f9c69bd93982c8ce5cf9115308e1e15e3526bbb294c942ac5  src/gpu.cpp
 e813596cc2836f4effa0e7cbda637f38efa6b713d9ee822668e47deb27cac2fa  src/internal.h
 d5b9a8c5869e75560b0bb40a5e13a39d70be14c9f4149d7bd7031f85f05b206b  src/sha256.cpp
 9d8233eb7a92de340f7d928fd38f76ca3e84e1759d4bdff315fd79370e87d261  src/slang_loader.cpp
 9b3937269dc2473bd37e8078ed86f18a275384f03837b50c1f32313f8d1ca647  src/stub.cpp
-a89a5565d644d71b9d96732a3eb4cc21983ea1166938e8a46250c329db4f9209  tests/gpu_test.cpp
+a9d479455e5d0d2097e7c9424b23207bdb40183d4717552edf390398827484f2  tests/gpu_test.cpp
 d5407c6ab90f3ee40888ab4ea026abc0a6f9feb1092060dc5f561122c23bfd3f  tests/run-tests.sh
 53300c142e71072cc79e46b7729dd7ee18f0685e3fc763fa8b780856421924c6  tests/stub_test.cpp
+db089274ce766da70f5b7d791029c3486f9f9e27c8c79c652689603d3192e802  third_party/ffx-fsr1/LICENSE.txt
+20448ea6bb02ec4f65e10ee84b330af7e6aefc8271ea88f2ecdf2c9063adc713  third_party/ffx-fsr1/PROVENANCE.txt
+f60e2722fcd13989523b9164d776ab382b3692791767f3bf8bb19967f763f3fb  third_party/ffx-fsr1/ffx_a.h
+93c3922362ea7fc99cbcc698ca30c98de4f8c246d1fbb0b09e015ddef38ce3a5  third_party/ffx-fsr1/ffx_fsr1.h
 adb783e734e906d1f46db5df29991dbde84bdb0ceab502ac2febb44fe3c2b5f4  third_party/glslang/LICENSE.txt
 e4dabb52553be9ac1bb44976ed26b023ce8f3be651cc69b9b498fd9db0a0e832  third_party/glslang/PROVENANCE.txt
 28b306c7d15734d5e91ea771118beb70009a8469d97333964a3f50fb4a877a42  third_party/glslang/SPIRV/GLSL.ext.AMD.h
