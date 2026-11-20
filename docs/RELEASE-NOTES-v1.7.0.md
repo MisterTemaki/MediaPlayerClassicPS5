@@ -95,7 +95,29 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
 
 ### Validation and limits
 
-- (to be filled in with the final runs)
+- **Not run on a PS5 before this release.** Nothing of 1.7 has run on a console yet: FSR 1 and the other passes,
+  their half-precision builds, motion smoothing at 60 Hz, the Shaders page, the home-screen category and its pick-up
+  by ShadowMount+. The GPU device is now created with new features even with Shaders Off: if the app falls back to the
+  software renderer on your console, please report it with `boot.log` (**Debug logs** on,
+  `/data/mpcps5/logs/boot.log`).
+- **Full frontend suite: 941 checks passed.** The 12 that fail (an SMB address check, and 11 comparisons of the GPU's
+  4K HDR pictures with the CPU path's on the host's software Vulkan) fail the same way on 1.6.4. The new group 40
+  (48 checks) covers the presets, the menu, the Shaders page (Custom's edits kept on OK), the colour controls, the
+  statistics, motion smoothing (pictures made between two; paused, the picture itself; a change of size mid-stream),
+  the software renderer, the home-screen category from the app and from the installer, and the library and HDR
+  tests below.
+- The GPU library's own tests pass on the host's Vulkan (Mesa lavapipe): the passes with their half-precision builds
+  (77 checks) and their 32-bit builds (77), the passes or their images failing (3 and 5), motion smoothing's images
+  failing (7), and the build without a GPU. The HDR10 output test (20 checks) runs the passes too.
+- Credential core 36, real SMB UI 31 and theme harness 43 checks passed, and the update, log, installer and GPU
+  start harnesses pass. The frontend suite ran with GCC 13 and ASan/UBSan.
+- The translation table (755 texts) passed validation in all five languages; the Shaders page was checked on screen
+  in English, Spanish, Portuguese, French and German, the Miscellaneous page and the home-screen message in English.
+- The native PS5 GPU build and complete installer passed import, runtime-link, syscall and RADV linkage checks.
+- Three independent review rounds; the last found nothing that blocks the release.
+
+Host tests use simulated PS5 calls and software Vulkan, which is far slower than the console's GPU: the passes'
+timings on the PS5 aren't known yet.
 
 ### Credits
 
