@@ -1,5 +1,5 @@
 diff --git a/VENDOR.txt b/VENDOR.txt
-index 144cc17..3b52909 100644
+index 144cc17..09ce1be 100644
 --- a/VENDOR.txt
 +++ b/VENDOR.txt
 @@ -1,14 +1,19 @@
@@ -17,7 +17,7 @@ index 144cc17..3b52909 100644
  1587364aac37a209d58e1dbb6ffba553b1bab1aec6850d00cf23a139aa4c4742  Makefile
  8fe3b51d67e5263b74d92e0b60ff9f7e2c2bf737da09533a538e475e901ac880  README.md
 -1f06b548b31269c163030c380d3e0124dfc9dd1275fdc1c71d72092de7df91f2  include/ps5gpu/gpu.h
-+4d137aa3709090c8cf049a61e2ccab94c0efe14f2c87cfd9fe8498a8e2854b64  include/ps5gpu/gpu.h
++ae87fff24072128e5b04a2b1a80ca0b41e1d948ac7be850857b22dfc051dd9d1  include/ps5gpu/gpu.h
  4de96dc35f156214e3838ada0c6b0555efdf1a7df22eaf980339ef3a37241c1e  include/ps5gpu/slang.h
 -bcac6cc54216262f1276dfd054e49909f17fb0e393dff13dd3b1af09006d1aaf  mk/slang-gpu.mk
 +ae0b02d23fca332d7419d9d46526a2da179127d5d81b2940738cd0682804d9a9  mk/slang-gpu.mk
@@ -47,7 +47,7 @@ index 144cc17..3b52909 100644
 -aa816c91ffc392c6c5532a215d5bccf56baec2196c69bf487efd866545d40591  src/gpu.cpp
 +c7e34bf6c28f100161fead3ec8a23ec19623bec08142da165226be769547871a  shaders/warp.comp
 +cd52c87107bec3309bae8a2ddeef4e7d2ed43d6d325e53a42233b3afa6d20c4b  src/common.cpp
-+28fff2456a0bec7e6f6988ef38b65b37657a1e8edb027e23e535a7ad5cd2badb  src/gpu.cpp
++e8e128e0448c2452cc32f494024cc319b30604c9abb6ae6db93dcaacb3319d8d  src/gpu.cpp
  e813596cc2836f4effa0e7cbda637f38efa6b713d9ee822668e47deb27cac2fa  src/internal.h
  d5b9a8c5869e75560b0bb40a5e13a39d70be14c9f4149d7bd7031f85f05b206b  src/sha256.cpp
  9d8233eb7a92de340f7d928fd38f76ca3e84e1759d4bdff315fd79370e87d261  src/slang_loader.cpp
@@ -55,8 +55,8 @@ index 144cc17..3b52909 100644
 -a89a5565d644d71b9d96732a3eb4cc21983ea1166938e8a46250c329db4f9209  tests/gpu_test.cpp
 -d5407c6ab90f3ee40888ab4ea026abc0a6f9feb1092060dc5f561122c23bfd3f  tests/run-tests.sh
 -53300c142e71072cc79e46b7729dd7ee18f0685e3fc763fa8b780856421924c6  tests/stub_test.cpp
-+232afc0d53dff13f0656397dd6e9a71021b3aa2071d48ac06a6d9d1116477af0  src/stub.cpp
-+a4a73bfbf3c43e8ab7f2e25229c4524ec5cd11919de3a5b67127d47dac8763f3  tests/gpu_test.cpp
++50bceaba99cedb1bdbd193353468b542385439906e22ef755bf61cef03165413  src/stub.cpp
++c43e9df5c7182309455e5d37c9950f5977d0b961d23197f361f38114d33a6661  tests/gpu_test.cpp
 +d57a0bfc65a5747f229473734eca621ec45cdbec0061732e50cad5079144984e  tests/run-tests.sh
 +1d14a09958c1250abef96902d82324de9f3aec92bd4a16099b281668ba037745  tests/stub_test.cpp
 +db089274ce766da70f5b7d791029c3486f9f9e27c8c79c652689603d3192e802  third_party/ffx-fsr1/LICENSE.txt
@@ -67,7 +67,7 @@ index 144cc17..3b52909 100644
  e4dabb52553be9ac1bb44976ed26b023ce8f3be651cc69b9b498fd9db0a0e832  third_party/glslang/PROVENANCE.txt
  28b306c7d15734d5e91ea771118beb70009a8469d97333964a3f50fb4a877a42  third_party/glslang/SPIRV/GLSL.ext.AMD.h
 diff --git a/include/ps5gpu/gpu.h b/include/ps5gpu/gpu.h
-index 96c8025..198d86d 100644
+index 96c8025..a39f2a4 100644
 --- a/include/ps5gpu/gpu.h
 +++ b/include/ps5gpu/gpu.h
 @@ -87,6 +87,10 @@ struct Config
@@ -146,7 +146,7 @@ index 96c8025..198d86d 100644
 +	// GPU milliseconds per drawn frame since the last call (0: not measured)
 +	double prep_ms = 0, motion_ms = 0, scale_ms = 0, final_ms = 0;
 +	std::string why_off; // why the passes aren't used although asked for ("" when they are, or not asked)
-+	std::string motion_why_off; // why motion smoothing isn't, although asked for ("" when it is, or not asked)
++	std::string motion_why_off; // motion smoothing asked for but its images couldn't be made: why ("" otherwise)
 +};
 +PostStatus TakePostStatus();
 +// Motion smoothing can start from this picture (VideoView::motion_from): the passes and motion smoothing are asked for
@@ -1061,7 +1061,7 @@ index 1b6a2b4..1ab99c9 100644
  namespace
  {
 diff --git a/src/gpu.cpp b/src/gpu.cpp
-index be54755..4cef98e 100644
+index be54755..3bd32ec 100644
 --- a/src/gpu.cpp
 +++ b/src/gpu.cpp
 @@ -67,7 +67,8 @@ namespace
@@ -1173,7 +1173,7 @@ index be54755..4cef98e 100644
  // HDR10 uses the same presentation method as VLC-PS5: typed 10-bit rendering, then a size-compatible raw image
  // copy into the WSI's 32-bit buffers after VideoOut changes their scanout attribute. No 8-bit render or quantization.
  void FreeHdr()
-@@ -2770,6 +2792,1048 @@ void InitVideo(bool host_import)
+@@ -2770,6 +2792,1052 @@ void InitVideo(bool host_import)
  		gv.sampled_ok[3] && gv.sampled_ok[4] ? "yes" : "no", gv.linear_ok[3] && gv.linear_ok[4] ? "yes" : "no",
  		gv.host_import ? "yes (VK_EXT_external_memory_host)" : "no (one copy each)", gv.host_align);
  }
@@ -1293,7 +1293,7 @@ index be54755..4cef98e 100644
 +	// the images, for pictures of pw x ph and the output's size
 +	int pw = 0, ph = 0;
 +	// (review L8, N3) the sizes whose images couldn't be made: not tried again at every frame; forgotten when the sizes
-+	// change, when the passes are turned off, and in FreePost
++	// change, when the passes are turned off, when no picture is shown (a film closed), and in FreePost
 +	int failed_w = 0, failed_h = 0, failed_ow = 0, failed_oh = 0;
 +	PostSlot ring[kPostRing];
 +	Image big; // the scaler's output: the visible part of the rectangle, at the image's corner (the output's size)
@@ -1716,8 +1716,9 @@ index be54755..4cef98e 100644
 +}
 +
 +// motion smoothing's images: the pyramid (the picture's luma at a quarter of its size, at most 960 wide, halved while
-+// that leaves 15 pixels or more: at most 7 levels, 960 to 15 for a 4K picture, whose +-1 searches reach 127 pixels of
-+// the finest, 508 of a 4K picture's; 1080p: 6 levels, 252 pixels), the flows at each level, the picture between two
++// that leaves 15 pixels or more across and 8 down: at most 7 levels, 960x540 to 15x9 for a 16:9 4K picture, whose +-1
++// searches reach 127 pixels of the finest, 508 of a 4K picture's; 16:9 1080p and 2.39:1 4K: 6 levels, 252 pixels;
++// 2.39:1 1080p, 1920x800: 5 levels, 124 pixels), the flows at each level, the picture between two
 +bool PostMotionImages()
 +{
 +	if (pv.motion_made)
@@ -1975,7 +1976,10 @@ index be54755..4cef98e 100644
 +	}
 +	if (!gv.ok || !gv.show || !gv.picture || gv.nplanes == 0)
 +	{
-+		pv.failed_w = pv.failed_h = 0; // (review N3: no picture, the film closed: the next one tries again)
++		// (review N3, P2: no picture, the film closed: the next one tries the images again, motion smoothing's too; those
++		// were freed when they failed)
++		pv.failed_w = pv.failed_h = 0;
++		pv.motion_failed = false;
 +		return PostStatusSet(false, false, "none", "");
 +	}
 +	// the picture's rectangle on the output, in whole pixels (as video.frag's scissor), and its part on the output
@@ -2222,7 +2226,7 @@ index be54755..4cef98e 100644
  } // namespace
  
  bool HdrOutputActive() { return g.ok && g.hdr_active; }
-@@ -2986,6 +4050,8 @@ bool SetVideo(const VideoFrame& f, const VideoView& view)
+@@ -2986,6 +4054,8 @@ bool SetVideo(const VideoFrame& f, const VideoView& view)
  	gv.pend = np;
  	gv.pend_next = use_next;
  	gv.meta = f;
@@ -2231,7 +2235,7 @@ index be54755..4cef98e 100644
  	for (VideoPlane& pl : gv.meta.plane)
  		pl = VideoPlane();
  	gv.meta.memory = nullptr;
-@@ -3054,6 +4120,58 @@ VideoStats TakeVideoStats()
+@@ -3054,6 +4124,58 @@ VideoStats TakeVideoStats()
  	return s;
  }
  
@@ -2290,7 +2294,7 @@ index be54755..4cef98e 100644
  namespace
  {
  // (VideoSelfTest) the expected R'G'B' of a flat picture, as the shader computes it, 0..255
-@@ -3258,14 +4376,20 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+@@ -3258,14 +4380,20 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
  	// (Config::video) the host-pointer import's properties (minImportedHostPointerAlignment) come through
  	// VK_KHR_get_physical_device_properties2 on the 1.0 instance (a 1.1 instance crashed the PS5's driver: see
  	// vkGetPhysicalDeviceProperties2 above); its buffers need VK_KHR_external_memory_capabilities on the instance
@@ -2314,7 +2318,7 @@ index be54755..4cef98e 100644
  	{
  		std::string list;
  		for (const char* w : want)
-@@ -3289,6 +4413,8 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+@@ -3289,6 +4417,8 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
  		GPU_DISPLAY_FNS(GPU_LOAD_INSTANCE)
  	}
  #undef GPU_LOAD_INSTANCE
@@ -2323,7 +2327,7 @@ index be54755..4cef98e 100644
  	if (props2)
  	{
  		vkGetPhysicalDeviceProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
-@@ -3296,6 +4422,11 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+@@ -3296,6 +4426,11 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
  		if (!vkGetPhysicalDeviceProperties2)
  			vkGetPhysicalDeviceProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
  				GPU_GET_INSTANCE_PROC(g.instance, "vkGetPhysicalDeviceProperties2"));
@@ -2335,7 +2339,7 @@ index be54755..4cef98e 100644
  	}
  	internal::Log("[gpu] Init: the GPUs: counting them");
  	uint32_t pc = 0;
-@@ -3362,7 +4493,7 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+@@ -3362,7 +4497,7 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
  	}
  	// 1.1: pictures read where they are (a hardware decoder's buffers): VK_EXT_external_memory_host and what it needs
  	// (VK_KHR_external_memory; the instance's properties2 and external_memory_capabilities), on the 1.0 instance
@@ -2344,7 +2348,7 @@ index be54755..4cef98e 100644
  							 HasExtension(dexts, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME) &&
  							 HasExtension(dexts, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
  	if (host_import)
-@@ -3376,13 +4507,54 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+@@ -3376,13 +4511,54 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
  	qi.queueFamilyIndex = g.family;
  	qi.queueCount = 1;
  	qi.pQueuePriorities = &prio;
@@ -2401,7 +2405,7 @@ index be54755..4cef98e 100644
  	{
  		Shutdown();
  		return false;
-@@ -3739,6 +4911,7 @@ void WaitFrame()
+@@ -3739,6 +4915,7 @@ void WaitFrame()
  		}
  		g.queries_written = false;
  	}
@@ -2409,7 +2413,7 @@ index be54755..4cef98e 100644
  	g.in_flight = false;
  }
  } // namespace
-@@ -4120,6 +5293,8 @@ bool Present(const uint32_t* ui, Rect dirty, bool wait_vsync)
+@@ -4120,6 +5297,8 @@ bool Present(const uint32_t* ui, Rect dirty, bool wait_vsync)
  				Barrier(cmd, *t.im, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
  		}
  	}
@@ -2418,7 +2422,7 @@ index be54755..4cef98e 100644
  	VkFramebuffer fb = g.hdr_active ? g.hdr_target.fb : g.offscreen ? g.offscreen_target.fb : g.swap_fbs[index];
  	VkClearValue cv = {};
  	cv.color.float32[3] = 1.0f;
-@@ -4145,8 +5320,9 @@ bool Present(const uint32_t* ui, Rect dirty, bool wait_vsync)
+@@ -4145,8 +5324,9 @@ bool Present(const uint32_t* ui, Rect dirty, bool wait_vsync)
  			internal::Log("[gpu] shelf scene not drawn: game %d, pipeline %d", int(draw_game), int(g.scene_pipe != VK_NULL_HANDLE));
  	}
  	g.presents++;
@@ -2431,15 +2435,23 @@ index be54755..4cef98e 100644
  	{
  		Chain& uc = g.hdr_active ? g.hdr_ui_chain : g.ui_chain;
 diff --git a/src/stub.cpp b/src/stub.cpp
-index add4e7b..a312350 100644
+index add4e7b..9196ad4 100644
 --- a/src/stub.cpp
 +++ b/src/stub.cpp
-@@ -62,4 +62,15 @@ size_t HostMemoryAlignment() { return 0; }
+@@ -7,6 +7,7 @@
+ #include "ps5gpu/gpu.h"
+ #include "internal.h"
+ 
++#include <atomic>
+ #include <cstring>
+ 
+ namespace ps5gpu
+@@ -62,4 +63,15 @@ size_t HostMemoryAlignment() { return 0; }
  HostMemory* ImportHostMemory(void*, size_t) { return nullptr; }
  void ReleaseHostMemory(HostMemory*) {}
  VideoStats TakeVideoStats() { return VideoStats(); }
 +// 1.2 (MPC 1.7): the post-processing: nothing to run it on
-+static bool post_asked = false;
++static std::atomic<bool> post_asked{false};
 +void SetVideoPost(const VideoPost& p) { post_asked = p.on; }
 +PostStatus TakePostStatus()
 +{
@@ -2451,10 +2463,10 @@ index add4e7b..a312350 100644
 +bool PostHolds(uint64_t) { return false; }
  } // namespace ps5gpu
 diff --git a/tests/gpu_test.cpp b/tests/gpu_test.cpp
-index 74471b7..dc3ed65 100644
+index 74471b7..deeb4ee 100644
 --- a/tests/gpu_test.cpp
 +++ b/tests/gpu_test.cpp
-@@ -1247,6 +1247,527 @@ int VideoKeep()
+@@ -1247,6 +1247,540 @@ int VideoKeep()
  	ps5gpu::Shutdown();
  	return g_fail;
  }
@@ -2974,6 +2986,19 @@ index 74471b7..dc3ed65 100644
 +									"), not the next one early");
 +	Check(st.active && st.motion_why_off == "no memory for its images", "... the status says why: " + st.motion_why_off);
 +	Check(!ps5gpu::PostHolds(11) && !ps5gpu::PostHolds(12), "... and PostHolds says no: the pictures as they come");
++	// (review P2) the film closed (no picture), the memory back: the next film of the same size tries them again
++	unsetenv("PS5GPU_TEST_POST_FAIL");
++	ps5gpu::HideVideo();
++	Present();
++	ps5gpu::SetVideo(Luma(kOutW, kOutH, ya, uva, 13), FullView());
++	Present();
++	Check(ps5gpu::PostHolds(13), "the next film, the same size: motion smoothing tried again");
++	ps5gpu::VideoView v2 = FullView();
++	v2.motion_from = 13;
++	v2.motion_t = 0.5;
++	ps5gpu::SetVideo(Luma(kOutW, kOutH, yb, uvb, 14), v2);
++	Present();
++	Check(ps5gpu::TakePostStatus().motion, "... and the picture between two made");
 +	post.motion = false;
 +	ps5gpu::SetVideoPost(post);
 +	ps5gpu::Shutdown();
@@ -2982,7 +3007,7 @@ index 74471b7..dc3ed65 100644
  } // namespace vt
  
  int main(int argc, char** argv)
-@@ -1274,6 +1795,15 @@ int main(int argc, char** argv)
+@@ -1274,6 +1808,15 @@ int main(int argc, char** argv)
  		return vt::VideoImageFail();
  	if (mode == "video-keep")
  		return vt::VideoKeep();

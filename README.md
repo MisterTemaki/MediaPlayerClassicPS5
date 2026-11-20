@@ -25,8 +25,8 @@ Miscellaneous** now also chooses whether the home screen lists the app under **M
 [design notes](docs/POST-PROCESSING.md) and the [1.7.0 release notes](docs/RELEASE-NOTES-v1.7.0.md).
 
 > **Status (1.7.0):** tested on the host (Linux, software Vulkan); not yet run on a PS5. The GPU device is now
-> created with new features (A2B10G10R10 and 16-bit storage images, and 16-bit arithmetic on the usual start) even
-> with Shaders Off. If the app falls back to the software renderer on your console, which it does by itself after a
+> created with new features (A2B10G10R10 and 16-bit storage images, and 16-bit arithmetic on most starts) even with
+> Shaders Off. If the app falls back to the software renderer on your console, which it does by itself after a
 > GPU start that fails, please send `boot.log` (with **Debug logs** on).
 
 **1.6.4: Stop keeps the file's position, and an audit's fixes.** Up to 1.6.3, a file stopped with **Stop** and then
@@ -686,12 +686,12 @@ presets at once and **Shader Options...** opens the page.
 - **Debanding** follows libplacebo's and f3kdb's approach; **deblocking** softens 8×8 block edges with H.264's rule
   and keeps pixels by strong edges within their neighbours' range.
 - **Motion smoothing** (experimental) computes each pair of pictures' optical flow both ways and shows the picture at
-  the display's time between them, while playing films of 24, 25 or 30 pictures a second (not 50 or 60). A cut is
+  the display's time between them, while playing films of 24, 25 or 30 pictures a second (not 48 or more). A cut is
   never blended, and where the motion is too large for the flow the nearer picture is shown, never a double image.
 - **Colour controls:** brightness, contrast and saturation, with any preset but Off.
 - **View > Statistics** shows each pass's GPU time per frame (its **Shaders** line); the statistics over the video
-  (R3 + Square) show their sum. Half-precision arithmetic is used where the GPU has it and started the usual way (the
-  one that reads the decoder's pictures where they are); the fallback starts use the 32-bit builds.
+  (R3 + Square) show their sum. Half-precision arithmetic is used where the GPU has it (not on GPU start variants 2
+  and 4, which only a start record kept by an earlier version selects).
 - HDR10 and HLG go through the passes in their own signal; tone mapping or the HDR10 output comes after.
 - Settings: `PostPreset` and the other `Post*` keys of `mpc-hc.ini`
   ([design notes](docs/POST-PROCESSING.md)).

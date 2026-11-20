@@ -7,6 +7,7 @@
 #include "ps5gpu/gpu.h"
 #include "internal.h"
 
+#include <atomic>
 #include <cstring>
 
 namespace ps5gpu
@@ -63,7 +64,7 @@ HostMemory* ImportHostMemory(void*, size_t) { return nullptr; }
 void ReleaseHostMemory(HostMemory*) {}
 VideoStats TakeVideoStats() { return VideoStats(); }
 // 1.2 (MPC 1.7): the post-processing: nothing to run it on
-static bool post_asked = false;
+static std::atomic<bool> post_asked{false};
 void SetVideoPost(const VideoPost& p) { post_asked = p.on; }
 PostStatus TakePostStatus()
 {

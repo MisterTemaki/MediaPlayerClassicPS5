@@ -2908,7 +2908,7 @@ struct PostGpu
 	// the images, for pictures of pw x ph and the output's size
 	int pw = 0, ph = 0;
 	// (review L8, N3) the sizes whose images couldn't be made: not tried again at every frame; forgotten when the sizes
-	// change, when the passes are turned off, and in FreePost
+	// change, when the passes are turned off, when no picture is shown (a film closed), and in FreePost
 	int failed_w = 0, failed_h = 0, failed_ow = 0, failed_oh = 0;
 	PostSlot ring[kPostRing];
 	Image big; // the scaler's output: the visible part of the rectangle, at the image's corner (the output's size)
@@ -3331,8 +3331,9 @@ bool PostImages(int pw, int ph)
 }
 
 // motion smoothing's images: the pyramid (the picture's luma at a quarter of its size, at most 960 wide, halved while
-// that leaves 15 pixels or more: at most 7 levels, 960 to 15 for a 4K picture, whose +-1 searches reach 127 pixels of
-// the finest, 508 of a 4K picture's; 1080p: 6 levels, 252 pixels), the flows at each level, the picture between two
+// that leaves 15 pixels or more across and 8 down: at most 7 levels, 960x540 to 15x9 for a 16:9 4K picture, whose +-1
+// searches reach 127 pixels of the finest, 508 of a 4K picture's; 16:9 1080p and 2.39:1 4K: 6 levels, 252 pixels;
+// 2.39:1 1080p, 1920x800: 5 levels, 124 pixels), the flows at each level, the picture between two
 bool PostMotionImages()
 {
 	if (pv.motion_made)
@@ -3590,7 +3591,10 @@ void RecordPost(VkCommandBuffer cmd)
 	}
 	if (!gv.ok || !gv.show || !gv.picture || gv.nplanes == 0)
 	{
-		pv.failed_w = pv.failed_h = 0; // (review N3: no picture, the film closed: the next one tries again)
+		// (review N3, P2: no picture, the film closed: the next one tries the images again, motion smoothing's too; those
+		// were freed when they failed)
+		pv.failed_w = pv.failed_h = 0;
+		pv.motion_failed = false;
 		return PostStatusSet(false, false, "none", "");
 	}
 	// the picture's rectangle on the output, in whole pixels (as video.frag's scissor), and its part on the output

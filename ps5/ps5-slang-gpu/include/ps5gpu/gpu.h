@@ -360,7 +360,7 @@ struct PostStatus
 	// GPU milliseconds per drawn frame since the last call (0: not measured)
 	double prep_ms = 0, motion_ms = 0, scale_ms = 0, final_ms = 0;
 	std::string why_off; // why the passes aren't used although asked for ("" when they are, or not asked)
-	std::string motion_why_off; // why motion smoothing isn't, although asked for ("" when it is, or not asked)
+	std::string motion_why_off; // motion smoothing asked for but its images couldn't be made: why ("" otherwise)
 };
 PostStatus TakePostStatus();
 // Motion smoothing can start from this picture (VideoView::motion_from): the passes and motion smoothing are asked for

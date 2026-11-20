@@ -1763,6 +1763,19 @@ int PostMotionFail()
 									"), not the next one early");
 	Check(st.active && st.motion_why_off == "no memory for its images", "... the status says why: " + st.motion_why_off);
 	Check(!ps5gpu::PostHolds(11) && !ps5gpu::PostHolds(12), "... and PostHolds says no: the pictures as they come");
+	// (review P2) the film closed (no picture), the memory back: the next film of the same size tries them again
+	unsetenv("PS5GPU_TEST_POST_FAIL");
+	ps5gpu::HideVideo();
+	Present();
+	ps5gpu::SetVideo(Luma(kOutW, kOutH, ya, uva, 13), FullView());
+	Present();
+	Check(ps5gpu::PostHolds(13), "the next film, the same size: motion smoothing tried again");
+	ps5gpu::VideoView v2 = FullView();
+	v2.motion_from = 13;
+	v2.motion_t = 0.5;
+	ps5gpu::SetVideo(Luma(kOutW, kOutH, yb, uvb, 14), v2);
+	Present();
+	Check(ps5gpu::TakePostStatus().motion, "... and the picture between two made");
 	post.motion = false;
 	ps5gpu::SetVideoPost(post);
 	ps5gpu::Shutdown();

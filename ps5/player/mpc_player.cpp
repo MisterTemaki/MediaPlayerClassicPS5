@@ -3886,10 +3886,12 @@ const AVFrame* Player::NextPicture(uint64_t* id, double* t)
 	const VFrame& n = s.frames.front();
 	const double span = n.pts - s.cur_pts;
 	// the same stream run, and two pictures of a film (not a still held, nor a jump in the times); (review L12) not when
-	// they come at 50 a second or more (50 and 60 fps, 25 or 30 fps at twice the speed): little or nothing to make
-	// between; (review N1) the bound is above 1/50 s, which the times' rounding puts on either side of 0.02
+	// they come 48 times a second or more (48, 50 and 60 fps; 24, 25 or 30 fps at twice the speed): little or nothing to
+	// make between; (review N1, P1) the bound is away from the steps of the times as files keep them (whole
+	// milliseconds in MKV: 20 or 21 ms at 48 fps, 41 or 42 ms for 24 fps at 2x), which the times' rounding puts on
+	// either side of 0.02 or 0.021
 	const double wall_span = span / std::max(0.01, double(s.rate.load()));
-	if (n.serial != s.serial || s.cur_serial != s.serial || !n.id || !(span > 0.001 && span <= 0.25) || wall_span < 0.021)
+	if (n.serial != s.serial || s.cur_serial != s.serial || !n.id || !(span > 0.001 && span <= 0.25) || wall_span < 0.0215)
 		return nullptr;
 	// (review N2) a picture of another size or format (a resolution change mid-stream): shown when its time comes, the
 	// passes' images made once for it
