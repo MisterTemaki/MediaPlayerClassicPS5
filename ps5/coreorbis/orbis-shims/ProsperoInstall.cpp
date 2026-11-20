@@ -13,6 +13,7 @@
 
 #include "OrbisPaths.h"
 #include "ProsperoAppPlace.h"
+#include "ProsperoHome.h"
 #include "ProsperoUpdate.h"
 
 #include <fcntl.h>
@@ -268,6 +269,8 @@ InstallResult InstallApp()
 			OrbisLog("[install] %s doesn't inflate", f->rel);
 			return InstallResult::Failed;
 		}
+		if (strcmp(f->rel, "sce_sys/param.json") == 0)
+			bytes = WithHomeCategory(bytes, HomeCategory()); // 1.7: Options > Miscellaneous (ProsperoHome.h)
 		const unsigned char* data = reinterpret_cast<const unsigned char*>(bytes.data());
 		const size_t size = bytes.size();
 		if (SameContent(path, data, size))
@@ -341,6 +344,8 @@ int SyncAppMeta()
 		std::string bytes;
 		if (!EmbeddedContents(f, bytes))
 			continue;
+		if (name == "param.json")
+			bytes = WithHomeCategory(bytes, HomeCategory()); // 1.7 (ProsperoHome.h)
 		const unsigned char* data = reinterpret_cast<const unsigned char*>(bytes.data());
 		const size_t size = bytes.size();
 		if (SameContent(path, data, size))

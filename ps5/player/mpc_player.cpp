@@ -252,7 +252,15 @@ struct VFrame
 	double pts;
 	double dur;
 	int serial;
+	uint64_t id = 0; // 1.7: the picture's id (Player::Picture), given as it is queued: the next picture has it already
 };
+
+// 1.6 / 1.7: picture ids, unique across files (Player::Picture, NextPicture)
+uint64_t NewPictureId()
+{
+	static std::atomic<uint64_t> ids{0};
+	return ++ids;
+}
 
 struct SubItem
 {
@@ -846,6 +854,7 @@ struct Player::Impl
 	int cur_serial = -1;
 	uint64_t cur_id = 0;
 	uint64_t pic_serial = 0; // 1.6: unique across files (Player::Picture)
+	AVFrame* peek = nullptr; // 1.7: NextPicture's reference to the picture after the current one
 	// 1.6: the current picture in the CPU's layout when it is the console decoder's own 10-bit one, in place (mpc_vdec.h)
 	AVFrame* cur_cpu = nullptr;
 	uint64_t cur_cpu_id = 0;
@@ -2235,7 +2244,7 @@ struct Player::Impl
 				if (hold_serial.load() == my_serial && serial == my_serial)
 				{
 					av_frame_free(&hold_last.f);
-					hold_last = {f, pts, dur, my_serial};
+					hold_last = {f, pts, dur, my_serial, NewPictureId()};
 					return;
 				}
 			}
@@ -2262,7 +2271,7 @@ struct Player::Impl
 			av_frame_free(&f);
 			return;
 		}
-		frames.push_back({f, pts, dur, my_serial});
+		frames.push_back({f, pts, dur, my_serial, NewPictureId()});
 	}
 
 	void VideoThread()
@@ -2870,6 +2879,7 @@ struct Player::Impl
 		frames.clear();
 		av_frame_free(&hold_last.f);
 		av_frame_free(&cur);
+		av_frame_free(&peek);
 		hwdec::Close(hw);
 		hw = nullptr;
 		hw_active = false;
@@ -3737,6 +3747,7 @@ const Image* Player::CoverArt() const
 bool Player::UpdateVideo()
 {
 	Impl& s = *m;
+	av_frame_free(&s.peek); // (NextPicture's, used by now)
 	if (s.vstream < 0 || s.state == PlayState::Opening || s.state == PlayState::Closed)
 		return false;
 	std::lock_guard<std::mutex> l(s.fmu);
@@ -3798,10 +3809,7 @@ bool Player::UpdateVideo()
 	s.cur_pts = s.frames.front().pts;
 	s.cur_serial = s.frames.front().serial;
 	s.cur_id++;
-	{
-		static std::atomic<uint64_t> serials{0};
-		s.pic_serial = ++serials;
-	}
+	s.pic_serial = s.frames.front().id ? s.frames.front().id : NewPictureId();
 	s.frames.pop_front();
 	s.fcv.notify_all();
 	// pictures per second, measured
@@ -3863,6 +3871,30 @@ const AVFrame* Player::Picture(uint64_t* id) const
 	if (id)
 		*id = s.pic_serial;
 	return f;
+}
+
+const AVFrame* Player::NextPicture(uint64_t* id, double* t)
+{
+	Impl& s = *m;
+	av_frame_free(&s.peek);
+	if (!s.cur || s.paused || s.step_req || s.show_after_seek || s.SeekPending() || s.state != PlayState::Playing)
+		return nullptr;
+	std::lock_guard<std::mutex> l(s.fmu);
+	if (s.frames.empty() || s.hold_serial.load() == s.serial)
+		return nullptr;
+	const VFrame& n = s.frames.front();
+	const double span = n.pts - s.cur_pts;
+	// the same stream run, and two pictures of a film (not a still held, nor a jump in the times)
+	if (n.serial != s.serial || s.cur_serial != s.serial || !n.id || !(span > 0.001 && span <= 0.25))
+		return nullptr;
+	// where the display is between them: the clock as UpdateVideo reads it (with the display delay)
+	const double clock = s.clock.Get() + s.display_delay.load() * s.rate.load();
+	s.peek = av_frame_clone(n.f); // (the queue's own can go on another thread: a seek empties it)
+	if (!s.peek)
+		return nullptr;
+	*id = n.id;
+	*t = std::min(1.0, std::max(0.0, (clock - s.cur_pts) / span));
+	return s.peek;
 }
 
 std::string Player::TakeNotice()

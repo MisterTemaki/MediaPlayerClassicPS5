@@ -131,6 +131,7 @@ enum class OptionsPage : int
 	Keys,
 	Playback,
 	Output,
+	Shaders, // 1.7: Output > Shaders
 	Fullscreen,
 	Subtitles,
 	DefaultStyle,
@@ -211,6 +212,21 @@ struct Settings
 	int video_renderer = 0;
 	int gpu_start = 0; // 0 Automatic (software after a failed GPU start, until explicitly retried), 1 CPU only
 	int video_resizer = 0; // the GPU's scaling: 0 bilinear, 1 bicubic
+	// 1.7: Options > Output > Shaders: the GPU's post-processing of the video (docs/POST-PROCESSING.md). The preset:
+	// 0 Off (1.6's single pass, the default), 1 Performance, 2 Quality, 3 Experimental, 4 Custom (the post_* below)
+	int post_preset = 0;
+	bool post_deband = true;
+	int post_deband_strength = 100; // percent, 50..300
+	bool post_deblock = true;
+	int post_deblock_strength = 100;
+	int post_scaler = 0;   // 0 FSR 1, 1 Lanczos, 2 bicubic, 3 bilinear
+	int post_sharpen = 88; // FSR 1's sharpening (RCAS), 0..100 %: 100 the most (0 stops), 0 the least (2 stops)
+	bool post_motion = false;
+	int post_scene = 12; // percent: the mean luma difference above which two pictures aren't blended (a cut)
+	// the colour controls, with any preset but Off
+	int post_brightness = 0;   // -100..100
+	int post_contrast = 100;   // 0..200 %
+	int post_saturation = 100; // 0..200 %
 	// Subtitles (Default Style): the text formats other than ASS/SSA; sizes in a 288-line script's pixels, as
 	// VSFilter scales SRT text with the picture
 	std::string sub_font; // a file in <data>/fonts ("name.ttf", "name.ttc#1"); "" Selawik, "Roboto" the app's own
@@ -241,6 +257,10 @@ struct Settings
 	// 1.6.3 (#10): Options > Miscellaneous > Backup: the drive mpc-hc.ini is backed up to automatically
 	// (<drive>/mpcps5/backup, mpc_backup.h): "/mnt/usb0".."/mnt/usb7", "/mnt/ext0", "/mnt/ext1"; "" off (the default)
 	std::string backup_drive;
+	// 1.7: Options > Miscellaneous: where the PS5's home screen lists the app: 0 Media (1.6.3's), 1 Games. Written to
+	// the installed copy's sce_sys/param.json at each start (mpc_home.h); the console reads it when it registers the
+	// app (after deleting it from the home screen, ShadowMount+ registers it again)
+	int home_category = 0;
 	// 1.6.3 review: this installation's id (BackupId=, 32 hex digits): made by the first Save, kept by Reset, taken
 	// over by an import. The automatic backup writes only over a backup with the same id (mpc_backup.h).
 	mutable std::string backup_id;

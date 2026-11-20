@@ -2809,7 +2809,7 @@ void InitVideo(bool host_import)
 #include "post_spv.h"
 
 constexpr int kPostRing = 3;
-constexpr int kPyrMax = 6;
+constexpr int kPyrMax = 7;
 constexpr int kPostQueries = 6; // prep | motion | scale, then the final pass: before and after each
 constexpr VkFormat kPostRgb = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
 constexpr VkFormat kPostFlow = VK_FORMAT_R16G16_SFLOAT;
@@ -3323,7 +3323,8 @@ bool PostImages(int pw, int ph)
 }
 
 // motion smoothing's images: the pyramid (the picture's luma at a quarter of its size, at most 960 wide, halved while
-// that leaves 32 pixels or more), the flows at each level, the picture between two
+// that leaves 16 pixels or more: at most 7 levels, whose +-1 searches reach 127 pixels of the finest, 508 of a 4K
+// picture's), the flows at each level, the picture between two
 bool PostMotionImages()
 {
 	if (pv.motion_made)
@@ -3338,7 +3339,7 @@ bool PostMotionImages()
 		pv.lw[pv.levels] = w;
 		pv.lh[pv.levels] = h;
 		pv.levels++;
-		if ((w + 1) / 2 < 32 || (h + 1) / 2 < 8)
+		if ((w + 1) / 2 < 16 || (h + 1) / 2 < 8)
 			break;
 		w = (w + 1) / 2;
 		h = (h + 1) / 2;
@@ -4115,6 +4116,11 @@ void SetVideoPost(const VideoPost& p)
 		c.scaler = VideoScaler::Fsr;
 	std::lock_guard<std::mutex> l(pv.mx);
 	pv.want = c;
+}
+
+bool PostHolds(uint64_t id)
+{
+	return g.ok && pv.ok && FindPostSlot(id) >= 0;
 }
 
 PostStatus TakePostStatus()

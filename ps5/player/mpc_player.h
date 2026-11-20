@@ -188,6 +188,11 @@ public:
 	// 1.6: the current picture as it is, for the GPU (mpc_gpu.h), and an id that changes with each picture shown (unique
 	// across files); nullptr when there is none. Valid until the next UpdateVideo.
 	const AVFrame* Picture(uint64_t* id) const;
+	// 1.7: motion smoothing (Options > Output > Shaders): the picture after the current one as decoded, its id (the one
+	// Picture will give it), and where the display is between the two (*t: 0 the current one, 1 that one); nullptr
+	// when there is none to go to (paused, a seek, a frame step, a still, the queue empty). Valid until the next
+	// UpdateVideo or NextPicture.
+	const AVFrame* NextPicture(uint64_t* id, double* t);
 	int ToneMapMode() const;  // SetToneMapping's
 	int ToneMapWhite() const;
 	// 1.6: how much later than 1.5.4's direct flip a picture reaches the screen (the GPU's swapchain queues one more

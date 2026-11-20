@@ -1692,6 +1692,107 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		s.audio_output = aout->sel;
 	});
 
+	// ---- Output > Shaders (1.7, suggested by Cris Valente): the GPU's post-processing of the video
+	// (docs/POST-PROCESSING.md). A preset, or Custom's own controls; the colour controls with any preset but Off.
+	p = d->NewPage("Shaders", 1);
+	d->Group(p, "Video post-processing (GPU renderer)", 5, 5, 286, 46);
+	d->Text(p, "Preset:", 10, 18, 40, 8);
+	ComboBox* preset = d->Combo(p, 52, 16, 234, 13,
+		{"Off (one pass, as 1.6)", "Performance: FSR 1", "Quality: debanding, deblocking, FSR 1",
+			"Experimental: Quality and motion smoothing", "Custom"},
+		s.post_preset);
+	d->Text(p, s.video_renderer == 0 ? "For the video only. View > Renderer Settings > Display Statistics shows each pass's time."
+									 : "Needs the GPU renderer (Output).",
+		10, 34, 276, 14);
+	d->Group(p, "Custom", 5, 54, 286, 98);
+	CheckBox* deband = d->Check(p, "Debanding", 10, 66, 135, 8, s.post_deband);
+	d->Text(p, "Strength:", 150, 66, 48, 8);
+	NumberBox* debs = d->Number(p, 200, 63, 60, 14, s.post_deband_strength, 50, 300, 10, " %");
+	CheckBox* deblock = d->Check(p, "Deblocking (light)", 10, 82, 135, 8, s.post_deblock);
+	d->Text(p, "Strength:", 150, 82, 48, 8);
+	NumberBox* debl = d->Number(p, 200, 79, 60, 14, s.post_deblock_strength, 50, 300, 10, " %");
+	d->Text(p, "Scaler:", 10, 98, 38, 8);
+	ComboBox* scaler = d->Combo(p, 50, 96, 95, 13, {"FSR 1", "Lanczos", "Bicubic", "Bilinear"}, s.post_scaler);
+	d->Text(p, "Sharpening:", 150, 98, 48, 8);
+	NumberBox* sharpen = d->Number(p, 200, 95, 60, 14, s.post_sharpen, 0, 100, 5, " %");
+	CheckBox* motion = d->Check(p, "Motion smoothing (experimental)", 10, 114, 135, 8, s.post_motion);
+	d->Text(p, "Scene cut:", 150, 114, 48, 8);
+	NumberBox* scene = d->Number(p, 200, 111, 60, 14, s.post_scene, 1, 50, 1, " %");
+	d->Text(p, "Motion smoothing makes pictures between the film's own for the screen's 60 a second; a cut (the "
+			   "pictures more different than the scene cut) is never blended.",
+		10, 128, 276, 20);
+	d->Group(p, "Colour controls", 5, 155, 286, 58);
+	d->Text(p, "Brightness:", 10, 168, 50, 8);
+	NumberBox* bright = d->Number(p, 62, 165, 56, 14, s.post_brightness, -100, 100, 5);
+	d->Text(p, "Contrast:", 126, 168, 40, 8);
+	NumberBox* contrast = d->Number(p, 168, 165, 56, 14, s.post_contrast, 0, 200, 5, " %");
+	d->Text(p, "Saturation:", 10, 185, 50, 8);
+	NumberBox* sat = d->Number(p, 62, 182, 56, 14, s.post_saturation, 0, 200, 5, " %");
+	Button* creset = d->P(p, new Button, 168, 182, 56, 14);
+	creset->text = T("Reset");
+	creset->on_click = [bright, contrast, sat] {
+		bright->value = 0;
+		contrast->value = 100;
+		sat->value = 100;
+	};
+	d->Text(p, "With any preset but Off.", 10, 200, 276, 8);
+	// a preset shows its values in Custom's controls (greyed); Custom shows its own, kept while another is chosen
+	struct CustomValues
+	{
+		bool deband, deblock, motion;
+		int debs, debl, scaler, sharpen, scene;
+	};
+	auto custom = std::make_shared<CustomValues>(CustomValues{s.post_deband, s.post_deblock, s.post_motion,
+		s.post_deband_strength, s.post_deblock_strength, s.post_scaler, s.post_sharpen, s.post_scene});
+	auto shown = std::make_shared<int>(s.post_preset);
+	auto show = [=](int sel) {
+		if (*shown == 4 && sel != 4)
+			*custom = {deband->checked, deblock->checked, motion->checked, debs->value, debl->value, scaler->sel,
+				sharpen->value, scene->value};
+		CustomValues v = *custom;
+		if (sel == 1)
+			v = {false, false, false, 100, 100, 0, 75, 12}; // (mpc_gpu.cpp's presets)
+		else if (sel == 2 || sel == 3)
+			v = {true, true, sel == 3, 100, 100, 0, 88, 12};
+		if (sel != 0)
+		{
+			deband->checked = v.deband;
+			deblock->checked = v.deblock;
+			motion->checked = v.motion;
+			debs->value = v.debs;
+			debl->value = v.debl;
+			scaler->sel = v.scaler;
+			sharpen->value = v.sharpen;
+			scene->value = v.scene;
+		}
+		for (Control* c : std::initializer_list<Control*>{deband, deblock, motion, debs, debl, scaler, sharpen, scene})
+			c->enabled = sel == 4;
+		for (Control* c : std::initializer_list<Control*>{bright, contrast, sat, creset})
+			c->enabled = sel != 0;
+		*shown = sel;
+	};
+	show(s.post_preset);
+	preset->on_change = [preset, show] { show(preset->sel); };
+	d->apply_fns.push_back([&s, preset, show, custom, deband, deblock, motion, debs, debl, scaler, sharpen, scene, bright,
+							   contrast, sat] {
+		show(preset->sel); // (Custom's values into `custom`)
+		const CustomValues& v = preset->sel == 4 ? CustomValues{deband->checked, deblock->checked, motion->checked,
+														 debs->value, debl->value, scaler->sel, sharpen->value, scene->value}
+												 : *custom;
+		s.post_preset = preset->sel;
+		s.post_deband = v.deband;
+		s.post_deblock = v.deblock;
+		s.post_motion = v.motion;
+		s.post_deband_strength = v.debs;
+		s.post_deblock_strength = v.debl;
+		s.post_scaler = v.scaler;
+		s.post_sharpen = v.sharpen;
+		s.post_scene = v.scene;
+		s.post_brightness = bright->value;
+		s.post_contrast = contrast->value;
+		s.post_saturation = sat->value;
+	});
+
 	// ---- Fullscreen (IDD_PPAGEFULLSCREEN) ----
 	p = d->NewPage("Fullscreen");
 	d->Group(p, "Fullscreen monitor", 4, 2, 288, 46);
@@ -1904,7 +2005,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 
 	// ---- Miscellaneous (PS5: the interface scale, the pointer, the shares) ----
 	p = d->NewPage("Miscellaneous");
-	d->Group(p, "Interface (PlayStation 5)", 5, 5, 286, 74);
+	d->Group(p, "Interface (PlayStation 5)", 5, 5, 286, 88);
 	d->Text(p, "Size of the window's text and controls:", 10, 18, 160, 8);
 	ComboBox* scale = d->Combo(p, 175, 16, 110, 13, {"100%", "125%", "150% (recommended)", "175%", "200%"},
 		s.dpi == 96 ? 0 : s.dpi == 120 ? 1 : s.dpi == 168 ? 3 : s.dpi == 192 ? 4 : 2);
@@ -1913,8 +2014,11 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	// the emulator ports' Settings > Debug logs: logs/boot.log in the data folder, on or off at once (off by default)
 	CheckBox* logs = d->Check(p, "Debug logs", 10, 50, 276, 8, s.debug_logs);
 	d->Text(p, "logs/boot.log in the data folder; on or off at once", 22, 62, 264, 8);
-	d->Group(p, "Network locations", 5, 83, 286, 107);
-	ListView* servers = d->P(p, new ListView, 10, 95, 220, 89);
+	// 1.7: where the home screen lists the app (mpc_home: param.json's applicationCategoryType)
+	d->Text(p, "On the PS5's home screen, under:", 10, 77, 160, 8);
+	ComboBox* home = d->Combo(p, 175, 75, 110, 13, {"Media", "Games"}, s.home_category);
+	d->Group(p, "Network locations", 5, 97, 286, 93);
+	ListView* servers = d->P(p, new ListView, 10, 109, 220, 75);
 	servers->columns = {{T("Name"), servers->rect.Width() * 40 / 100}, {T("Address"), servers->rect.Width() * 58 / 100}};
 	auto fill_servers = [&s, servers] {
 		servers->rows.clear();
@@ -1924,9 +2028,9 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 			servers->sel = int(servers->rows.size()) - 1;
 	};
 	fill_servers();
-	Button* addsrv = d->P(p, new Button, 235, 95, 50, 14);
+	Button* addsrv = d->P(p, new Button, 235, 109, 50, 14);
 	addsrv->text = T("Add...");
-	Button* delsrv = d->P(p, new Button, 235, 113, 50, 14);
+	Button* delsrv = d->P(p, new Button, 235, 127, 50, 14);
 	delsrv->text = T("Delete");
 	addsrv->on_click = [&s, fill_servers] {
 		ShowAddNetworkDialog([&s, fill_servers](const std::string& n, const std::string& u) {
@@ -1960,11 +2064,12 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 					o->applied();
 			});
 	};
-	d->apply_fns.push_back([&s, scale, speed, logs] {
+	d->apply_fns.push_back([&s, scale, speed, logs, home] {
 		static const int dpis[] = {96, 120, 144, 168, 192};
 		s.dpi = dpis[std::max(0, std::min(4, scale->sel))];
 		s.cursor_speed = speed->value;
 		s.debug_logs = logs->checked;
+		s.home_category = home->sel;
 	});
 
 	// ---- Miscellaneous > Backup (1.6.3, Sulfurico-One64, #10): the settings kept on a USB drive, and imported back

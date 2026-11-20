@@ -6,6 +6,7 @@
 
 #include "OrbisPaths.h"
 #include "ProsperoVideo.h"
+#include "mpc_settings.h"
 #include "mpc_tonemap.h"
 #include "mpc_vdec.h"
 #include "ps5gpu/gpu.h"
@@ -15,6 +16,7 @@ extern "C" {
 #include <libavutil/time.h>
 }
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <mutex>
@@ -336,7 +338,96 @@ ps5gpu::VideoView View(const CRect& dst, const Options& o)
 std::mutex g_stats_mu;
 double g_stats_t0 = 0;
 std::string g_stats_text, g_stats_short;
+// 1.7: the post-processing asked for (SetPost), and its lines (with the statistics)
+bool g_post_on = false, g_motion = false;
+std::string g_post_text, g_post_short;
+
+// 1.7: Options > Output > Shaders' presets (docs/POST-PROCESSING.md): Performance, Quality, Experimental
+constexpr int kSharpenPerformance = 75, kSharpenQuality = 88; // percent: 0.5 and 0.24 stops of RCAS
+float SharpenStops(int percent)
+{
+	return 2.0f * (1.0f - float(std::max(0, std::min(percent, 100))) / 100.0f);
+}
+
+// the post-processing's line from its status (View > Statistics) and the short one (the OSD)
+void PostLines(const ps5gpu::PostStatus& st, std::string* text, std::string* brief)
+{
+	text->clear();
+	brief->clear();
+	if (!g_post_on)
+		return;
+	if (!st.active)
+	{
+		*text = st.why_off.empty() ? "on (no picture through it now)" : "off: " + st.why_off;
+		return;
+	}
+	char b[256];
+	const double total = st.prep_ms + st.motion_ms + st.scale_ms + st.final_ms;
+	snprintf(b, sizeof(b), "%s%s; prep %.1f ms, motion %.1f ms, scale %.1f ms, final %.1f ms; %s",
+		std::string(st.scaler) == "none" ? "not scaled" : st.scaler, st.motion ? ", motion smoothing" : "", st.prep_ms,
+		st.motion_ms, st.scale_ms, st.final_ms, st.fp16 ? "half precision" : "32-bit");
+	*text = b;
+	snprintf(b, sizeof(b), "shaders %.1f ms", total);
+	*brief = b;
+}
 } // namespace
+
+void SetPost(const Settings& s)
+{
+	ps5gpu::VideoPost p;
+	const int preset = std::max(0, std::min(s.post_preset, 4));
+	if (preset > 0 && s.video_renderer == 0)
+	{
+		p.on = true;
+		p.scaler = ps5gpu::VideoScaler::Fsr;
+		switch (preset)
+		{
+			case 1: // Performance: FSR 1 alone
+				p.sharpness = SharpenStops(kSharpenPerformance);
+				break;
+			case 2: // Quality: debanding, deblocking, FSR 1
+			case 3: // Experimental: and motion smoothing
+				p.deband = p.deblock = true;
+				p.sharpness = SharpenStops(kSharpenQuality);
+				p.motion = preset == 3;
+				break;
+			default: // Custom
+			{
+				static const ps5gpu::VideoScaler kScalers[4] = {ps5gpu::VideoScaler::Fsr, ps5gpu::VideoScaler::Lanczos,
+					ps5gpu::VideoScaler::Bicubic, ps5gpu::VideoScaler::Bilinear};
+				p.deband = s.post_deband;
+				p.deband_strength = s.post_deband_strength / 100.0f;
+				p.deblock = s.post_deblock;
+				p.deblock_strength = s.post_deblock_strength / 100.0f;
+				p.scaler = kScalers[std::max(0, std::min(s.post_scaler, 3))];
+				p.sharpness = SharpenStops(s.post_sharpen);
+				p.motion = s.post_motion;
+				p.scene_threshold = s.post_scene / 100.0f;
+				break;
+			}
+		}
+		p.brightness = s.post_brightness / 100.0f;
+		p.contrast = s.post_contrast / 100.0f;
+		p.saturation = s.post_saturation / 100.0f;
+	}
+	if (p.on != g_post_on || p.motion != g_motion)
+		OrbisLog("[gpu] shaders: %s", !p.on ? "off" : p.motion ? "on, with motion smoothing" : "on");
+	g_post_on = p.on;
+	g_motion = p.on && p.motion;
+	if (Active())
+		ps5gpu::SetVideoPost(p);
+}
+
+bool MotionSmoothing()
+{
+	return g_motion && Active();
+}
+
+bool PostHolds(uint64_t id)
+{
+	return id && Active() && ps5gpu::PostHolds(id);
+}
+
 
 bool Active()
 {
@@ -401,13 +492,15 @@ void Stop()
 		InPlaceDone();
 }
 
-bool Show(const AVFrame* f, uint64_t id, const CRect& dst, const Options& o, std::string* why)
+bool Show(const AVFrame* f, uint64_t id, const CRect& dst, const Options& o, std::string* why, uint64_t from_id, double t)
 {
 	hwdec::CollectPools(ReleaseImport); // the decoder blocks no frame holds any more
 	InPlaceProgress(false);
 	if (!Active() || !f)
 		return false;
-	const ps5gpu::VideoView view = View(dst, o);
+	ps5gpu::VideoView view = View(dst, o);
+	view.motion_from = from_id; // (1.7: the picture between the GPU's `from_id` and this one, at t)
+	view.motion_t = from_id ? t : 1.0;
 	if (g_shown && id == g_shown_id)
 	{
 		ps5gpu::SetVideoView(view);
@@ -416,7 +509,9 @@ bool Show(const AVFrame* f, uint64_t id, const CRect& dst, const Options& o, std
 	ps5gpu::VideoFrame v;
 	std::string w;
 	const hwdec::ZeroCopyInfo* z = hwdec::ZeroCopyOf(f);
-	if (!(z ? DescribeInPlace(f, z, v, w) : Describe(f, v, w)) || !ps5gpu::SetVideo(v, view))
+	const bool described = z ? DescribeInPlace(f, z, v, w) : Describe(f, v, w);
+	v.id = id; // (1.7: the post-processing's ring knows the pictures by the player's ids: motion smoothing names them)
+	if (!described || !ps5gpu::SetVideo(v, view))
 	{
 		if (w.empty())
 			w = "the GPU didn't take it (see the [gpu] lines)";
@@ -496,9 +591,26 @@ std::string TakeStats()
 		else
 			snprintf(b, sizeof(b), "GPU %.1f ms, copy %.1f ms", s.gpu_ms, s.copy_ms);
 		g_stats_short = b;
+		PostLines(ps5gpu::TakePostStatus(), &g_post_text, &g_post_short);
 		g_stats_t0 = now;
 	}
 	return g_stats_text;
+}
+
+std::string PostStats()
+{
+	if (TakeStats().empty())
+		return "";
+	std::lock_guard<std::mutex> l(g_stats_mu);
+	return g_post_text;
+}
+
+std::string PostShortStats()
+{
+	if (TakeStats().empty())
+		return "";
+	std::lock_guard<std::mutex> l(g_stats_mu);
+	return g_post_short;
 }
 
 std::string ShortStats()

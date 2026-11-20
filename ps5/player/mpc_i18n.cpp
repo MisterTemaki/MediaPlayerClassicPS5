@@ -1514,7 +1514,110 @@ const Entry kTable[] = {
 		"Les paramètres importés sont utilisés, mais ils n'ont pas pu être enregistrés : ils seront perdus à la fermeture "
 		"de l'app.",
 		"Die importierten Einstellungen sind aktiv, konnten aber nicht gespeichert werden: Sie gehen verloren, wenn die "
-		"App geschlossen wird."},
+		"App geschlossen wird."},	// 1.7: Options > Output > Shaders, Play > Shaders (the GPU's post-processing, suggested by Cris Valente)
+	{"&Off", "&Desactivado", "&Desligado", "&Désactivé", "&Aus"},
+	{"&Performance (FSR 1)", "&Rendimiento (FSR 1)", "&Desempenho (FSR 1)", "&Performance (FSR 1)", "&Leistung (FSR 1)"},
+	{"&Quality (debanding, deblocking, FSR 1)", "&Calidad (debanding, deblocking, FSR 1)",
+		"&Qualidade (debanding, deblocking, FSR 1)", "&Qualité (debanding, deblocking, FSR 1)",
+		"&Qualität (Debanding, Deblocking, FSR 1)"},
+	{"&Experimental (and motion smoothing)", "&Experimental (y suavizado de movimiento)",
+		"&Experimental (e suavização de movimento)", "&Expérimental (et lissage du mouvement)",
+		"&Experimentell (und Bewegungsglättung)"},
+	{"&Custom", "&Personalizado", "&Personalizado", "&Personnalisé", "&Benutzerdefiniert"},
+	{"&Shader Options...", "&Opciones de shaders...", "&Opções de shaders...", "&Options des shaders...",
+		"&Shader-Optionen..."},
+	{"Shaders: %s", "Shaders: %s", "Shaders: %s", "Shaders : %s", "Shader: %s"},
+	{"Performance", "Rendimiento", "Desempenho", "Performance", "Leistung"},
+	{"Quality", "Calidad", "Qualidade", "Qualité", "Qualität"},
+	{"Experimental", "Experimental", "Experimental", "Expérimental", "Experimentell"},
+	{"Custom", "Personalizado", "Personalizado", "Personnalisé", "Benutzerdefiniert"},
+	{"Shaders", "Shaders", "Shaders", "Shaders", "Shader"},
+	{"Video post-processing (GPU renderer)", "Posprocesado del vídeo (renderizador GPU)",
+		"Pós-processamento do vídeo (renderizador GPU)", "Post-traitement de la vidéo (rendu GPU)",
+		"Video-Nachbearbeitung (GPU-Renderer)"},
+	{"Preset:", "Preajuste:", "Predefinição:", "Préréglage :", "Voreinstellung:"},
+	{"Off (one pass, as 1.6)", "Desactivado (una pasada, como 1.6)", "Desligado (uma passada, como na 1.6)",
+		"Désactivé (une passe, comme la 1.6)", "Aus (ein Durchgang, wie 1.6)"},
+	{"Performance: FSR 1", "Rendimiento: FSR 1", "Desempenho: FSR 1", "Performance : FSR 1", "Leistung: FSR 1"},
+	{"Quality: debanding, deblocking, FSR 1", "Calidad: debanding, deblocking, FSR 1",
+		"Qualidade: debanding, deblocking, FSR 1", "Qualité : debanding, deblocking, FSR 1",
+		"Qualität: Debanding, Deblocking, FSR 1"},
+	{"Experimental: Quality and motion smoothing", "Experimental: Calidad y suavizado de movimiento",
+		"Experimental: Qualidade e suavização de movimento", "Expérimental : Qualité et lissage du mouvement",
+		"Experimentell: Qualität und Bewegungsglättung"},
+	{"For the video only. View > Renderer Settings > Display Statistics shows each pass's time.",
+		"Solo para el vídeo. Ver > Ajustes del renderizador > Mostrar estadísticas muestra el tiempo de cada pasada.",
+		"Só para o vídeo. Exibir > Configurações do renderizador > Mostrar estatísticas mostra o tempo de cada passada.",
+		"Pour la vidéo seulement. Affichage > Paramètres du rendu > Afficher les statistiques montre le temps de chaque "
+		"passe.",
+		"Nur für das Video. Ansicht > Renderer-Einstellungen > Statistiken anzeigen zeigt die Zeit jedes Durchgangs."},
+	{"Needs the GPU renderer (Output).", "Necesita el renderizador GPU (Salida).", "Precisa do renderizador GPU (Saída).",
+		"Nécessite le rendu GPU (Sortie).", "Braucht den GPU-Renderer (Ausgabe)."},
+	{"Debanding", "Debanding", "Debanding", "Debanding", "Debanding"},
+	{"Strength:", "Intensidad:", "Intensidade:", "Intensité :", "Stärke:"},
+	{"Deblocking (light)", "Deblocking (suave)", "Deblocking (leve)", "Deblocking (léger)", "Deblocking (leicht)"},
+	{"Scaler:", "Escalador:", "Escalonador:", "Mise à l'échelle :", "Skalierer:"},
+	{"FSR 1", "FSR 1", "FSR 1", "FSR 1", "FSR 1"},
+	{"Lanczos", "Lanczos", "Lanczos", "Lanczos", "Lanczos"},
+	{"Bicubic", "Bicúbico", "Bicúbico", "Bicubique", "Bikubisch"},
+	{"Bilinear", "Bilineal", "Bilinear", "Bilinéaire", "Bilinear"},
+	{"Sharpening:", "Nitidez:", "Nitidez:", "Netteté :", "Schärfe:"},
+	{"Motion smoothing (experimental)", "Suavizado de movimiento (experimental)", "Suavização de movimento (experimental)",
+		"Lissage du mouvement (expérimental)", "Bewegungsglättung (experimentell)"},
+	{"Scene cut:", "Corte de escena:", "Corte de cena:", "Changement de plan :", "Szenenschnitt:"},
+	{"Motion smoothing makes pictures between the film's own for the screen's 60 a second; a cut (the pictures more "
+	 "different than the scene cut) is never blended.",
+		"El suavizado de movimiento crea imágenes entre las de la película para las 60 por segundo de la pantalla; un "
+		"corte (imágenes más distintas que el corte de escena) nunca se mezcla.",
+		"A suavização de movimento cria imagens entre as do filme para as 60 por segundo da tela; um corte (imagens mais "
+		"diferentes que o corte de cena) nunca é misturado.",
+		"Le lissage du mouvement crée des images entre celles du film pour les 60 par seconde de l'écran ; un changement "
+		"de plan (des images plus différentes que le seuil) n'est jamais mélangé.",
+		"Die Bewegungsglättung erzeugt Bilder zwischen denen des Films für die 60 pro Sekunde des Bildschirms; ein "
+		"Schnitt (Bilder, die sich stärker als der Szenenschnitt unterscheiden) wird nie überblendet."},
+	{"Colour controls", "Controles de color", "Controles de cor", "Réglages des couleurs", "Farbregler"},
+	{"Brightness:", "Brillo:", "Brilho:", "Luminosité :", "Helligkeit:"},
+	{"Contrast:", "Contraste:", "Contraste:", "Contraste :", "Kontrast:"},
+	{"Saturation:", "Saturación:", "Saturação:", "Saturation :", "Sättigung:"},
+	{"With any preset but Off.", "Con cualquier preajuste salvo Desactivado.", "Com qualquer predefinição exceto Desligado.",
+		"Avec tout préréglage sauf Désactivé.", "Mit jeder Voreinstellung außer Aus."},
+	// 1.7: Options > Miscellaneous, the home screen's category (param.json's applicationCategoryType)
+	{"On the PS5's home screen, under:", "En la pantalla de inicio de la PS5, en:", "Na tela inicial do PS5, em:",
+		"Sur l'écran d'accueil de la PS5, dans :", "Auf dem Startbildschirm der PS5 unter:"},
+	{"Media", "Multimedia", "Mídia", "Multimédia", "Medien"},
+	{"Games", "Juegos", "Jogos", "Jeux", "Spiele"},
+	{"The app's param.json couldn't be changed: %s.\n\nThe home screen keeps listing the app where it is.",
+		"No se pudo cambiar el param.json de la app: %s.\n\nLa pantalla de inicio sigue mostrando la app donde está.",
+		"Não foi possível alterar o param.json do app: %s.\n\nA tela inicial continua mostrando o app onde ele está.",
+		"Le param.json de l'app n'a pas pu être modifié : %s.\n\nL'écran d'accueil garde l'app là où elle est.",
+		"Die param.json der App konnte nicht geändert werden: %s.\n\nDer Startbildschirm zeigt die App weiter dort, wo "
+		"sie ist."},
+	{"The app's param.json now says %s. The PS5 reads it when it adds the app to the home screen: delete the app from "
+	 "the home screen (Options on its card, Delete) and ShadowMount+ adds it again under %s. Your settings, favorites "
+	 "and positions in /data/mpcps5 stay.",
+		"El param.json de la app ahora dice %s. La PS5 lo lee cuando añade la app a la pantalla de inicio: elimina la "
+		"app de la pantalla de inicio (Options en su tarjeta, Eliminar) y ShadowMount+ la vuelve a añadir en %s. Tus "
+		"ajustes, favoritos y posiciones en /data/mpcps5 se conservan.",
+		"O param.json do app agora diz %s. O PS5 o lê quando adiciona o app à tela inicial: exclua o app da tela "
+		"inicial (Options no card dele, Excluir) e o ShadowMount+ o adiciona de novo em %s. Suas configurações, "
+		"favoritos e posições em /data/mpcps5 continuam.",
+		"Le param.json de l'app indique maintenant %s. La PS5 le lit quand elle ajoute l'app à l'écran d'accueil : "
+		"supprimez l'app de l'écran d'accueil (Options sur sa carte, Supprimer) et ShadowMount+ la rajoute dans %s. Vos "
+		"paramètres, favoris et positions dans /data/mpcps5 sont conservés.",
+		"Die param.json der App sagt jetzt %s. Die PS5 liest sie, wenn sie die App zum Startbildschirm hinzufügt: Die "
+		"App vom Startbildschirm löschen (Options auf ihrer Karte, Löschen), und ShadowMount+ fügt sie unter %s wieder "
+		"hinzu. Deine Einstellungen, Favoriten und Positionen in /data/mpcps5 bleiben."},
+	{"the folder the console runs the app from wasn't found", "no se encontró la carpeta desde la que la consola abre la app",
+		"a pasta de onde o console abre o app não foi encontrada", "le dossier d'où la console lance l'app est introuvable",
+		"der Ordner, aus dem die Konsole die App startet, wurde nicht gefunden"},
+	{"the app runs from %s, where nothing can be written", "la app se abre desde %s, donde no se puede escribir nada",
+		"o app é aberto de %s, onde nada pode ser gravado", "l'app est lancée depuis %s, où rien ne peut être écrit",
+		"die App läuft aus %s, wo nichts geschrieben werden kann"},
+	{"the app's param.json couldn't be written", "no se pudo escribir el param.json de la app",
+		"não foi possível gravar o param.json do app", "le param.json de l'app n'a pas pu être écrit",
+		"die param.json der App konnte nicht geschrieben werden"},
+	{"the app's param.json isn't there", "el param.json de la app no está", "o param.json do app não está lá",
+		"le param.json de l'app est absent", "die param.json der App fehlt"},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};

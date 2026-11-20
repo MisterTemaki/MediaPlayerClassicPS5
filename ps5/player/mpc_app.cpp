@@ -28,6 +28,7 @@
 #include "OrbisPaths.h"
 #include "ProsperoAudio.h"
 #include "ProsperoCrash.h"
+#include "ProsperoHome.h"
 #include "ProsperoJailbreak.h"
 #include "ProsperoNotify.h"
 #include "ProsperoSce.h"
@@ -167,6 +168,12 @@ enum Cmd
 	ID_SUB_DELAY_RESET,
 	ID_AUDIO_DELAY_DOWN,
 	ID_AUDIO_DELAY_UP,
+	ID_SHADERS_OFF, // 1.7: Play > Shaders: Options > Output > Shaders' presets (+ preset)
+	ID_SHADERS_PERFORMANCE,
+	ID_SHADERS_QUALITY,
+	ID_SHADERS_EXPERIMENTAL,
+	ID_SHADERS_CUSTOM,
+	ID_SHADERS_OPTIONS,
 	ID_NAVIGATE_SKIPBACK = 400,
 	ID_NAVIGATE_SKIPFORWARD,
 	ID_NAVIGATE_GOTO,
@@ -362,6 +369,8 @@ private:
 	std::vector<MenuItem> FileMenu() const;
 	std::vector<MenuItem> ViewMenu(bool context) const;
 	std::vector<MenuItem> PlayMenu() const;
+	std::vector<MenuItem> ShadersMenu() const;
+	void ApplyHomeScreen(bool said);
 	std::vector<MenuItem> NavigateMenu() const;
 	std::vector<MenuItem> FavoritesMenu() const;
 	std::vector<MenuItem> HelpMenu() const;
@@ -875,6 +884,9 @@ std::vector<std::pair<std::string, std::string>> MainFrame::StatsRows() const
 		const std::string g = gpu::TakeStats();
 		if (!g.empty())
 			rows.push_back({"GPU", g.substr(5)});
+		const std::string sh = gpu::PostStats(); // 1.7: Options > Output > Shaders
+		if (!sh.empty())
+			rows.push_back({"Shaders", sh});
 	}
 	snprintf(b, sizeof(b), "%lld kb/s", (long long)(st.bitrate / 1000));
 	rows.push_back({"Bitrate", b});
@@ -1178,7 +1190,13 @@ void MainFrame::PaintVideo(CDC& dc)
 		o.tone_map = player_.ToneMapMode();
 		o.white_nits = player_.ToneMapWhite();
 		o.resizer = s_.video_resizer;
-		if (pic && gpu::Show(pic, id, video_rect_, o, nullptr))
+		// 1.7: motion smoothing: the picture after this one, at the display's place between the two, once the GPU
+		// holds this one (it was shown, or was the one after before)
+		uint64_t next_id = 0;
+		double t = 1;
+		const AVFrame* next =
+			pic && gpu::MotionSmoothing() && gpu::PostHolds(id) ? player_.NextPicture(&next_id, &t) : nullptr;
+		if (next ? gpu::Show(next, next_id, video_rect_, o, nullptr, id, t) : pic && gpu::Show(pic, id, video_rect_, o, nullptr))
 		{
 			dc.ClearRect(vis);
 			return;
@@ -1308,6 +1326,9 @@ void MainFrame::PaintOsd(CDC& dc)
 		text = text.empty() ? b : text + "   " + b;
 		if (!g.empty())
 			text += "  " + g;
+		const std::string sh = gpu::PostShortStats();
+		if (!sh.empty())
+			text += ", " + sh;
 	}
 	if (text.empty())
 		return;
@@ -1581,13 +1602,27 @@ std::vector<MenuItem> MainFrame::PlayMenu() const
 								M::Cmd("&Playlist", ID_PLAY_REPEAT_WHOLEPLAYLIST).Radio(s_.repeat == 2)}),
 		M::Sep(), M::Cmd("&Decrease Rate", ID_PLAY_DECRATE, Accel(PadAction::Slower)).Enable(loaded), M::Cmd("&Increase Rate", ID_PLAY_INCRATE, Accel(PadAction::Faster)).Enable(loaded),
 		M::Cmd("R&eset Rate", ID_PLAY_RESETRATE, Accel(PadAction::NormalSpeed)).Enable(loaded), M::Sep(), M::Popup("&Filters", {M::Cmd("<empty>", 0).Enable(false)}),
-		M::Popup("S&haders", {M::Cmd("<empty>", 0).Enable(false)}), M::Sep(),
+		M::Popup("S&haders", ShadersMenu()), M::Sep(),
 		M::Popup("&Audio Track", TrackMenu(TrackType::Audio)).Enable(loaded),
 		M::Popup("Su&btitle Track", TrackMenu(TrackType::Subtitle)).Enable(loaded),
 		M::Popup("Vide&o Track", TrackMenu(TrackType::Video)).Enable(loaded), M::Sep(),
 		M::Popup("&Volume", {M::Cmd("&Up", ID_VOLUME_UP, Accel(PadAction::VolumeUp)), M::Cmd("&Down", ID_VOLUME_DOWN, Accel(PadAction::VolumeDown)),
 								M::Cmd("&Mute", ID_VOLUME_MUTE, Accel(PadAction::Mute)).Check(s_.mute)}),
 		M::Popup("Af&ter Playback", after)};
+}
+
+// 1.7: Play > Shaders: Options > Output > Shaders' presets, with the GPU renderer
+std::vector<MenuItem> MainFrame::ShadersMenu() const
+{
+	using M = MenuItem;
+	const bool gpu = s_.video_renderer == 0;
+	const int p = s_.post_preset;
+	return {M::Cmd("&Off", ID_SHADERS_OFF).Radio(p == 0).Enable(gpu),
+		M::Cmd("&Performance (FSR 1)", ID_SHADERS_PERFORMANCE).Radio(p == 1).Enable(gpu),
+		M::Cmd("&Quality (debanding, deblocking, FSR 1)", ID_SHADERS_QUALITY).Radio(p == 2).Enable(gpu),
+		M::Cmd("&Experimental (and motion smoothing)", ID_SHADERS_EXPERIMENTAL).Radio(p == 3).Enable(gpu),
+		M::Cmd("&Custom", ID_SHADERS_CUSTOM).Radio(p == 4).Enable(gpu), M::Sep(),
+		M::Cmd("&Shader Options...", ID_SHADERS_OPTIONS)};
 }
 
 std::vector<MenuItem> MainFrame::NavigateMenu() const
@@ -1767,6 +1802,7 @@ void MainFrame::ApplyAudio()
 	player_.SetDecodeMode(s_.decode_mode);
 	player_.SetToneMapping(s_.hdr_tonemap, s_.hdr_peak);
 	player_.SetSurround(s_.audio_output == 1);
+	gpu::SetPost(s_); // 1.7: Options > Output > Shaders
 }
 
 void MainFrame::Seek(double t)
@@ -2256,6 +2292,22 @@ void MainFrame::Command(int id)
 			break;
 		case ID_VIEW_OPTIONS:
 			ShowOptions(OptionsPage::Last);
+			break;
+		case ID_SHADERS_OFF:
+		case ID_SHADERS_PERFORMANCE:
+		case ID_SHADERS_QUALITY:
+		case ID_SHADERS_EXPERIMENTAL:
+		case ID_SHADERS_CUSTOM:
+		{
+			static const char* const kNames[5] = {"Off", "Performance", "Quality", "Experimental", "Custom"};
+			s.post_preset = id - ID_SHADERS_OFF;
+			ApplyAudio(); // (gpu::SetPost)
+			s.Save();
+			Osd(Fmt(T("Shaders: %s"), T(kNames[s.post_preset])));
+			break;
+		}
+		case ID_SHADERS_OPTIONS:
+			ShowOptions(OptionsPage::Shaders);
 			break;
 		case ID_PLAY_PLAYPAUSE:
 			if (player_.State() == PlayState::Playing)
@@ -3157,11 +3209,58 @@ void MainFrame::NextTrack(TrackType t)
 	OrbisLog("[ui] next audio track: %d", n.id);
 }
 
+// /user/appmeta/<TITLE_ID>: the home screen's copy of the app's sce_sys (MPCPS5_PS5_APPMETA: the host tests')
+static std::string AppMetaDirOfTitle()
+{
+	const char* env = getenv("MPCPS5_PS5_APPMETA");
+	return std::string(env && *env ? env : "/user/appmeta") + "/" MPCPS5_TITLE_ID;
+}
+
+// 1.7: Options > Miscellaneous, "On the PS5's home screen, under": the app's param.json (and the home screen's copy)
+// made to say it (ProsperoHome.h). said: the change was just made in Options (a message tells what follows).
+void MainFrame::ApplyHomeScreen(bool said)
+{
+	const AppPlace& place = mpcupdate::Place();
+	std::string error; // (translated)
+	int r = -1;
+	if (place.unsure || place.source.empty())
+		error = T("the folder the console runs the app from wasn't found");
+	else if (!place.writable)
+		error = Fmt(T("the app runs from %s, where nothing can be written"), place.source.c_str());
+	else
+	{
+		r = ApplyHomeCategory(place.dir, AppMetaDirOfTitle(), s_.home_category, &error);
+		error = T(error.c_str());
+	}
+	if (r < 0)
+		OrbisLog("[home] %s not written: %s (%s)", s_.home_category == 1 ? "Games" : "Media", error.c_str(), place.log.c_str());
+	if (!said)
+		return;
+	const char* where = T(s_.home_category == 1 ? "Games" : "Media");
+	if (r < 0)
+		MessageBox(Fmt(T("The app's param.json couldn't be changed: %s.\n\nThe home screen keeps listing the app where it "
+						 "is."),
+					   error.c_str()),
+			T("Options"), MB_OK, 2);
+	else
+		MessageBox(Fmt(T("The app's param.json now says %s. The PS5 reads it when it adds the app to the home screen: "
+						 "delete the app from the home screen (Options on its card, Delete) and ShadowMount+ adds it again "
+						 "under %s. Your settings, favorites and positions in /data/mpcps5 stay."),
+					   where, where),
+			T("Options"), MB_OK, 1);
+}
+
 void MainFrame::ShowOptions(OptionsPage page)
 {
 	OrbisLog("[ui] Options (page %d)", int(page));
+	auto home_before = std::make_shared<int>(s_.home_category);
 	ShowOptionsDialog(
-		[this] {
+		[this, home_before] {
+			if (s_.home_category != *home_before)
+			{
+				*home_before = s_.home_category;
+				ApplyHomeScreen(true);
+			}
 			ApplyAudio();
 			player_.SetSubtitleDelay(s_.sub_delay_ms / 1000.0);
 			player_.SetAudioDelay(s_.audio_delay_ms / 1000.0);
@@ -3324,8 +3423,14 @@ void MainFrame::DoPadAction(PadAction a, PadButton from, bool repeat)
 		case PadAction::OptionsDefaultStyle:
 		case PadAction::OptionsAudio:
 		case PadAction::OptionsMisc:
-			ShowOptions(OptionsPage(int(a) - int(PadAction::OptionsPlayer)));
+		{
+			// (1.7: Output > Shaders between Output and Fullscreen in the pages, not among the actions)
+			static const OptionsPage kPage[] = {OptionsPage::Player, OptionsPage::Keys, OptionsPage::Playback,
+				OptionsPage::Output, OptionsPage::Fullscreen, OptionsPage::Subtitles, OptionsPage::DefaultStyle,
+				OptionsPage::AudioSwitcher, OptionsPage::Miscellaneous};
+			ShowOptions(kPage[int(a) - int(PadAction::OptionsPlayer)]);
 			break;
+		}
 		default:
 			break;
 	}
@@ -3536,6 +3641,10 @@ int MainFrame::Run(const std::string& first)
 						 "again. Network streams still work."),
 					   MPCPS5_PS5_VERSION),
 			"Media Player Classic Home Cinema", MB_OK, 2);
+	// 1.7: Options > Miscellaneous, the home screen's category, into the app's param.json (an update or another
+	// version's payload wrote its own)
+	if (have_data_)
+		ApplyHomeScreen(false);
 	// an update installed before: is this the new version? (if not, what to do)
 	if (have_data_)
 	{
@@ -3662,6 +3771,8 @@ int MainFrame::Run(const std::string& first)
 				else if (c.compare(0, 6, "eject ") == 0 || c.compare(0, 7, "insert ") == 0)
 					disc::HostEject(c.substr(c.find(' ') + 1), c[0] == 'e'); // a disc taken out / put back (host tests)
 #endif
+				else if (c == "shaders") // 1.7: the post-processing's line (View > Statistics')
+					OrbisLog("[test] shaders [%s] motion %d", gpu::PostStats().c_str(), int(gpu::MotionSmoothing()));
 				else if (c == "state")
 				{
 					const PlayerStats ps = player_.Stats();

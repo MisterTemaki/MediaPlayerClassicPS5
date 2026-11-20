@@ -3,7 +3,9 @@
 //   - Each pixel's vectors to A and to B, from the two flows at its place (the linear approximation of Super SloMo, Jiang
 //     et al. 2018): F(t->0) = -(1 - t) t F01 + t^2 F10, F(t->1) = (1 - t)^2 F01 - t (1 - t) F10.
 //   - A and B sampled where those vectors point, blended by t and by occlusion: where a vector and the other way's
-//     vector at its end don't cancel (forward-backward consistency), that picture is mostly left out.
+//     vector at its end don't cancel (forward-backward consistency), that picture is mostly left out. Where neither
+//     way's vectors hold up (a motion beyond the flow's reach), the nearer picture as it is: never a cross-fade, which
+//     would show a double image.
 //   - A scene change (the coarsest level's mean difference above the threshold): no blend, the nearer picture.
 //
 // SPDX-License-Identifier: MIT
@@ -86,6 +88,11 @@ void main()
 	const hf sigma = hf(pc.tune.z);
 	const hf v0 = hf(1.0) / (hf(1.0) + hf(e0) * hf(e0) / (sigma * sigma));
 	const hf v1 = hf(1.0) / (hf(1.0) + hf(e1) * hf(e1) / (sigma * sigma));
+	if (max(v0, v1) < hf(0.2)) // (both ways off by more than 2 flow pixels)
+	{
+		imageStore(Dst, p, t < 0.5 ? textureLod(I0, pc_ * inv, 0.0) : textureLod(I1, pc_ * inv, 0.0));
+		return;
+	}
 	const hf w0 = hf(1.0 - t) * v0, w1 = hf(t) * v1;
 	const hf3 c0 = hf3(textureLod(I0, (q0 * to_src) * inv, 0.0).rgb);
 	const hf3 c1 = hf3(textureLod(I1, (q1 * to_src) * inv, 0.0).rgb);

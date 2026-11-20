@@ -359,7 +359,7 @@ std::string PadActionText(PadAction a)
 		case PadAction::OptionsMisc:
 		{
 			static const char* const kPages[] = {"Player", "Keys", "Playback", "Output", "Fullscreen", "Subtitles",
-				"Default Style", "Audio Switcher", "Miscellaneous"};
+				"Default Style", "Audio Switcher", "Miscellaneous"}; // (the actions' order, not OptionsPage's)
 			return Fmt(T("Options: %s"), T(kPages[int(a) - int(PadAction::OptionsPlayer)]));
 		}
 		default:
@@ -517,6 +517,32 @@ bool Settings::ReadFile(const std::string& path, bool migrate)
 			gpu_start = Clamp(n, 0, 1);
 		else if (k == "VideoResizer")
 			video_resizer = Clamp(n, 0, 1);
+		else if (k == "PostPreset")
+			post_preset = Clamp(n, 0, 4);
+		else if (k == "PostDeband")
+			post_deband = b;
+		else if (k == "PostDebandStrength")
+			post_deband_strength = Clamp(n, 50, 300);
+		else if (k == "PostDeblock")
+			post_deblock = b;
+		else if (k == "PostDeblockStrength")
+			post_deblock_strength = Clamp(n, 50, 300);
+		else if (k == "PostScaler")
+			post_scaler = Clamp(n, 0, 3);
+		else if (k == "PostSharpen")
+			post_sharpen = Clamp(n, 0, 100);
+		else if (k == "PostMotion")
+			post_motion = b;
+		else if (k == "PostSceneThreshold")
+			post_scene = Clamp(n, 1, 50);
+		else if (k == "PostBrightness")
+			post_brightness = Clamp(n, -100, 100);
+		else if (k == "PostContrast")
+			post_contrast = Clamp(n, 0, 200);
+		else if (k == "PostSaturation")
+			post_saturation = Clamp(n, 0, 200);
+		else if (k == "HomeScreenCategory")
+			home_category = Clamp(n, 0, 1);
 		else if (k == "SubFontSize")
 			sub_font_size = Clamp(n, 8, 72);
 		else if (k == "SubBold")
@@ -677,6 +703,12 @@ bool Settings::Save() const
 		decode_mode);
 	fprintf(f, "VideoRenderer=%d\nVideoResizer=%d\nGpuStart=%d\n", video_renderer, video_resizer, gpu_start);
 	fprintf(f, "HdrOutput=%d\n", hdr_output ? 1 : 0);
+	fprintf(f, "PostPreset=%d\nPostDeband=%d\nPostDebandStrength=%d\nPostDeblock=%d\nPostDeblockStrength=%d\nPostScaler=%d\n"
+			   "PostSharpen=%d\nPostMotion=%d\nPostSceneThreshold=%d\n",
+		post_preset, post_deband ? 1 : 0, post_deband_strength, post_deblock ? 1 : 0, post_deblock_strength, post_scaler,
+		post_sharpen, post_motion ? 1 : 0, post_scene);
+	fprintf(f, "PostBrightness=%d\nPostContrast=%d\nPostSaturation=%d\n", post_brightness, post_contrast, post_saturation);
+	fprintf(f, "HomeScreenCategory=%d\n", home_category);
 	fprintf(f, "SubFont=%s\nSubFontSize=%d\nSubBold=%d\nSubBorderStyle=%d\nSubOutline=%d\nSubShadow=%d\n",
 		Escape(sub_font).c_str(), sub_font_size, sub_bold, sub_border, sub_outline, sub_shadow);
 	fprintf(f, "SubColor=%06X\nSubOutlineColor=%06X\nSubBoxOpacity=%d\nSubMarginBottom=%d\nSubPosition=%d\nSubDelay=%d\n",

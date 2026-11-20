@@ -46,13 +46,13 @@ EMU_SRC := coreorbis/main-boot.cpp \
 	player/mpc_player.cpp player/mpc_res.cpp player/mpc_settings.cpp player/mpc_backup.cpp player/mpc_credentials.cpp player/mpc_smb.cpp player/mpc_ui.cpp \
 	player/mpc_console.cpp player/mpc_vdec.cpp player/mpc_tonemap.cpp player/mpc_update.cpp player/mpc_i18n.cpp \
 	player/mpc_ass.cpp player/mpc_sfnt.cpp player/mpc_disc.cpp player/mpc_gpu.cpp player/mpc_bigmem.cpp \
-	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlaceApp.cpp
+	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoAppPlaceApp.cpp coreorbis/orbis-shims/ProsperoHome.cpp
 # the payloads: the helper, and the installer (= helper + install). ProsperoAppPlace.cpp reads the mount table there
 # (statfs / getfsstat, libkernel_sys); the app has its own build of it without (ProsperoAppPlaceApp.cpp, #3)
 HELPER_SRC := coreorbis/orbis-shims/orbis_paths.cpp coreorbis/orbis-shims/ProsperoNotify.cpp \
 	coreorbis/orbis-shims/ProsperoHelper.cpp coreorbis/orbis-shims/ProsperoCrash.cpp coreorbis/orbis-shims/ProsperoAppPlace.cpp
 INSTALLER_SRC := installer/installer_main.cpp $(HELPER_SRC) coreorbis/orbis-shims/ProsperoInstall.cpp \
-	coreorbis/orbis-shims/ProsperoUpdate.cpp
+	coreorbis/orbis-shims/ProsperoUpdate.cpp coreorbis/orbis-shims/ProsperoHome.cpp
 
 # Ed25519 for the release signatures (Monocypher 4.0.2, BSD-2-Clause / CC0): in the app and the installer, which both
 # link ProsperoUpdate.cpp

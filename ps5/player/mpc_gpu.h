@@ -26,6 +26,7 @@ extern "C" {
 
 namespace mpc
 {
+struct Settings;
 namespace gpu
 {
 // The GPU draws the pictures (ps5video::GpuActive and the video pipeline there).
@@ -50,15 +51,32 @@ struct Options
 // The picture `f` (the player's current one, `id` changing with each new one) in `dst` (surface pixels, the video's
 // whole rectangle: it may reach past the screen). False: the GPU didn't take it (the CPU draws it this time; why says
 // why, once per format). A picture already taken (the same id) is only moved.
-bool Show(const AVFrame* f, uint64_t id, const CRect& dst, const Options& o, std::string* why);
+// 1.7, motion smoothing: `f` the picture after the current one, `from_id` the current one's (PostHolds), `t` where the
+// display is between them (Player::NextPicture): the picture made between the two is shown.
+bool Show(const AVFrame* f, uint64_t id, const CRect& dst, const Options& o, std::string* why, uint64_t from_id = 0,
+	double t = 1);
 // Nothing of the video on the GPU this frame (no picture, a menu over the whole screen, the CPU drew it).
 void Hide();
+
+// 1.7: Options > Output > Shaders: the GPU's post-processing of the next pictures, from the settings (the preset, or
+// Custom's controls; the colour controls with any preset but Off); applied at once. Off, or the software renderer:
+// 1.6's single pass.
+void SetPost(const Settings& s);
+// 1.7: motion smoothing is asked for (Experimental, or Custom with it): the app shows the picture after the current
+// one at the display's place between them (Show's from_id and t) whenever the GPU holds the current one
+bool MotionSmoothing();
+bool PostHolds(uint64_t id);
 
 // The GPU path's times, averaged over half a second: "GPU: upload 0.4 ms (one copy), draw 1.2 ms, present 0.3 ms"
 // (View > Statistics, the log); "" when the GPU isn't drawing.
 std::string TakeStats();
 // The same, short, for the statistics over the video (R3 + Square): "GPU 1.2 ms, copy 0.4 ms" / "GPU 1.2 ms, in place"
 std::string ShortStats();
+// 1.7: the post-processing's line for View > Statistics ("FSR 1, motion smoothing; prep 0.3 ms, motion 1.1 ms, scale
+// 0.6 ms, final 0.2 ms; half precision"), its reason when it couldn't run; "" when it is off. Updated with TakeStats.
+std::string PostStats();
+// ... and for the statistics over the video: "shaders 2.2 ms" ("" when off)
+std::string PostShortStats();
 // How the GPU got the picture it shows now: "in place", "copied" or "none" (the host tests' state line)
 const char* ShownKind();
 } // namespace gpu

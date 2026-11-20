@@ -49,17 +49,18 @@ With **Shaders: Off** (the default) nothing of it is made: the picture is drawn 
    Written to the **src ring**: three pictures, keyed by the player's picture id.
 2. **motion smoothing** (Experimental, off by default; the picture between two decoded ones at the display's
    refresh):
-   - the **pyramid**: each picture's luma at ¼ of its size (at most 960 wide), then halved while that leaves 32 pixels
-     or more (at most six levels: 960 to 30 for a 4K picture);
+   - the **pyramid**: each picture's luma at ¼ of its size (at most 960 wide), then halved while that leaves 16 pixels
+     or more (at most seven levels: 960 to 15 for a 4K picture);
    - the **flow**, coarse to fine, both ways (N → N+1 and N+1 → N): at each level each pixel starts from the coarser
      level's vector, doubled, taken as the median of five around it (a stray vector doesn't spread); it is refined by
      a ±1-pixel search with a 5×5 patch's sum of absolute differences (with a small pull towards the starting vector,
-     so flat areas keep it) and a parabola through the best cost and its neighbours (sub-pixel). Six levels reach 63
-     pixels at the finest level, 252 of a 4K picture's. A pair's flows are made once;
+     so flat areas keep it) and a parabola through the best cost and its neighbours (sub-pixel). Seven levels reach 127
+     pixels at the finest level, 508 of a 4K picture's (1080p: six levels, 252 pixels). A pair's flows are made once;
    - the **warp** at the picture's size, at the display's time t between N and N+1: each pixel's vectors to N and to
      N+1 approximated from the two flows (`F(t→0) = −(1−t)·t·F01 + t²·F10`, `F(t→1) = (1−t)²·F01 − t·(1−t)·F10`), each
      picture sampled there, and blended by t and by **occlusion**: where a vector and the other way's vector at its
-     end don't cancel (forward–backward consistency), that picture is left out;
+     end don't cancel (forward–backward consistency), that picture is left out; where neither way's vectors hold up
+     (a motion beyond the flow's reach), the nearer picture is shown as it is, never a cross-fade (a double image);
    - **scene changes**: the mean difference of the two pictures' coarsest luma above the threshold set in Options:
      no blend, the nearer picture shown.
 

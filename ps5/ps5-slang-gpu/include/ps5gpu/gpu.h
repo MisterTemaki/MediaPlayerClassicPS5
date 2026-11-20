@@ -361,6 +361,9 @@ struct PostStatus
 	std::string why_off; // why the passes aren't used although asked for ("" when they are, or not asked)
 };
 PostStatus TakePostStatus();
+// The post-processing holds this picture (an earlier SetVideo's id, prepared at a Present since): motion smoothing can
+// start from it (VideoView::motion_from). From the thread that calls Present.
+bool PostHolds(uint64_t id);
 
 // ---- genplus's shelf: textured quads under the surface (Config::scene) -----------------------------------------------
 // Coordinates are the surface's; w is each corner's distance from the eye, so the textures are mapped in perspective.
