@@ -3196,7 +3196,8 @@ bool InitPost()
 {
 	pv.tried = true;
 #ifndef __PROSPERO__
-	// host tests: PS5GPU_TEST_POST_FAIL=1: the passes can't be made; =2: their images can't be (PostImages)
+	// host tests: PS5GPU_TEST_POST_FAIL=1: the passes can't be made; =2: their images can't be (PostImages); =3: motion
+	// smoothing's can't be (PostMotionImages)
 	if (const char* e = getenv("PS5GPU_TEST_POST_FAIL"))
 		if (*e == '1')
 			return PostFail("a pipeline couldn't be made (PS5GPU_TEST_POST_FAIL)");
@@ -3297,6 +3298,10 @@ bool PostImages(int pw, int ph)
 {
 	if (pv.pw == pw && pv.ph == ph && pv.big.img && pv.big.w == g.out_w && pv.big.h == g.out_h)
 		return true;
+	// (review L8) the sizes whose images couldn't be made: not tried again at every frame (until the sizes change)
+	static int failed_w = 0, failed_h = 0, failed_ow = 0, failed_oh = 0;
+	if (failed_w == pw && failed_h == ph && failed_ow == g.out_w && failed_oh == g.out_h)
+		return false;
 	FreePostImages();
 	const VkImageUsageFlags use = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	bool ok = MakeImage(pv.big, g.out_w, g.out_h, kPostRgb, use);
@@ -3309,13 +3314,14 @@ bool PostImages(int pw, int ph)
 	if (!ok)
 	{
 		FreePostImages();
-		static int failed_w = 0, failed_h = 0; // (logged once a size: it is tried again each frame)
-		if (failed_w != pw || failed_h != ph)
-			internal::Log("[gpu] post-processing: no memory for %dx%d pictures' images", pw, ph);
+		internal::Log("[gpu] post-processing: no memory for %dx%d pictures' images", pw, ph);
 		failed_w = pw;
 		failed_h = ph;
+		failed_ow = g.out_w;
+		failed_oh = g.out_h;
 		return false;
 	}
+	failed_w = failed_h = 0;
 	pv.pw = pw;
 	pv.ph = ph;
 	internal::Log("[gpu] post-processing: images for %dx%d pictures, %dx%d output", pw, ph, g.out_w, g.out_h);
@@ -3323,8 +3329,8 @@ bool PostImages(int pw, int ph)
 }
 
 // motion smoothing's images: the pyramid (the picture's luma at a quarter of its size, at most 960 wide, halved while
-// that leaves 16 pixels or more: at most 7 levels, whose +-1 searches reach 127 pixels of the finest, 508 of a 4K
-// picture's), the flows at each level, the picture between two
+// that leaves 15 pixels or more: at most 7 levels, 960 to 15 for a 4K picture, whose +-1 searches reach 127 pixels of
+// the finest, 508 of a 4K picture's; 1080p: 6 levels, 252 pixels), the flows at each level, the picture between two
 bool PostMotionImages()
 {
 	if (pv.motion_made)
@@ -3339,13 +3345,17 @@ bool PostMotionImages()
 		pv.lw[pv.levels] = w;
 		pv.lh[pv.levels] = h;
 		pv.levels++;
-		if ((w + 1) / 2 < 16 || (h + 1) / 2 < 8)
+		if ((w + 1) / 2 < 15 || (h + 1) / 2 < 8)
 			break;
 		w = (w + 1) / 2;
 		h = (h + 1) / 2;
 	}
 	const VkImageUsageFlags use = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	bool ok = MakeImage(pv.mid, pv.pw, pv.ph, kPostRgb, use);
+#ifndef __PROSPERO__
+	if (const char* e = getenv("PS5GPU_TEST_POST_FAIL")) // host tests: =3: motion smoothing's images can't be made
+		ok = ok && *e != '3';
+#endif
 	for (int l = 0; ok && l < pv.levels; l++)
 	{
 		for (PostSlot& s : pv.ring)
@@ -3631,12 +3641,14 @@ void RecordPost(VkCommandBuffer cmd)
 			PostSlot& sa = pv.ring[a];
 			PostSlot& sb = pv.ring[b];
 			sa.stamp = pv.frames;
-			if (t <= 0)
+			// t 0, or (review M1) no in-between picture to be had (no memory for motion smoothing's images): the
+			// picture the display is at, the one before -- never the next one early for the whole interval
+			if (t <= 0 || (t < 1 && !PostMotionImages()))
 			{
 				src = &sa.img;
 				src_version = sa.version;
 			}
-			else if (t < 1 && PostMotionImages())
+			else if (t < 1)
 			{
 				if (!sa.pyr_ok)
 					RecordPyramid(cmd, sa, 0);
@@ -4120,7 +4132,13 @@ void SetVideoPost(const VideoPost& p)
 
 bool PostHolds(uint64_t id)
 {
-	return g.ok && pv.ok && FindPostSlot(id) >= 0;
+	bool motion;
+	{
+		std::lock_guard<std::mutex> l(pv.mx);
+		motion = pv.want.on && pv.want.motion;
+	}
+	// (review M1: motion smoothing off, or its images couldn't be made: the program shows its pictures as they come)
+	return motion && g.ok && pv.ok && !pv.motion_failed && FindPostSlot(id) >= 0;
 }
 
 PostStatus TakePostStatus()

@@ -1,7 +1,7 @@
 // ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): motion smoothing's pyramid (docs/POST-PROCESSING.md). One level of a
 // picture's luma pyramid: from the picture itself (mode 0: its luma averaged over each output pixel's footprint, about a
 // quarter of its size, at most 960 pixels wide) or from the level above (mode 1: halved, a 2x2 average). R16_SFLOAT.
-// (gpu.cpp halves it while that leaves 16 pixels or more, at most 7 levels: 960 to 15 for a 4K picture.)
+// (gpu.cpp halves it while that leaves 15 pixels or more, at most 7 levels: 960 to 15 for a 4K picture.)
 //
 // SPDX-License-Identifier: MIT
 #version 450

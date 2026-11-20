@@ -3497,6 +3497,13 @@ expect "grep -qx 'PostPreset=2' $T/root/mpc-hc.ini && grep '\[test\] shaders' $T
 cp "$T/dump/flip00046.ppm" "$WORK/t40-shaders-page.ppm" 2>/dev/null
 cp "$T/dump/flip00058.ppm" "$WORK/t40-shaders-page-quality.ppm" 2>/dev/null
 nosan "$T"
+# (review H1) Custom's values changed on the page are kept: the debanding strength 100 -> 120 %, motion smoothing on
+T=$(newroot t40d2)
+ini "$T" "PostPreset=4"
+rc=$(run "$T" "0:0" "20:cmd shaderoptions;30:key r1;32:key r1;34:key r1;36:key right;38:key right;40:key r1;42:key r1;44:key r1;46:key r1;48:key r1;50:key enter;54:key menu;70:quit" "52")
+expect "[ $rc = 0 ] && grep -qx 'PostPreset=4' $T/root/mpc-hc.ini && grep -qx 'PostDebandStrength=120' $T/root/mpc-hc.ini && grep -qx 'PostMotion=1' $T/root/mpc-hc.ini" "Custom: a strength and Motion smoothing changed on the page, OK: kept (up to review 1 they were put back)"
+cp "$T/dump/flip00052.ppm" "$WORK/t40-custom-page.ppm" 2>/dev/null
+nosan "$T"
 # Custom's own values and the colour controls from mpc-hc.ini: a saturation of 0 makes the picture grey
 T=$(newroot t40e)
 ini "$T" "PostPreset=4
@@ -3534,6 +3541,21 @@ cp "$GM/fmt_yuv420p.nut" "$T/root/media/"
 rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "$SHOT40" "" "$T/root/media/fmt_yuv420p.nut")
 expect "[ $rc = 0 ] && state $T 1 | grep -q ' gpu 0 ' && ! grep -q 'post-processing: \|\[gpu\] shaders: on' $T/root/logs/boot.log" "the software renderer: the shaders aren't used"
 nosan "$T"
+# the library's own tests of the passes (ps5-slang-gpu 1.2 on lavapipe: every layout through prep and each scaler,
+# debanding, deblocking, RCAS, the colour controls, HDR, motion smoothing and a cut, a frame not submitted; the 32-bit
+# builds; the failures), and the HDR10 output with the passes
+LIBT="env ASAN_OPTIONS=detect_leaks=0 timeout 900 $PWD/build/host/mpc-gpu-library-test"
+for m in post post-fp32 "post-fail 1" "post-fail 2" "post-motion-fail 3"; do
+	set -- $m
+	o=$WORK/t40-lib-$1-${2:-0}.txt
+	PS5GPU_TEST_POST_FAIL=${2:-} $LIBT $1 >"$o" 2>&1
+	r=$?
+	expect "[ $r = 0 ] && ! grep -q '^FAIL' $o && [ \$(grep -c '^ok ' $o) -ge 3 ]" "the library's tests, $m: $(grep -c '^ok ' $o) checks pass ($(grep '^FAIL' $o | head -2 | cut -c1-80 | tr '\n' '|'))"
+done
+o=$WORK/t40-hdr.txt
+ASAN_OPTIONS=detect_leaks=0 timeout 600 $PWD/build/host/mpc-hdr-test >"$o" 2>&1
+r=$?
+expect "[ $r = 0 ] && ! grep -q '^FAIL' $o && grep -q '^ok   post-processing on the HDR10 output: HLG to PQ' $o" "the HDR10 output test, with the passes: $(grep -c '^ok ' $o) checks pass"
 # h: the home screen's category (param.json's applicationCategoryType): Games from mpc-hc.ini at the start, into the
 # app's copy and the home screen's; already so the next time; Media again from Options > Miscellaneous
 T=$(newroot t40h)

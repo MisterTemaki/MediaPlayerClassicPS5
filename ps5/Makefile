@@ -27,7 +27,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.6.4
+VERSION ?= 1.7.0
 TITLE_ID ?= PPSA99015
 # where the app looks for its updates (Help, Check for updates): this repository's GitHub releases
 UPDATE_REPO ?= MisterTemaki/MediaPlayerClassicPS5
@@ -491,7 +491,8 @@ $(HOST_OUT)/mpc-hdr-test: tests/hdr_output_test.cpp $(HOST_GPU_OBJ)
 $(HOST_OUT)/mpc-gpu-library-test: $(SLANG_GPU)/tests/gpu_test.cpp $(HOST_GPU_OBJ)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(SLANG_GPU_WARN) $(SLANG_GPU_INC) -o $@ $< $(HOST_GPU_OBJ) -lvulkan -lpthread
 
-test: host test-audit test-theme test-credentials test-credentials-ui $(HOST_OUT)/mpc-credentials-fixture
+test: host test-audit test-theme test-credentials test-credentials-ui $(HOST_OUT)/mpc-credentials-fixture \
+	$(HOST_OUT)/mpc-gpu-library-test $(HOST_OUT)/mpc-hdr-test
 	bash tests/run-tests.sh
 
 # 1.6: the CPU's work per picture, 1.5.4's path against the GPU's (tests/gpu_bench.cpp; optimised, no sanitizers):

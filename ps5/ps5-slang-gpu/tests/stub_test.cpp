@@ -22,5 +22,10 @@ int main()
 		"the stub: the menu is Off alone, Present false, nothing to save");
 	const ps5gpu::Rect r = ps5gpu::Fit(320, 224, 4.0 / 3.0, {0, 0, 1920, 1080}, false);
 	check(r.x == 240 && r.w == 1440 && r.h == 1080, "the stub build has Fit too");
+	ps5gpu::VideoPost post;
+	post.on = true;
+	ps5gpu::SetVideoPost(post);
+	const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
+	check(!st.active && !st.why_off.empty() && !ps5gpu::PostHolds(1), "1.2: the post-processing: not active, says why");
 	return fail;
 }

@@ -1626,6 +1626,7 @@ int Post(bool fp16)
 		ps5gpu::SetVideo(Luma(w, h, ya, uva, 1001), v);
 		Present();
 		const int a_left = At(90, 64).g, a_right = At(154, 64).g;
+		Check(ps5gpu::PostHolds(1001) && !ps5gpu::PostHolds(999), "PostHolds: the picture shown is held, another isn't");
 		v.motion_from = 1001;
 		v.motion_t = 0.5;
 		ps5gpu::SetVideo(Luma(w, h, yb, uvb, 1002), v);
@@ -1722,6 +1723,37 @@ int PostFail()
 	ps5gpu::Shutdown();
 	return g_fail;
 }
+
+// motion smoothing's images can't be made (PS5GPU_TEST_POST_FAIL=3): between two pictures the one before is shown (not
+// the next one early), and PostHolds says no, so the program shows its pictures as they come
+int PostMotionFail()
+{
+	ps5gpu::Config c = BaseConfig();
+	c.video = true;
+	if (!StartOffscreen(kOutW, kOutH, c))
+		return g_fail;
+	std::fill(g_ui.begin(), g_ui.end(), 0u);
+	ps5gpu::VideoPost post = PostOn();
+	post.motion = true;
+	ps5gpu::SetVideoPost(post);
+	std::vector<uint8_t> ya(size_t(kOutW) * kOutH, 40), yb(size_t(kOutW) * kOutH, 200), uva, uvb;
+	ps5gpu::SetVideo(Luma(kOutW, kOutH, ya, uva, 11), FullView());
+	Present();
+	Check(ps5gpu::PostHolds(11), "motion smoothing on: the picture shown is held");
+	ps5gpu::VideoView v = FullView();
+	v.motion_from = 11;
+	v.motion_t = 0.5;
+	ps5gpu::SetVideo(Luma(kOutW, kOutH, yb, uvb, 12), v);
+	Present();
+	const int g = At(100, 60).g;
+	Check(g < 40 && !ps5gpu::TakePostStatus().motion, "no memory for motion smoothing: at t 0.5 the picture before (" +
+														  std::to_string(g) + "), not the next one early");
+	Check(!ps5gpu::PostHolds(11) && !ps5gpu::PostHolds(12), "... and PostHolds says no: the pictures as they come");
+	post.motion = false;
+	ps5gpu::SetVideoPost(post);
+	ps5gpu::Shutdown();
+	return g_fail;
+}
 } // namespace vt
 
 int main(int argc, char** argv)
@@ -1755,7 +1787,9 @@ int main(int argc, char** argv)
 		return vt::Post(false);
 	if (mode == "post-fail") // with PS5GPU_TEST_POST_FAIL=1 or 2
 		return vt::PostFail();
+	if (mode == "post-motion-fail") // with PS5GPU_TEST_POST_FAIL=3
+		return vt::PostMotionFail();
 	fprintf(stderr, "usage: gpu-test unit|presets|formats|ui-straight|damaged <preset>|init|guard <marker>|params <file> set|get|"
-					"video|video-image-fail|video-keep|post|post-fp32|post-fail\n");
+					"video|video-image-fail|video-keep|post|post-fp32|post-fail|post-motion-fail\n");
 	return 2;
 }

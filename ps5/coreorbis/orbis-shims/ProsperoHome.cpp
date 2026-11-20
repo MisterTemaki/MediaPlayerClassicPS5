@@ -57,12 +57,31 @@ bool WriteText(const std::string& path, const std::string& text)
 	return true;
 }
 
-// 1 written, 0 already so, -1 not (missing: -2)
+// the value param.json gives applicationCategoryType ("" when it has none, or not a number)
+std::string CategoryOf(const std::string& param)
+{
+	const std::string key = "\"applicationCategoryType\"";
+	const size_t k = param.find(key);
+	size_t a = k == std::string::npos ? k : param.find(':', k + key.size());
+	if (a == std::string::npos)
+		return "";
+	a++;
+	while (a < param.size() && (param[a] == ' ' || param[a] == '\t'))
+		a++;
+	size_t b = a;
+	while (b < param.size() && isdigit(static_cast<unsigned char>(param[b])))
+		b++;
+	return param.substr(a, b - a);
+}
+
+// 1 written, 0 already so, -1 not (missing: -2; no category in it to change: -3)
 int ApplyTo(const std::string& path, int category, std::string* error)
 {
 	std::string text;
 	if (!ReadText(path, text))
 		return -2;
+	if (CategoryOf(text).empty())
+		return -3; // (review L10: not reported as done)
 	const std::string want = WithHomeCategory(text, category);
 	if (want == text)
 		return 0;
@@ -121,11 +140,19 @@ int ApplyHomeCategory(const std::string& dir, const std::string& appmeta, int ca
 			*error = "the app's param.json isn't there";
 		return -1;
 	}
+	if (app == -3)
+	{
+		OrbisLog("[home] %s/sce_sys/param.json has no applicationCategoryType number", dir.c_str());
+		if (error)
+			*error = "the app's param.json has no category to change";
+		return -1;
+	}
 	if (app < 0)
 		return -1;
 	const int meta = appmeta.empty() ? 0 : ApplyTo(appmeta + "/param.json", category, nullptr); // (as SyncAppMeta: best effort)
+	// (-3: no category in the home screen's copy: left as it is, as one that isn't there)
 	OrbisLog("[home] %s: %s (the home screen's copy: %s)", category == 1 ? "Games" : "Media",
 		app == 1 ? "param.json written" : "param.json already says so",
-		meta == 1 ? "written" : meta == 0 ? "the same" : meta == -2 ? "not there" : "not written");
+		meta == 1 ? "written" : meta == 0 ? "the same" : meta == -2 || meta == -3 ? "not there" : "not written");
 	return app == 1 || meta == 1 ? 1 : 0;
 }

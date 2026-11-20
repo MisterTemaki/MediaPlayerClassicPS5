@@ -1616,6 +1616,12 @@ const Entry kTable[] = {
 		"die param.json der App konnte nicht geschrieben werden"},
 	{"the app's param.json isn't there", "el param.json de la app no está", "o param.json do app não está lá",
 		"le param.json de l'app est absent", "die param.json der App fehlt"},
+	{"the app's param.json has no category to change", "el param.json de la app no tiene una categoría que cambiar",
+		"o param.json do app não tem uma categoria para alterar", "le param.json de l'app n'a pas de catégorie à changer",
+		"die param.json der App hat keine Kategorie zum Ändern"},
+	{"an update of the app isn't finished", "una actualización de la app no ha terminado",
+		"uma atualização do app não terminou", "une mise à jour de l'app n'est pas terminée",
+		"ein Update der App ist nicht abgeschlossen"},
 };
 
 const char* const kLanguageNames[] = {"English", "Español", "Português (Brasil)", "Français", "Deutsch"};

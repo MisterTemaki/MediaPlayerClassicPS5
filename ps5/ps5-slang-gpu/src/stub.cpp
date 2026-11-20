@@ -62,4 +62,13 @@ size_t HostMemoryAlignment() { return 0; }
 HostMemory* ImportHostMemory(void*, size_t) { return nullptr; }
 void ReleaseHostMemory(HostMemory*) {}
 VideoStats TakeVideoStats() { return VideoStats(); }
+// 1.2 (MPC 1.7): the post-processing: nothing to run it on
+void SetVideoPost(const VideoPost&) {}
+PostStatus TakePostStatus()
+{
+	PostStatus s;
+	s.why_off = "no GPU in this build";
+	return s;
+}
+bool PostHolds(uint64_t) { return false; }
 } // namespace ps5gpu

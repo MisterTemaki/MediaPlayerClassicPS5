@@ -1745,7 +1745,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		s.post_deband_strength, s.post_deblock_strength, s.post_scaler, s.post_sharpen, s.post_scene});
 	auto shown = std::make_shared<int>(s.post_preset);
 	auto show = [=](int sel) {
-		if (*shown == 4 && sel != 4)
+		if (*shown == 4) // (review H1: Custom's controls kept whenever the page was on Custom, before anything is shown)
 			*custom = {deband->checked, deblock->checked, motion->checked, debs->value, debl->value, scaler->sel,
 				sharpen->value, scene->value};
 		CustomValues v = *custom;
@@ -1772,12 +1772,9 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	};
 	show(s.post_preset);
 	preset->on_change = [preset, show] { show(preset->sel); };
-	d->apply_fns.push_back([&s, preset, show, custom, deband, deblock, motion, debs, debl, scaler, sharpen, scene, bright,
-							   contrast, sat] {
-		show(preset->sel); // (Custom's values into `custom`)
-		const CustomValues& v = preset->sel == 4 ? CustomValues{deband->checked, deblock->checked, motion->checked,
-														 debs->value, debl->value, scaler->sel, sharpen->value, scene->value}
-												 : *custom;
+	d->apply_fns.push_back([&s, preset, show, custom, bright, contrast, sat] {
+		show(preset->sel); // (Custom's values into `custom`: on Custom, the controls as they are)
+		const CustomValues& v = *custom;
 		s.post_preset = preset->sel;
 		s.post_deband = v.deband;
 		s.post_deblock = v.deblock;

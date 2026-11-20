@@ -28,11 +28,15 @@ With **Shaders: Off** (the default) nothing of it is made: the picture is drawn 
   stream's own transfer (gamma for SDR, the PQ or HLG signal for HDR) and primaries: perceptually even codes, which is
   what debanding, the scalers and FSR 1 want; linear light and the display's primaries only in the final pass. The
   motion vectors are `R16G16_SFLOAT`, the pyramid's luma `R16_SFLOAT`.
-- **Half precision.** Each compute shader is built twice, with and without
-  `GL_EXT_shader_explicit_arithmetic_types_float16`; the FP16 build is used when the device has `shaderFloat16`
-  (`VK_KHR_shader_float16_int8`; RDNA 2 does, at twice the FP32 rate), the FP32 one otherwise. The log says which.
-- **Descriptor sets.** One set layout per pass, one set per pass (written when its images change), the parameters
-  in push constants (≤ 128 bytes): no uniform buffer to keep in step with the frame in flight.
+- **Half precision.** The passes that do the most arithmetic (flow, warp, FSR 1's EASU, and the final pass) are
+  built twice, with and without `GL_EXT_shader_explicit_arithmetic_types_float16`; prep, the pyramid and the other
+  scalers are 32-bit only. The FP16 builds are used when the device has `shaderFloat16` (`VK_KHR_shader_float16_int8`;
+  RDNA 2 does, at twice the FP32 rate) and `shaderInt16`, the 32-bit ones otherwise; the log and View > Statistics
+  say which. The device is made with those features, and with `shaderStorageImageExtendedFormats` (the passes write
+  A2B10G10R10, R16G16 and R16 storage images), when it has them; one that refuses them is made again without.
+- **Descriptor sets.** One set layout per pass, and one set per dispatch of a frame (the pyramids and the flows have
+  14 each), written as the frame is recorded (the frame before is done); the parameters in push constants
+  (≤ 128 bytes): no uniform buffer to keep in step with the frame in flight.
 
 ## The passes
 
@@ -71,12 +75,16 @@ With **Shaders: Off** (the default) nothing of it is made: the picture is drawn 
    1.0, MIT, vendored unchanged in `ps5-slang-gpu/third_party/ffx-fsr1`), **Lanczos** (3 lobes), **bicubic**
    (Catmull-Rom) or **bilinear**, to the picture's rectangle on the display.
 4. **final** (a fragment shader in the frame's render pass, under the UI): **RCAS** (FSR 1's sharpening, the
-   strength in Options) when FSR 1 scaled, **brightness, contrast and saturation**, then what `video.frag` does after
-   its conversion: tone mapping (BT.2390, Hable, Reinhard: the settings of Options > Output) or HDR10 output.
+   strength in Options) when FSR 1 scaled, then what `video.frag` does after its conversion: tone mapping (BT.2390,
+   Hable, Reinhard: the settings of Options > Output) or HDR10 output, then **brightness, contrast and saturation** on
+   the result's codes. On the HDR10 output those are PQ codes: the same setting goes further than on SDR.
 
 Nothing is made again that hasn't changed: a picture is prepared once (again when the prep settings change while it
-is shown), the scaler runs only when its input or the rectangle changes. A paused picture, and the repeats of a 24 fps
-film at 60 Hz, cost the final pass alone.
+is shown), the scaler runs only when its input or the rectangle changes. Without motion smoothing, a paused picture
+and the repeats of a 24 fps film at 60 Hz cost the final pass alone; with it, the warp and the scaler run at every
+refresh (t changes), the flows once per pair. When motion smoothing's images can't be made (no memory), the pictures
+are shown as they come, and the program is told so (`PostHolds`). Pictures that come as often as the screen
+refreshes, or more (60 fps, or 30 fps at twice the speed), aren't smoothed.
 
 ## Timings
 

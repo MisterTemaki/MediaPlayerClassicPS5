@@ -587,6 +587,9 @@ bool InitGpu()
 	g_gpu_variant = variant;
 	g_gpu_works = works;
 	c.host_import = variant == 1 || variant == 3;
+	// 1.7 (review L5): the shaders' half-precision builds only on the start that has VK_KHR_get_physical_device_properties2
+	// on its instance already (the host import's): the variants without an instance extension stay without one
+	c.post_fp16 = c.host_import;
 	ps5gpu::Configure(c);
 	OrbisLog("[video] GPU start: %s %d (%s); the console decoder's compute queues: %s", works ? "the kept variant" : "attempt",
 		variant, GpuVariantName(variant), mpc::hwdec::QueuesExist() ? "there" : "none");

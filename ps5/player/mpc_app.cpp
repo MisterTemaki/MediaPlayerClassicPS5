@@ -1615,13 +1615,13 @@ std::vector<MenuItem> MainFrame::PlayMenu() const
 std::vector<MenuItem> MainFrame::ShadersMenu() const
 {
 	using M = MenuItem;
-	const bool gpu = s_.video_renderer == 0;
+	const bool on_gpu = gpu::Active(); // (review L13: not when the GPU didn't start, whatever the setting)
 	const int p = s_.post_preset;
-	return {M::Cmd("&Off", ID_SHADERS_OFF).Radio(p == 0).Enable(gpu),
-		M::Cmd("&Performance (FSR 1)", ID_SHADERS_PERFORMANCE).Radio(p == 1).Enable(gpu),
-		M::Cmd("&Quality (debanding, deblocking, FSR 1)", ID_SHADERS_QUALITY).Radio(p == 2).Enable(gpu),
-		M::Cmd("&Experimental (and motion smoothing)", ID_SHADERS_EXPERIMENTAL).Radio(p == 3).Enable(gpu),
-		M::Cmd("&Custom", ID_SHADERS_CUSTOM).Radio(p == 4).Enable(gpu), M::Sep(),
+	return {M::Cmd("&Off", ID_SHADERS_OFF).Radio(p == 0).Enable(on_gpu),
+		M::Cmd("&Performance (FSR 1)", ID_SHADERS_PERFORMANCE).Radio(p == 1).Enable(on_gpu),
+		M::Cmd("&Quality (debanding, deblocking, FSR 1)", ID_SHADERS_QUALITY).Radio(p == 2).Enable(on_gpu),
+		M::Cmd("&Experimental (and motion smoothing)", ID_SHADERS_EXPERIMENTAL).Radio(p == 3).Enable(on_gpu),
+		M::Cmd("&Custom", ID_SHADERS_CUSTOM).Radio(p == 4).Enable(on_gpu), M::Sep(),
 		M::Cmd("&Shader Options...", ID_SHADERS_OPTIONS)};
 }
 
@@ -3225,6 +3225,8 @@ void MainFrame::ApplyHomeScreen(bool said)
 	int r = -1;
 	if (place.unsure || place.source.empty())
 		error = T("the folder the console runs the app from wasn't found");
+	else if (access((place.dir + "/update.journal").c_str(), F_OK) == 0)
+		error = T("an update of the app isn't finished"); // (review L10: its files are left to the update's recovery)
 	else if (!place.writable)
 		error = Fmt(T("the app runs from %s, where nothing can be written"), place.source.c_str());
 	else

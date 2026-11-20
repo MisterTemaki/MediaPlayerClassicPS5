@@ -26,12 +26,13 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
   picture's optical flow both ways, coarse to fine, then the picture at the display's time, with occluded areas taken
   from the picture that shows them. A cut (two pictures more different than the **Scene cut** setting) is never
   blended, and where the motion is beyond what the flow can follow the nearer picture is shown as it is, never a
-  double image. It is used while playing; paused, stepped or seeking, the picture is shown as it is.
+  double image. It is used while playing a film slower than the screen (24, 25 or 30 pictures a second; not 50 or
+  60); paused, stepped or seeking, the picture is shown as it is.
 - **Colour controls:** brightness, contrast and saturation, with any preset but Off.
 - **Play > Shaders** switches between the presets at once; **Shader Options...** opens the page.
 - **View > Statistics** has a **Shaders** line with each pass's GPU time per frame (prep, motion smoothing, scale,
-  final); the statistics over the video (R3 + Square) show their sum. A paused picture, and the repeats of a 24 fps
-  film at 60 Hz, cost only the last pass.
+  final); the statistics over the video (R3 + Square) show their sum. Without motion smoothing, a paused picture and
+  the repeats of a 24 fps film at 60 Hz cost only the last pass.
 - HDR10 and HLG films go through the passes in their own signal; tone mapping, or the native HDR10 output, comes
   after, as before.
 - The passes use the GPU's half-precision arithmetic where it has it, and say so in the statistics.
@@ -69,7 +70,9 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
 
 ### Unchanged
 
-- Without a preset, the picture is drawn exactly as in 1.6 (nothing of the passes is made).
+- Without a preset, the picture is drawn as in 1.6 (nothing of the passes is made). The GPU device is now created
+  with the features the passes need, when the GPU has them (storage images of A2B10G10R10 and 16-bit floats, and
+  16-bit arithmetic), with any preset or none.
 - Stop still goes back to the start, and **Play** after a Stop still plays from the start.
 - Backup, dark mode, saved network passwords, settings and favorites behave as in 1.6.3.
 

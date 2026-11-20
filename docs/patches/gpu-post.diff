@@ -1,0 +1,3005 @@
+diff --git a/VENDOR.txt b/VENDOR.txt
+index 144cc17..246a8e8 100644
+--- a/VENDOR.txt
++++ b/VENDOR.txt
+@@ -1,14 +1,19 @@
+ # Base commit below, with MPC local patches; hashes pin the delivered modified copy.
+-# Patches: native HDR10 target, VideoOut callbacks, PQ/HLG output, HDR UI and enumeration errors.
+-# See docs/GPU-HDR-CHANGES.md and docs/patches/gpu-hdr.diff (repository root); this is not an untouched upstream checkout.
++# Patches: native HDR10 target, VideoOut callbacks, PQ/HLG output, HDR UI and enumeration errors (MPC 1.6);
++# the video post-processing (SetVideoPost: shaders/prep, pyr, flow, warp, scale, easu .comp, post.frag; FSR 1 vendored
++# in third_party/ffx-fsr1, MIT) and its device features (MPC 1.7).
++# See docs/GPU-HDR-CHANGES.md, docs/POST-PROCESSING.md, docs/patches/gpu-hdr.diff and docs/patches/gpu-post.diff
++# (repository root); this is not an untouched upstream checkout.
+ commit 5531e732bc76b4eb1c1165f3044e5c0471fe44fa
+ 181314065df2f2fdaf920b1a8b5311daa216a2d6489a06ada5b49cc514d89417  .gitignore
+ 4e35910329ed8442c5babfee979c4e200c884c08553b357e763e6cc82e115b6a  LICENSE
+ 1587364aac37a209d58e1dbb6ffba553b1bab1aec6850d00cf23a139aa4c4742  Makefile
+ 8fe3b51d67e5263b74d92e0b60ff9f7e2c2bf737da09533a538e475e901ac880  README.md
+-1f06b548b31269c163030c380d3e0124dfc9dd1275fdc1c71d72092de7df91f2  include/ps5gpu/gpu.h
++9b4995ccc4730d9ea166e0947e1f723cbff9f794b73bd86c3247bca4b935bac6  include/ps5gpu/gpu.h
+ 4de96dc35f156214e3838ada0c6b0555efdf1a7df22eaf980339ef3a37241c1e  include/ps5gpu/slang.h
+-bcac6cc54216262f1276dfd054e49909f17fb0e393dff13dd3b1af09006d1aaf  mk/slang-gpu.mk
++ae0b02d23fca332d7419d9d46526a2da179127d5d81b2940738cd0682804d9a9  mk/slang-gpu.mk
++cd16749a3712a53f0ff82e2d5c70e427799580ddb9f7dfbc635db56310009f03  shaders/easu.comp
++abc6743ad7483dc99a8445e162742115d952463614e589e63225467c1129d6fa  shaders/flow.comp
+ 8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643  shaders/licences/GPL-2.0.txt
+ 3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  shaders/licences/GPL-3.0.txt
+ c145eefda6620bd9b95df7f18465616c3ed547d2f98b140fb6ed0cf64a04bcf9  shaders/own/crt-blurPi-sharp.slangp
+@@ -20,7 +25,12 @@ c145eefda6620bd9b95df7f18465616c3ed547d2f98b140fb6ed0cf64a04bcf9  shaders/own/cr
+ 13d5d4696dd36c95d18afd5062dc4729bb8893358a0f3bfa8452b9030eab87eb  shaders/own/monoCRT.slangp
+ d66d6c591757eadfd18aca81ce3d4498deca257d6c84d17ad9902d16d84efaaa  shaders/own/newpixie-mini.slangp
+ 2515791adcef326bbd695a39f207fed50421956d79a30ff12e3877d5c39c064e  shaders/plain.slang
++2a69553768b1e0d7f692ddebecf69cba649b2aa94a6ab030babef4bfd00a00e9  shaders/post.frag
++e19c5120d4bc4a41b3cf93882de0885d4a73576ea5bfece0a47872b3db461c38  shaders/post_common.glsl
++f1a140cf6fc5d140a62ada2027e26dc17001674e8e70bb70a94d6fa75b9ada7c  shaders/prep.comp
+ 2a275c31dbf128deccb4f14bfd5e0414ae3004640401824004b5eb899d3fc35b  shaders/presets.txt
++c059203f32af6f81bded796b6259ea8fefa95d85a259f62093e8da2064fa6540  shaders/pyr.comp
++20fbe2bb0bc9d37022afc19da10df525cc1a6d589319960088ff9dd06f055897  shaders/scale.comp
+ 8eeb3017876565e681daf2e7ea4271034f9a1a07a7910abe17da4e581191596a  shaders/slang/REVISION
+ a15d749abba5b84898ebefec04cae2037ef9ca0177d218150c69f7c084fc8099  shaders/slang/bezel/Mega_Bezel/Presets/Base_CRT_Presets/MBZ__3__STD__GDV.slangp
+ 2eb089ad0d52d3c7a499fac3981df52522dcb7444eb8535c47fd4771a44dd688  shaders/slang/bezel/Mega_Bezel/Presets/Base_CRT_Presets/MBZ__5__POTATO__GDV-MINI.slangp
+@@ -289,15 +299,20 @@ fa7d346e3706a351aa77dc8e77bd049b8bfde635baf4376fedcf81f38d9a4008  shaders/slang/
+ 54183a847e747bacd4b4ca5e5a3f2951960126ca48c4f372c0a4ac5435805925  shaders/ui.slang
+ fcf83d9a5add36a7e6bccc007da5a7587da12fd8d0209adc8b20730440552c38  shaders/video.frag
+ 1e510fdd5b0837d1d5d73e66898c87de847de080e62d86c4fe6edc4756f64e36  shaders/video.vert
+-f343f0208a6078d45f764abb47932fb7a14a4bb37faa9151e95fb90635e641c4  src/common.cpp
+-aa816c91ffc392c6c5532a215d5bccf56baec2196c69bf487efd866545d40591  src/gpu.cpp
++c7e34bf6c28f100161fead3ec8a23ec19623bec08142da165226be769547871a  shaders/warp.comp
++cd52c87107bec3309bae8a2ddeef4e7d2ed43d6d325e53a42233b3afa6d20c4b  src/common.cpp
++6b7bfdd19dc388838a416ab8fafb5b8126793e66524f2f0cec52b02b68ed29ef  src/gpu.cpp
+ e813596cc2836f4effa0e7cbda637f38efa6b713d9ee822668e47deb27cac2fa  src/internal.h
+ d5b9a8c5869e75560b0bb40a5e13a39d70be14c9f4149d7bd7031f85f05b206b  src/sha256.cpp
+ 9d8233eb7a92de340f7d928fd38f76ca3e84e1759d4bdff315fd79370e87d261  src/slang_loader.cpp
+-9b3937269dc2473bd37e8078ed86f18a275384f03837b50c1f32313f8d1ca647  src/stub.cpp
+-a89a5565d644d71b9d96732a3eb4cc21983ea1166938e8a46250c329db4f9209  tests/gpu_test.cpp
+-d5407c6ab90f3ee40888ab4ea026abc0a6f9feb1092060dc5f561122c23bfd3f  tests/run-tests.sh
+-53300c142e71072cc79e46b7729dd7ee18f0685e3fc763fa8b780856421924c6  tests/stub_test.cpp
++b5a90dff722cf7cfb3cfb73924e250ae65c258bffc090fb8242d9234141a9026  src/stub.cpp
++9c6cd9c7f73f6c03a08da8c73275983f510fb11588c7b19d0c06e8ba87d3ec8e  tests/gpu_test.cpp
++d57a0bfc65a5747f229473734eca621ec45cdbec0061732e50cad5079144984e  tests/run-tests.sh
++1d14a09958c1250abef96902d82324de9f3aec92bd4a16099b281668ba037745  tests/stub_test.cpp
++db089274ce766da70f5b7d791029c3486f9f9e27c8c79c652689603d3192e802  third_party/ffx-fsr1/LICENSE.txt
++20448ea6bb02ec4f65e10ee84b330af7e6aefc8271ea88f2ecdf2c9063adc713  third_party/ffx-fsr1/PROVENANCE.txt
++f60e2722fcd13989523b9164d776ab382b3692791767f3bf8bb19967f763f3fb  third_party/ffx-fsr1/ffx_a.h
++93c3922362ea7fc99cbcc698ca30c98de4f8c246d1fbb0b09e015ddef38ce3a5  third_party/ffx-fsr1/ffx_fsr1.h
+ adb783e734e906d1f46db5df29991dbde84bdb0ceab502ac2febb44fe3c2b5f4  third_party/glslang/LICENSE.txt
+ e4dabb52553be9ac1bb44976ed26b023ce8f3be651cc69b9b498fd9db0a0e832  third_party/glslang/PROVENANCE.txt
+ 28b306c7d15734d5e91ea771118beb70009a8469d97333964a3f50fb4a877a42  third_party/glslang/SPIRV/GLSL.ext.AMD.h
+diff --git a/include/ps5gpu/gpu.h b/include/ps5gpu/gpu.h
+index 96c8025..fedda20 100644
+--- a/include/ps5gpu/gpu.h
++++ b/include/ps5gpu/gpu.h
+@@ -87,6 +87,9 @@ struct Config
+ 	bool hdr_output = false;
+ 	int (*set_hdr_output)(bool on, int width, int height) = nullptr;
+ 	int (*hdr_output_range)() = nullptr;
++	// 1.2 (MPC 1.7): the post-processing's half-precision builds (VideoPost) when the device has shaderFloat16 and
++	// shaderInt16; false: the FP32 builds always (host tests compare both)
++	bool post_fp16 = true;
+ };
+ // Before Init (a later call changes nothing of a running renderer but the log).
+ void Configure(const Config& config);
+@@ -268,6 +271,9 @@ struct VideoFrame
+ 	// has read it, at a later Present, HideVideo or Shutdown), on the thread that called that.
+ 	void (*release)(void* ctx) = nullptr;
+ 	void* release_ctx = nullptr;
++	// 1.2: the picture's identity (the program's, never 0 for two different pictures; 0: one is made): motion smoothing
++	// (VideoView::motion_from) names the picture before it by this
++	uint64_t id = 0;
+ };
+ // Where and how the picture is drawn; changes at each Present without a new picture.
+ struct VideoView
+@@ -276,6 +282,11 @@ struct VideoView
+ 	ToneMap tone_map = ToneMap::Bt2390;
+ 	double white_nits = 250; // the picture's white after tone mapping
+ 	VideoFilter filter = VideoFilter::Bilinear;
++	// 1.2 (VideoPost::motion): what is shown is the picture motion_t of the way from the picture motion_from (an
++	// earlier SetVideo's id, still in the post-processing's ring) to this one: 0 that one, 1 this one. 0 (no id): this
++	// picture as it is.
++	uint64_t motion_from = 0;
++	double motion_t = 1;
+ };
+ // The video pipeline is there (Config::video, the GPU on, its self-test passed).
+ bool VideoAvailable();
+@@ -309,6 +320,50 @@ struct VideoStats
+ 	double wait_ms = 0;    // per Present, waiting for the GPU and the display
+ };
+ VideoStats TakeVideoStats();
++// ---- 1.2 (Media Player Classic PS5 1.7): the video's post-processing --------------------------------------------------
++// Compute passes between the picture's planes and the screen (docs/POST-PROCESSING.md in the player's repository):
++// prep (the conversion, debanding, deblocking) into a ring of pictures, motion smoothing (optical flow, warping), a
++// scaler (FSR 1 EASU, Lanczos, bicubic, bilinear), then the final pass (FSR 1 RCAS, tone mapping or HDR10 out, colour
++// controls) under the UI surface. Off: 1.1's single pass, nothing of this made. Made on its first use; when anything of
++// it fails (an image, a pipeline), the single pass draws and PostStatus says why.
++enum class VideoScaler
++{
++	Bilinear,
++	Bicubic,
++	Lanczos,
++	Fsr, // FSR 1 EASU when the picture is made larger (with RCAS), bicubic when it is made smaller
++};
++struct VideoPost
++{
++	bool on = false;
++	bool deband = false;
++	float deband_strength = 1.0f; // 0.5 .. 3: the threshold and the grain, times this
++	bool deblock = false;
++	float deblock_strength = 1.0f; // 0.5 .. 3
++	VideoScaler scaler = VideoScaler::Fsr;
++	float sharpness = 0.25f; // RCAS, in stops: 0 the strongest, 2 hardly any
++	bool motion = false;     // motion smoothing (VideoView::motion_from / motion_t)
++	float scene_threshold = 0.12f; // the mean luma difference above which two pictures aren't blended (a cut)
++	float brightness = 0.0f;       // -1 .. 1, added to the codes
++	float contrast = 1.0f;         // 0 .. 2
++	float saturation = 1.0f;       // 0 .. 2
++};
++// For the next Presents (the program's options); no GPU work until a picture is drawn with it.
++void SetVideoPost(const VideoPost& p);
++struct PostStatus
++{
++	bool active = false; // the last picture went through the passes
++	bool fp16 = false;   // their half-precision builds
++	const char* scaler = "";  // what scaled the last picture: "FSR 1", "Lanczos", "bicubic", "bilinear", "none"
++	bool motion = false;      // the last picture was one made between two
++	// GPU milliseconds per drawn frame since the last call (0: not measured)
++	double prep_ms = 0, motion_ms = 0, scale_ms = 0, final_ms = 0;
++	std::string why_off; // why the passes aren't used although asked for ("" when they are, or not asked)
++};
++PostStatus TakePostStatus();
++// The post-processing holds this picture (an earlier SetVideo's id, prepared at a Present since): motion smoothing can
++// start from it (VideoView::motion_from). From the thread that calls Present.
++bool PostHolds(uint64_t id);
+ 
+ // ---- genplus's shelf: textured quads under the surface (Config::scene) -----------------------------------------------
+ // Coordinates are the surface's; w is each corner's distance from the eye, so the textures are mapped in perspective.
+diff --git a/mk/slang-gpu.mk b/mk/slang-gpu.mk
+index ea581fc..4f3ca60 100644
+--- a/mk/slang-gpu.mk
++++ b/mk/slang-gpu.mk
+@@ -18,6 +18,7 @@
+ #   SLANG_GPU_INC                       -I for ps5gpu/gpu.h
+ #   SLANG_GPU_TABLES                    the two generated tables (built-in presets; the shipped presets' manifest)
+ #   SLANG_GPU_VIDEO_SPV                 1.1: the video pass's SPIR-V header (glslangValidator, from shaders/video.*)
++#   SLANG_GPU_POST_SPV                  1.2: the video post-processing's SPIR-V header (shaders/*.comp, post.frag)
+ #   SLANG_GPU_VENDOR_OK                 a stamp: the copy checked (every object and table depends on it)
+ #   $(call SLANG_GPU_OBJECTS,<dir>,<c++>,<flags>,<glslang flags>)  the GPU build's objects under <dir>, rules defined
+ #   $(call SLANG_GPU_STUB_OBJECTS,<dir>,<c++>,<flags>)              the CPU-only build's (common.cpp + stub.cpp)
+@@ -91,12 +92,34 @@ $(SLANG_GPU_VIDEO_SPV): $(SLANG_GPU)/shaders/video.vert $(SLANG_GPU)/shaders/vid
+ 	$(SLANG_GPU_GLSLANG_VALIDATOR) -V --target-env vulkan1.0 --vn kVideoVs -o $@.vs $(SLANG_GPU)/shaders/video.vert >/dev/null
+ 	$(SLANG_GPU_GLSLANG_VALIDATOR) -V --target-env vulkan1.0 --vn kVideoFs -o $@.fs $(SLANG_GPU)/shaders/video.frag >/dev/null
+ 	cat $@.vs $@.fs >$@.part && rm -f $@.vs $@.fs && mv $@.part $@
++# 1.2 (Media Player Classic PS5 1.7): the video post-processing's passes (docs/POST-PROCESSING.md in the player's
++# repository): each compute shader, and post.frag; flow, warp, easu and post twice, the second with POST_FP16 (the
++# device's shaderFloat16 and shaderInt16), "H" at the end of its name
++SLANG_GPU_POST_SRC := $(addprefix $(SLANG_GPU)/shaders/,post_common.glsl prep.comp pyr.comp flow.comp warp.comp scale.comp \
++	easu.comp post.frag) $(SLANG_GPU)/third_party/ffx-fsr1/ffx_a.h $(SLANG_GPU)/third_party/ffx-fsr1/ffx_fsr1.h
++SLANG_GPU_POST_SPV := $(SLANG_GPU_GEN)/post_spv.h
++SLANG_GPU_POST_GLSLANG = $(SLANG_GPU_GLSLANG_VALIDATOR) -V --target-env vulkan1.0 -I$(SLANG_GPU)/shaders
++$(SLANG_GPU_POST_SPV): $(SLANG_GPU_POST_SRC) $(SLANG_GPU_VENDOR_OK)
++	@mkdir -p $(dir $@)
++	rm -f $@.part
++	for s in prep:Prep pyr:Pyr flow:Flow warp:Warp scale:Scale easu:Easu; do \
++		$(SLANG_GPU_POST_GLSLANG) -S comp --vn k$${s#*:}Cs -o $@.one $(SLANG_GPU)/shaders/$${s%%:*}.comp >/dev/null && \
++		cat $@.one >>$@.part || exit 1; \
++	done
++	for s in flow:Flow warp:Warp easu:Easu; do \
++		$(SLANG_GPU_POST_GLSLANG) -DPOST_FP16 -S comp --vn k$${s#*:}CsH -o $@.one $(SLANG_GPU)/shaders/$${s%%:*}.comp >/dev/null && \
++		cat $@.one >>$@.part || exit 1; \
++	done
++	$(SLANG_GPU_POST_GLSLANG) -S frag --vn kPostFs -o $@.one $(SLANG_GPU)/shaders/post.frag >/dev/null && cat $@.one >>$@.part
++	$(SLANG_GPU_POST_GLSLANG) -DPOST_FP16 -S frag --vn kPostFsH -o $@.one $(SLANG_GPU)/shaders/post.frag >/dev/null && \
++		cat $@.one >>$@.part
++	rm -f $@.one && mv $@.part $@
+ 
+ # ---- objects ------------------------------------------------------------------------------------------------------------
+ # $(1) the folder, $(2) the C++ compiler, $(3) the library's flags (optimisation, -fPIC, -march, sanitizers, the Vulkan
+ # headers' -isystem), $(4) glslang's and the tables' (no sanitizer needed)
+ define SLANG_GPU_RULES
+-$(1)/lib/%.o: $(SLANG_GPU)/src/%.cpp $(SLANG_GPU_HEADERS) $(SLANG_GPU_VENDOR_OK) $(SLANG_GPU_VIDEO_SPV)
++$(1)/lib/%.o: $(SLANG_GPU)/src/%.cpp $(SLANG_GPU_HEADERS) $(SLANG_GPU_VENDOR_OK) $(SLANG_GPU_VIDEO_SPV) $(SLANG_GPU_POST_SPV)
+ 	@mkdir -p $$(dir $$@)
+ 	$(2) -std=c++17 $(3) $(SLANG_GPU_WARN) $(SLANG_GPU_INC) -I$(SLANG_GPU_GLSLANG) -I$(SLANG_GPU_GEN) -c -o $$@ $$<
+ $(1)/glslang/%.o: $(SLANG_GPU_GLSLANG)/%.cpp $(SLANG_GPU_VENDOR_OK)
+@@ -126,7 +149,8 @@ SLANG_GPU_IMPORT_ALLOW := --allow libSceAgc.sprx --allow libSceAgcDriver.sprx
+ SLANG_GPU_LIBC_ALLOWED = $(shell sed -n 's/^\([A-Za-z0-9_]*\.o\)[ \t].*/\1/p' $(SLANG_GPU_MITRT)/platform/libc-allow.txt)
+ SLANG_GPU_NOTICES := "ps5-slang-gpu: the GPU renderer (MIT)=$(SLANG_GPU)/LICENSE" \
+ 	"glslang (BSD-3-Clause and others)=$(SLANG_GPU_GLSLANG)/LICENSE.txt" \
+-	"stb_image 2.30 in ps5-slang-gpu (public domain, or MIT)=$(SLANG_GPU)/third_party/stb/LICENSE"
++	"stb_image 2.30 in ps5-slang-gpu (public domain, or MIT)=$(SLANG_GPU)/third_party/stb/LICENSE" \
++	"AMD FidelityFX Super Resolution 1.0 in ps5-slang-gpu (MIT)=$(SLANG_GPU)/third_party/ffx-fsr1/LICENSE.txt"
+ 
+ # $(1) the link's --trace output, $(2) the linked PIE. Each line fails the recipe (and removes the PIE) when its check does.
+ define SLANG_GPU_LINK_CHECKS
+diff --git a/shaders/easu.comp b/shaders/easu.comp
+new file mode 100644
+index 0000000..b101f3d
+--- /dev/null
++++ b/shaders/easu.comp
+@@ -0,0 +1,68 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): the video post-processing's FSR 1 scaler (docs/POST-PROCESSING.md):
++// AMD FidelityFX Super Resolution 1.0's EASU (edge-adaptive spatial upsampling), third_party/ffx-fsr1 (MIT, unchanged),
++// wired as AMD's Vulkan sample wires it (sample/src/VK/FSR_Pass.glsl): 64 invocations make a 16x16 tile, four pixels
++// each, the input read through textureGather. POST_FP16: FSR's half-precision EASU (FsrEasuH). Only the rectangle's
++// part on the display is made (pc.offset: that part's corner in the rectangle). Its sharpening, RCAS, is in post.frag.
++//
++// SPDX-License-Identifier: MIT
++#version 450
++#extension GL_GOOGLE_include_directive : require
++
++layout(set = 0, binding = 0) uniform sampler2D Src; // A2B10G10R10, linear, clamped
++layout(set = 0, binding = 1, rgb10_a2) uniform writeonly image2D Dst;
++
++layout(push_constant) uniform Pc
++{
++	uvec4 con0, con1, con2, con3; // FsrEasuCon's, made on the CPU (gpu.cpp, EasuConstants)
++	ivec4 area;                   // the visible part's corner in the rectangle (x, y), its width and height
++}
++pc;
++
++#define A_GPU 1
++#define A_GLSL 1
++#ifdef POST_FP16
++#define A_HALF 1
++#endif
++#include "../third_party/ffx-fsr1/ffx_a.h"
++
++#ifdef POST_FP16
++#define FSR_EASU_H 1
++AH4 FsrEasuRH(AF2 p) { return AH4(textureGather(Src, p, 0)); }
++AH4 FsrEasuGH(AF2 p) { return AH4(textureGather(Src, p, 1)); }
++AH4 FsrEasuBH(AF2 p) { return AH4(textureGather(Src, p, 2)); }
++#else
++#define FSR_EASU_F 1
++AF4 FsrEasuRF(AF2 p) { return textureGather(Src, p, 0); }
++AF4 FsrEasuGF(AF2 p) { return textureGather(Src, p, 1); }
++AF4 FsrEasuBF(AF2 p) { return textureGather(Src, p, 2); }
++#endif
++#include "../third_party/ffx-fsr1/ffx_fsr1.h"
++
++void Filter(AU2 pos)
++{
++	if (int(pos.x) >= pc.area.z || int(pos.y) >= pc.area.w)
++		return;
++	const AU2 ip = pos + AU2(pc.area.xy);
++#ifdef POST_FP16
++	AH3 c;
++	FsrEasuH(c, ip, pc.con0, pc.con1, pc.con2, pc.con3);
++	imageStore(Dst, ASU2(pos), vec4(vec3(c), 1.0));
++#else
++	AF3 c;
++	FsrEasuF(c, ip, pc.con0, pc.con1, pc.con2, pc.con3);
++	imageStore(Dst, ASU2(pos), vec4(clamp(c, 0.0, 1.0), 1.0));
++#endif
++}
++
++layout(local_size_x = 64) in;
++void main()
++{
++	AU2 gxy = ARmp8x8(gl_LocalInvocationID.x) + AU2(gl_WorkGroupID.x << 4u, gl_WorkGroupID.y << 4u);
++	Filter(gxy);
++	gxy.x += 8u;
++	Filter(gxy);
++	gxy.y += 8u;
++	Filter(gxy);
++	gxy.x -= 8u;
++	Filter(gxy);
++}
+diff --git a/shaders/flow.comp b/shaders/flow.comp
+new file mode 100644
+index 0000000..86313ce
+--- /dev/null
++++ b/shaders/flow.comp
+@@ -0,0 +1,103 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): motion smoothing's optical flow, one level of the pyramid, one way
++// (docs/POST-PROCESSING.md). Coarse to fine: each pixel's vector from picture A to picture B starts from the coarser
++// level's (doubled, the median of five around it: a stray vector doesn't spread), or from this level's last pass, or
++// from zero at the coarsest; it is then refined by a +-1 pixel search around it, a 5x5 patch's sum of absolute
++// differences (with a small pull towards the starting vector, so flat areas keep it), and a parabola through the best
++// cost and its neighbours for the sub-pixel part. Vectors in this level's pixels, R16G16_SFLOAT.
++//
++// SPDX-License-Identifier: MIT
++#version 450
++#extension GL_GOOGLE_include_directive : require
++#include "post_common.glsl"
++
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(set = 0, binding = 0) uniform sampler2D A;    // this level, linear, clamped
++layout(set = 0, binding = 1) uniform sampler2D B;    // this level of the other picture
++layout(set = 0, binding = 2) uniform sampler2D Prev; // the starting vectors (the coarser level, or this one)
++layout(set = 0, binding = 3, rg16f) uniform writeonly image2D Dst;
++
++layout(push_constant) uniform Pc
++{
++	ivec4 mode; // 0: from zero, 1: from the coarser level (doubled), 2: from this level's last pass; width, height
++	vec4 tune;  // the pull towards the starting vector (per pixel of difference), 0, 0, 0
++}
++pc;
++
++hf Sad(vec2 pa, vec2 pb, vec2 inv)
++{
++	hf s = hf(0.0);
++	for (int j = -2; j <= 2; j++)
++		for (int i = -2; i <= 2; i++)
++		{
++			const vec2 o = vec2(i, j);
++			s += abs(hf(textureLod(A, (pa + o) * inv, 0.0).r) - hf(textureLod(B, (pb + o) * inv, 0.0).r));
++		}
++	return s;
++}
++
++float Med3(float a, float b, float c)
++{
++	return max(min(a, b), min(max(a, b), c));
++}
++
++// the median of five values
++float Med5(float a, float b, float c, float d, float e)
++{
++	const float f = max(min(a, b), min(c, d));
++	const float g = min(max(a, b), max(c, d));
++	return Med3(e, f, g);
++}
++
++vec2 Start(ivec2 p, ivec2 size)
++{
++	if (pc.mode.x == 0)
++		return vec2(0.0);
++	const ivec2 psize = textureSize(Prev, 0);
++	const float k = pc.mode.x == 1 ? 2.0 : 1.0;
++	const vec2 c = (vec2(p) + 0.5) / k; // where this pixel falls in the starting level
++	vec2 v[5];
++	const vec2 offs[5] = vec2[5](vec2(0, 0), vec2(-1, 0), vec2(1, 0), vec2(0, -1), vec2(0, 1));
++	for (int n = 0; n < 5; n++)
++		v[n] = textureLod(Prev, (c + offs[n]) / vec2(psize), 0.0).rg;
++	return k * vec2(Med5(v[0].x, v[1].x, v[2].x, v[3].x, v[4].x), Med5(v[0].y, v[1].y, v[2].y, v[3].y, v[4].y));
++}
++
++void main()
++{
++	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++	const ivec2 size = pc.mode.yz;
++	if (p.x >= size.x || p.y >= size.y)
++		return;
++	const vec2 inv = 1.0 / vec2(size);
++	const vec2 pa = vec2(p) + 0.5;
++	const vec2 v0 = Start(p, size);
++	const hf pull = hf(pc.tune.x);
++	hf cost[9];
++	int best = 4;
++	for (int j = -1; j <= 1; j++)
++		for (int i = -1; i <= 1; i++)
++		{
++			const int k = (j + 1) * 3 + (i + 1);
++			cost[k] = Sad(pa, pa + v0 + vec2(i, j), inv) + pull * hf(abs(i) + abs(j));
++			if (cost[k] < cost[best])
++				best = k;
++		}
++	const int bi = best % 3 - 1, bj = best / 3 - 1;
++	vec2 d = vec2(bi, bj);
++	// the sub-pixel part: a parabola through the best cost and its two neighbours, each way, when both are there
++	if (bi == 0)
++	{
++		const float l = float(cost[best - 1]), c = float(cost[best]), r = float(cost[best + 1]);
++		const float den = l - 2.0 * c + r;
++		if (den > 1e-6)
++			d.x += clamp(0.5 * (l - r) / den, -0.5, 0.5);
++	}
++	if (bj == 0)
++	{
++		const float u = float(cost[best - 3]), c = float(cost[best]), w = float(cost[best + 3]);
++		const float den = u - 2.0 * c + w;
++		if (den > 1e-6)
++			d.y += clamp(0.5 * (u - w) / den, -0.5, 0.5);
++	}
++	imageStore(Dst, p, vec4(v0 + d, 0.0, 0.0));
++}
+diff --git a/shaders/post.frag b/shaders/post.frag
+new file mode 100644
+index 0000000..52bc93f
+--- /dev/null
++++ b/shaders/post.frag
+@@ -0,0 +1,75 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): the video post-processing's last pass, a fragment shader in the
++// frame's render pass under the UI surface (docs/POST-PROCESSING.md; the quad: video.vert). Each pixel of the picture's
++// part on the display, from the image the compute passes made (the scaler's at the display's size, or the picture's own
++// when it is shown at its size), in this order:
++//   1. FSR 1's RCAS sharpening when FSR 1 scaled it (third_party/ffx-fsr1, MIT; the strength in stops);
++//   2. to the display: tone mapping of an HDR picture to SDR (BT.2390, Hable, Reinhard: as video.frag), or HDR10 output;
++//   3. MPC-HC's colour controls (brightness, contrast, saturation) on the result's codes.
++//
++// SPDX-License-Identifier: MIT
++#version 450
++#extension GL_GOOGLE_include_directive : require
++#include "post_common.glsl"
++
++layout(location = 0) in vec2 Tc;
++layout(location = 0) out vec4 FragColor;
++layout(set = 0, binding = 0) uniform sampler2D Img; // A2B10G10R10, read with texelFetch (its part pc.tone.yz)
++
++layout(push_constant) uniform Pc
++{
++	layout(offset = 16) ivec4 area; // the image's corner on the display (x, y), flags (1 RCAS, 2 HDR10 out), transfer
++	ivec4 tone;                     // the curve (0 off, 1 BT.2390, 2 Hable, 3 Reinhard); the image's part read (w, h), 0
++	vec4 color;                     // brightness (-1..1), contrast (0..2), saturation (0..2), 0
++	uvec4 rcas;                     // FsrRcasCon's
++	vec4 tm;                        // the curve's top (nits), the white (nits), 1 / white, 0
++	vec4 pq;                        // BT.2390: PqInv(top), PqInv(white) / PqInv(top), ks, 0
++}
++pc;
++
++ivec2 gSize; // the part of the image the passes wrote (it can be larger: made once at the display's size)
++
++#define A_GPU 1
++#define A_GLSL 1
++#ifdef POST_FP16
++#define A_HALF 1
++#endif
++#include "../third_party/ffx-fsr1/ffx_a.h"
++#ifdef POST_FP16
++#define FSR_RCAS_H 1
++AH4 FsrRcasLoadH(ASW2 p) { return AH4(texelFetch(Img, clamp(ivec2(p), ivec2(0), gSize - 1), 0)); }
++void FsrRcasInputH(inout AH1 r, inout AH1 g, inout AH1 b) {}
++#else
++#define FSR_RCAS_F 1
++AF4 FsrRcasLoadF(ASU2 p) { return texelFetch(Img, clamp(ivec2(p), ivec2(0), gSize - 1), 0); }
++void FsrRcasInputF(inout AF1 r, inout AF1 g, inout AF1 b) {}
++#endif
++#include "../third_party/ffx-fsr1/ffx_fsr1.h"
++
++void main()
++{
++	gSize = max(min(pc.tone.yz, textureSize(Img, 0)), ivec2(1));
++	const ivec2 p = clamp(ivec2(gl_FragCoord.xy) - pc.area.xy, ivec2(0), gSize - 1);
++	vec3 c;
++	if ((pc.area.z & 1) != 0)
++	{
++#ifdef POST_FP16
++		AH1 r, g, b;
++		FsrRcasH(r, g, b, AU2(p), pc.rcas);
++		c = vec3(r, g, b);
++#else
++		AF1 r, g, b;
++		FsrRcasF(r, g, b, AU2(p), pc.rcas);
++		c = vec3(r, g, b);
++#endif
++		c = clamp(c, 0.0, 1.0);
++	}
++	else
++		c = texelFetch(Img, p, 0).rgb;
++	const int transfer = pc.area.w;
++	if ((pc.area.z & 2) != 0)
++		c = PostToHdr10(c, transfer);
++	else if (transfer != kPostSdr && pc.tone.x != kPostTmOff)
++		c = PostToneMap(c, transfer, pc.tone.x, pc.tm, pc.pq);
++	c = PostColor(c, pc.color.x, pc.color.y, pc.color.z);
++	FragColor = vec4(c, 1.0);
++}
+diff --git a/shaders/post_common.glsl b/shaders/post_common.glsl
+new file mode 100644
+index 0000000..df21491
+--- /dev/null
++++ b/shaders/post_common.glsl
+@@ -0,0 +1,153 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): what the video post-processing passes share (docs/POST-PROCESSING.md
++// in the player's repository). Included by prep.comp, pyr.comp, flow.comp, warp.comp, scale.comp, easu.comp and
++// post.frag (glslangValidator -I shaders).
++//
++// POST_FP16 (the FP16 build of a pass, used when the device has shaderFloat16 and shaderInt16): `hf` and friends are
++// float16_t, else float. Only arithmetic is half: images are read and written as float.
++//
++// SPDX-License-Identifier: MIT
++#ifndef POST_COMMON_GLSL
++#define POST_COMMON_GLSL
++
++#ifdef POST_FP16
++#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
++#define hf float16_t
++#define hf2 f16vec2
++#define hf3 f16vec3
++#define hf4 f16vec4
++#else
++#define hf float
++#define hf2 vec2
++#define hf3 vec3
++#define hf4 vec4
++#endif
++
++// BT.709 luma (for a picture's motion and its banding: the exact weights don't matter there)
++const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
++
++// Integer hash (a pixel's own random numbers, the same each run: the tests compare pictures)
++uint PostHash(uvec3 v)
++{
++	uint h = v.x * 0x8da6b343u ^ v.y * 0xd8163841u ^ v.z * 0xcb1ab31fu;
++	h ^= h >> 16;
++	h *= 0x7feb352du;
++	h ^= h >> 15;
++	h *= 0x846ca68bu;
++	h ^= h >> 16;
++	return h;
++}
++
++float PostRand(uvec3 v) // 0..1
++{
++	return float(PostHash(v) >> 8) * (1.0 / 16777216.0);
++}
++
++// ---- transfer functions and tone mapping: the same numbers as video.frag (and the player's CPU path) ----------------
++float PostPqEotf(float e) // signal 0..1 -> nits
++{
++	const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
++	const float p = pow(max(e, 0.0), 1.0 / m2);
++	return 10000.0 * pow(max(p - c1, 0.0) / (c2 - c3 * p), 1.0 / m1);
++}
++
++float PostPqInv(float nits) // nits -> signal 0..1
++{
++	const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
++	const float y = pow(max(nits, 0.0) / 10000.0, m1);
++	return pow((c1 + c2 * y) / (1.0 + c3 * y), m2);
++}
++
++float PostHlgInvOetf(float e) // signal 0..1 -> scene light 0..1
++{
++	const float a = 0.17883277, b = 0.28466892, c = 0.55991073;
++	return e <= 0.5 ? e * e / 3.0 : (exp((e - c) / a) + b) / 12.0;
++}
++
++float PostHable(float x)
++{
++	const float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
++	return (x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F) - E / F;
++}
++
++const int kPostSdr = 0, kPostPq = 1, kPostHlg = 2;
++const int kPostTmOff = 0, kPostBt2390 = 1, kPostHable = 2, kPostReinhard = 3;
++
++// nits in -> nits out, from [0, top] to [0, white]; tm: top, white, 1 / white; pq: BT.2390's PqInv(top),
++// PqInv(white) / PqInv(top), ks
++float PostCurve(float L, int curve, vec4 tm, vec4 pq)
++{
++	const float top = tm.x, white = tm.y;
++	if (L <= 0.0)
++		return 0.0;
++	if (top <= white)
++		return L;
++	if (curve == kPostHable)
++		return white * PostHable(L / white * 2.0) / PostHable(top / white * 2.0);
++	if (curve == kPostReinhard)
++	{
++		const float x = L / white, lw2 = (top / white) * (top / white);
++		return white * x * (1.0 + x / lw2) / (1.0 + x);
++	}
++	const float src = pq.x, max_lum = pq.y, ks = pq.z;
++	const float e1 = PostPqInv(L) / src;
++	float e2 = e1;
++	if (e1 > ks && ks < 1.0)
++	{
++		const float t = (e1 - ks) / (1.0 - ks), t2 = t * t, t3 = t2 * t;
++		e2 = (2.0 * t3 - 3.0 * t2 + 1.0) * ks + (t3 - 2.0 * t2 + t) * (1.0 - ks) + (-2.0 * t3 + 3.0 * t2) * max_lum;
++	}
++	return PostPqEotf(min(e2, 1.0) * src);
++}
++
++// an HDR signal (PQ or HLG, BT.2020) to SDR R'G'B' (BT.709, gamma 2.4), as video.frag's ToneMap
++vec3 PostToneMap(vec3 e, int transfer, int curve, vec4 tm, vec4 pq)
++{
++	vec3 lin;
++	if (transfer == kPostHlg)
++	{
++		lin = vec3(PostHlgInvOetf(e.r), PostHlgInvOetf(e.g), PostHlgInvOetf(e.b));
++		const float ys = dot(lin, vec3(0.2627, 0.6780, 0.0593));
++		lin *= 1000.0 * pow(clamp(ys, 0.0, 1.0), 0.2);
++	}
++	else
++		lin = vec3(PostPqEotf(e.r), PostPqEotf(e.g), PostPqEotf(e.b));
++	vec3 c = vec3(dot(vec3(1.6605, -0.5876, -0.0728), lin), dot(vec3(-0.1246, 1.1329, -0.0083), lin),
++		dot(vec3(-0.0182, -0.1006, 1.1187), lin));
++	c = max(c, vec3(0.0));
++	const float mx = min(max(c.r, max(c.g, c.b)), tm.x);
++	const float gain = mx > 0.0 ? PostCurve(mx, curve, tm, pq) / mx * tm.z : tm.z;
++	c = min(c * gain, vec3(1.0));
++	return pow(c, vec3(1.0 / 2.4));
++}
++
++// to the native HDR10 output (PQ, BT.2020): PQ kept; HLG and SDR to absolute light, then PQ (as video.frag)
++vec3 PostToHdr10(vec3 rgb, int transfer)
++{
++	if (transfer == kPostPq)
++		return rgb;
++	vec3 light;
++	if (transfer == kPostHlg)
++	{
++		light = vec3(PostHlgInvOetf(rgb.r), PostHlgInvOetf(rgb.g), PostHlgInvOetf(rgb.b));
++		light *= 1000.0 * pow(max(dot(light, vec3(0.2627, 0.6780, 0.0593)), 0.0), 0.2);
++	}
++	else
++	{
++		light = pow(rgb, vec3(2.4)) * 203.0;
++		light = vec3(dot(light, vec3(0.6274, 0.3293, 0.0433)), dot(light, vec3(0.0691, 0.9195, 0.0114)),
++			dot(light, vec3(0.0164, 0.0880, 0.8956)));
++	}
++	return vec3(PostPqInv(light.r), PostPqInv(light.g), PostPqInv(light.b));
++}
++
++// MPC-HC's colour controls on R'G'B' (codes, 0..1): brightness -1..1 (added), contrast 0..2 and saturation 0..2
++// (times; 1 leaves the picture as it is), around mid grey and the pixel's own luma
++vec3 PostColor(vec3 c, float brightness, float contrast, float saturation)
++{
++	const float y = dot(c, kLuma);
++	c = mix(vec3(y), c, saturation);
++	c = (c - 0.5) * contrast + 0.5 + brightness;
++	return clamp(c, 0.0, 1.0);
++}
++
++#endif
+diff --git a/shaders/prep.comp b/shaders/prep.comp
+new file mode 100644
+index 0000000..a9eb743
+--- /dev/null
++++ b/shaders/prep.comp
+@@ -0,0 +1,153 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): pass 1 of the video post-processing, "prep" (docs/POST-PROCESSING.md
++// in the player's repository). Each pixel of a decoded picture, at the picture's own size:
++//   1. its planes read at their texel centres (the chroma bilinear where the stream sites it), the codes normalised;
++//   2. light deblocking and deringing of the luma (Options: Deblocking): across the 8x8 grid, a step between two blocks
++//      smaller than the texture around it smoothed (H.264's normal-strength rule: |p0 - q0| < alpha, |p1 - p0| < beta,
++//      |q1 - q0| < beta, the change at most tc); a pixel next to a strong edge kept within its neighbours' range;
++//   3. debanding (Options: Debanding): the approach of libplacebo's and f3kdb's (reimplemented, not copied): twice, the
++//      average of four pixels at a random angle and a growing radius taken where it differs from the pixel by less than
++//      the threshold, each component on its own; then a little noise to hide what is left of the steps;
++//   4. the colour matrix to R'G'B' (the stream's transfer and primaries kept: gamma, PQ or HLG codes), clipped to 0..1,
++//      written to the picture's slot of the ring (A2B10G10R10).
++// The same layouts and numbers as video.frag.
++//
++// SPDX-License-Identifier: MIT
++#version 450
++#extension GL_GOOGLE_include_directive : require
++#include "post_common.glsl"
++
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(set = 0, binding = 0) uniform sampler2D P0;
++layout(set = 0, binding = 1) uniform sampler2D P1;
++layout(set = 0, binding = 2) uniform sampler2D P2;
++layout(set = 0, binding = 3, rgb10_a2) uniform writeonly image2D Dst;
++
++layout(push_constant) uniform Pc
++{
++	vec4 norm;       // Y = v * norm.x + norm.y; C = v * norm.z + norm.w (v: the texture's value)
++	vec4 m0, m1, m2; // R', G', B' = dot(mN.xyz, (Y, Cb, Cr))
++	vec4 chroma;     // chroma texels per luma pixel (x, y), the chroma siting's offset in chroma texels (x, y)
++	ivec4 mode;      // layout, flags (1 deband, 2 deblock), packed RGB's swizzle (r | g << 2 | b << 4), the picture's number
++	vec4 band;       // deband threshold and grain (normalised codes), its radius (pixels), deblocking strength
++}
++pc;
++
++const int kPlanar = 0, kSemiUV = 1, kSemiVU = 2, kPacked = 3, kGray = 4, kPlanarGBR = 5;
++
++ivec2 gLsize, gCsize;
++
++vec4 Tex(sampler2D t, ivec2 p, ivec2 size)
++{
++	return texelFetch(t, clamp(p, ivec2(0), size - 1), 0);
++}
++
++// a chroma plane at a luma pixel's centre: bilinear between the chroma texels around it
++vec4 Chroma(sampler2D t, ivec2 p)
++{
++	const vec2 c = (vec2(p) + 0.5) * pc.chroma.xy + pc.chroma.zw - 0.5;
++	const vec2 f = fract(c);
++	const ivec2 i = ivec2(floor(c));
++	return mix(mix(Tex(t, i, gCsize), Tex(t, i + ivec2(1, 0), gCsize), f.x),
++		mix(Tex(t, i + ivec2(0, 1), gCsize), Tex(t, i + ivec2(1, 1), gCsize), f.x), f.y);
++}
++
++// the picture's three components at a pixel, normalised: (Y, Cb, Cr), or (R, G, B) for packed and planar GBR
++vec3 Codes(ivec2 p)
++{
++	const int lay = pc.mode.x;
++	const vec4 a = Tex(P0, p, gLsize);
++	if (lay == kPacked)
++	{
++		const int s = pc.mode.z;
++		return vec3(a[s & 3], a[(s >> 2) & 3], a[(s >> 4) & 3]);
++	}
++	if (lay == kPlanarGBR)
++		return clamp(vec3(Chroma(P2, p).r, a.r, Chroma(P1, p).r) * pc.norm.x + pc.norm.y, 0.0, 1.0);
++	vec2 cbcr = vec2(0.0);
++	if (lay == kPlanar)
++		cbcr = vec2(Chroma(P1, p).r, Chroma(P2, p).r);
++	else if (lay == kSemiUV || lay == kSemiVU)
++	{
++		const vec2 uv = Chroma(P1, p).rg;
++		cbcr = lay == kSemiUV ? uv : uv.yx;
++	}
++	return vec3(a.r * pc.norm.x + pc.norm.y, lay == kGray ? vec2(0.0) : cbcr * pc.norm.z + pc.norm.w);
++}
++
++float Luma(ivec2 p)
++{
++	return Tex(P0, p, gLsize).r * pc.norm.x + pc.norm.y;
++}
++
++// one block edge's filter for the pixel at index k (0..3 of p1 p0 | q0 q1); only p0 and q0 change
++float EdgeFilter(float p1, float p0, float q0, float q1, int k, float s)
++{
++	const float alpha = 0.06 * s, beta = 0.016 * s, tc = 0.02 * s;
++	if (k == 0 || k == 3 || abs(p0 - q0) >= alpha || abs(p1 - p0) >= beta || abs(q1 - q0) >= beta)
++		return k == 0 ? p1 : k == 1 ? p0 : k == 2 ? q0 : q1;
++	const float delta = clamp(((q0 - p0) * 4.0 + (p1 - q1)) / 8.0, -tc, tc);
++	return k == 1 ? p0 + delta : q0 - delta;
++}
++
++// the luma deblocked across the block edge beside it (each way), then kept within its neighbours' range near a strong edge
++float Deblock(ivec2 p, float y)
++{
++	const float s = pc.band.w;
++	for (int axis = 0; axis < 2; axis++)
++	{
++		const int c = axis == 0 ? p.x : p.y;
++		const int bx = c & 7;
++		if (bx != 7 && bx != 0)
++			continue;
++		const int b = bx == 0 ? c : c + 1; // the first pixel after the edge
++		if (b <= 0 || b >= (axis == 0 ? gLsize.x : gLsize.y))
++			continue;
++		const ivec2 d = axis == 0 ? ivec2(1, 0) : ivec2(0, 1);
++		const ivec2 o = axis == 0 ? ivec2(b, p.y) : ivec2(p.x, b);
++		y = EdgeFilter(Luma(o - 2 * d), Luma(o - d), Luma(o), Luma(o + d), bx == 7 ? 1 : 2, s) + (y - Luma(p));
++	}
++	// deringing: near a strong edge (the neighbours' range above 0.2), a lone overshoot is cut to that range
++	float lo = 1.0, hi = 0.0;
++	for (int j = -1; j <= 1; j++)
++		for (int i = -1; i <= 1; i++)
++			if (i != 0 || j != 0)
++			{
++				const float v = Luma(p + ivec2(i, j));
++				lo = min(lo, v);
++				hi = max(hi, v);
++			}
++	return hi - lo > 0.2 * s ? clamp(y, lo, hi) : y;
++}
++
++vec3 Deband(ivec2 p, vec3 c)
++{
++	const float thr = pc.band.x, radius = pc.band.z;
++	const uint seed = uint(pc.mode.w);
++	for (int it = 1; it <= 2; it++)
++	{
++		const float r = radius * float(it) * 0.5 * (0.25 + 0.75 * PostRand(uvec3(p, seed * 8u + uint(it))));
++		const float a = 6.2831853 * PostRand(uvec3(p, seed * 8u + uint(it) + 4u));
++		const ivec2 o1 = ivec2(round(vec2(cos(a), sin(a)) * r)), o2 = ivec2(-o1.y, o1.x);
++		const vec3 avg = (Codes(p + o1) + Codes(p - o1) + Codes(p + o2) + Codes(p - o2)) * 0.25;
++		c = mix(avg, c, greaterThanEqual(abs(avg - c), vec3(thr)));
++	}
++	return c + (PostRand(uvec3(p, seed * 8u + 7u)) - 0.5) * pc.band.y;
++}
++
++void main()
++{
++	gLsize = textureSize(P0, 0);
++	gCsize = textureSize(P1, 0);
++	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++	if (p.x >= gLsize.x || p.y >= gLsize.y)
++		return;
++	const int lay = pc.mode.x;
++	const bool ycc = lay != kPacked && lay != kPlanarGBR;
++	vec3 c = Codes(p);
++	if ((pc.mode.y & 2) != 0 && ycc)
++		c.x = Deblock(p, c.x);
++	if ((pc.mode.y & 1) != 0)
++		c = Deband(p, c);
++	vec3 rgb = ycc ? vec3(dot(pc.m0.xyz, c), dot(pc.m1.xyz, c), dot(pc.m2.xyz, c)) : c;
++	imageStore(Dst, p, vec4(clamp(rgb, 0.0, 1.0), 1.0));
++}
+diff --git a/shaders/pyr.comp b/shaders/pyr.comp
+new file mode 100644
+index 0000000..065e224
+--- /dev/null
++++ b/shaders/pyr.comp
+@@ -0,0 +1,47 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): motion smoothing's pyramid (docs/POST-PROCESSING.md). One level of a
++// picture's luma pyramid: from the picture itself (mode 0: its luma averaged over each output pixel's footprint, about a
++// quarter of its size, at most 960 pixels wide) or from the level above (mode 1: halved, a 2x2 average). R16_SFLOAT.
++// (gpu.cpp halves it while that leaves 15 pixels or more, at most 7 levels: 960 to 15 for a 4K picture.)
++//
++// SPDX-License-Identifier: MIT
++#version 450
++#extension GL_GOOGLE_include_directive : require
++#include "post_common.glsl"
++
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(set = 0, binding = 0) uniform sampler2D Src; // linear filtering, clamped
++layout(set = 0, binding = 1, r16f) uniform writeonly image2D Dst;
++
++layout(push_constant) uniform Pc
++{
++	ivec4 mode; // 0: from the picture, 1: from the level above; the output's width and height
++}
++pc;
++
++void main()
++{
++	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++	const ivec2 out_size = pc.mode.yz;
++	if (p.x >= out_size.x || p.y >= out_size.y)
++		return;
++	const vec2 in_size = vec2(textureSize(Src, 0));
++	const vec2 f = in_size / vec2(out_size); // input pixels per output pixel
++	float acc = 0.0;
++	if (pc.mode.x == 1)
++		acc = textureLod(Src, (vec2(p) + 0.5) / vec2(out_size), 0.0).r; // the 2x2 under it, through the bilinear tap
++	else
++	{
++		// N x N bilinear taps over the footprint, each the average of the 2x2 texels around it
++		const ivec2 n = clamp(ivec2(ceil(f * 0.5)), ivec2(1), ivec2(4));
++		const vec2 step_ = f / vec2(n);
++		const vec2 base = vec2(p) * f;
++		for (int j = 0; j < n.y; j++)
++			for (int i = 0; i < n.x; i++)
++			{
++				const vec2 c = base + (vec2(i, j) + 0.5) * step_;
++				acc += dot(textureLod(Src, c / in_size, 0.0).rgb, kLuma);
++			}
++		acc /= float(n.x * n.y);
++	}
++	imageStore(Dst, p, vec4(acc, 0.0, 0.0, 0.0));
++}
+diff --git a/shaders/scale.comp b/shaders/scale.comp
+new file mode 100644
+index 0000000..8e27478
+--- /dev/null
++++ b/shaders/scale.comp
+@@ -0,0 +1,81 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): the video post-processing's scaler other than FSR 1 (docs/
++// POST-PROCESSING.md): the picture to its rectangle on the display, bilinear (a tent), bicubic (Catmull-Rom) or Lanczos
++// (3 lobes), each widened by the shrink factor when the picture is made smaller (as video.frag does), the weights
++// normalised. Only the rectangle's part on the display is made (the output image's origin is that part's corner).
++//
++// SPDX-License-Identifier: MIT
++#version 450
++#extension GL_GOOGLE_include_directive : require
++#include "post_common.glsl"
++
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(set = 0, binding = 0) uniform sampler2D Src; // A2B10G10R10, nearest or linear: read at texel centres
++layout(set = 0, binding = 1, rgb10_a2) uniform writeonly image2D Dst;
++
++layout(push_constant) uniform Pc
++{
++	vec4 map;   // source pixels per output pixel (x, y); the visible part's corner in the rectangle (output pixels)
++	ivec4 mode; // 0 bilinear, 1 bicubic, 2 Lanczos; the visible part's width and height
++}
++pc;
++
++const float kPi = 3.14159265;
++
++float Kernel(float x, int m)
++{
++	x = abs(x);
++	if (m == 0)
++		return max(0.0, 1.0 - x);
++	if (m == 1)
++	{
++		if (x < 1.0)
++			return (1.5 * x - 2.5) * x * x + 1.0;
++		if (x < 2.0)
++			return ((-0.5 * x + 2.5) * x - 4.0) * x + 2.0;
++		return 0.0;
++	}
++	if (x < 1e-5)
++		return 1.0;
++	if (x >= 3.0)
++		return 0.0;
++	const float a = kPi * x;
++	return 3.0 * sin(a) * sin(a / 3.0) / (a * a);
++}
++
++void main()
++{
++	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++	if (p.x >= pc.mode.y || p.y >= pc.mode.z)
++		return;
++	const int m = pc.mode.x;
++	const ivec2 size = textureSize(Src, 0);
++	const vec2 r = max(pc.map.xy, vec2(1.0)); // the kernel's widening when shrinking
++	const float support = m == 0 ? 1.0 : m == 1 ? 2.0 : 3.0;
++	// where this output pixel's centre falls in the source (texel centres at i + 0.5)
++	const vec2 c = (vec2(p) + pc.map.zw + 0.5) * pc.map.xy - 0.5;
++	const vec2 rr = min(r, vec2(m == 2 ? 2.0 : 4.0));
++	const vec2 lo = floor(c - support * rr) + 1.0, hi = floor(c + support * rr);
++	vec3 acc = vec3(0.0);
++	float wsum = 0.0;
++	for (int j = 0; j < 25; j++)
++	{
++		const float y = lo.y + float(j);
++		if (y > hi.y)
++			break;
++		const float wy = Kernel((y - c.y) / rr.y, m);
++		if (wy == 0.0)
++			continue;
++		for (int i = 0; i < 25; i++)
++		{
++			const float x = lo.x + float(i);
++			if (x > hi.x)
++				break;
++			const float w = Kernel((x - c.x) / rr.x, m) * wy;
++			if (w == 0.0)
++				continue;
++			acc += w * texelFetch(Src, clamp(ivec2(x, y), ivec2(0), size - 1), 0).rgb;
++			wsum += w;
++		}
++	}
++	imageStore(Dst, p, vec4(clamp(wsum != 0.0 ? acc / wsum : vec3(0.0), 0.0, 1.0), 1.0));
++}
+diff --git a/shaders/warp.comp b/shaders/warp.comp
+new file mode 100644
+index 0000000..1dd8b48
+--- /dev/null
++++ b/shaders/warp.comp
+@@ -0,0 +1,105 @@
++// ps5-slang-gpu 1.2 (Media Player Classic PS5 1.7): motion smoothing's picture between two decoded ones, at the display's
++// time t (0: picture A, 1: picture B), at the pictures' own size (docs/POST-PROCESSING.md).
++//   - Each pixel's vectors to A and to B, from the two flows at its place (the linear approximation of Super SloMo, Jiang
++//     et al. 2018): F(t->0) = -(1 - t) t F01 + t^2 F10, F(t->1) = (1 - t)^2 F01 - t (1 - t) F10.
++//   - A and B sampled where those vectors point, blended by t and by occlusion: where a vector and the other way's
++//     vector at its end don't cancel (forward-backward consistency), that picture is mostly left out. Where neither
++//     way's vectors hold up (a motion beyond the flow's reach), the nearer picture as it is: never a cross-fade, which
++//     would show a double image.
++//   - A scene change (the coarsest level's mean difference above the threshold): no blend, the nearer picture.
++//
++// SPDX-License-Identifier: MIT
++#version 450
++#extension GL_GOOGLE_include_directive : require
++#include "post_common.glsl"
++
++layout(local_size_x = 8, local_size_y = 8) in;
++layout(set = 0, binding = 0) uniform sampler2D I0;   // picture A (A2B10G10R10), linear, clamped
++layout(set = 0, binding = 1) uniform sampler2D I1;   // picture B
++layout(set = 0, binding = 2) uniform sampler2D F01;  // A -> B, the finest level (its pixels), linear
++layout(set = 0, binding = 3) uniform sampler2D F10;  // B -> A
++layout(set = 0, binding = 4) uniform sampler2D LowA; // the coarsest luma level of A
++layout(set = 0, binding = 5) uniform sampler2D LowB; // ... of B
++layout(set = 0, binding = 6, rgb10_a2) uniform writeonly image2D Dst;
++
++layout(push_constant) uniform Pc
++{
++	vec4 tune;  // t, the scene change threshold (mean luma difference), the occlusion's scale (flow pixels), 0
++	ivec4 size; // the pictures' width and height, the flow's width and height
++}
++pc;
++
++shared float sDiff[64];
++
++float SceneDiff()
++{
++	const ivec2 ls = textureSize(LowA, 0);
++	const int n = ls.x * ls.y;
++	float acc = 0.0;
++	for (int i = int(gl_LocalInvocationIndex); i < n; i += 64)
++	{
++		const ivec2 q = ivec2(i % ls.x, i / ls.x);
++		acc += abs(texelFetch(LowA, q, 0).r - texelFetch(LowB, q, 0).r);
++	}
++	sDiff[gl_LocalInvocationIndex] = acc;
++	barrier();
++	for (uint s = 32u; s > 0u; s >>= 1)
++	{
++		if (gl_LocalInvocationIndex < s)
++			sDiff[gl_LocalInvocationIndex] += sDiff[gl_LocalInvocationIndex + s];
++		barrier();
++	}
++	return sDiff[0] / float(max(n, 1));
++}
++
++// a vector at a place given in flow pixels
++vec2 Flow(sampler2D f, vec2 q, vec2 fsize)
++{
++	return textureLod(f, q / fsize, 0.0).rg;
++}
++
++void main()
++{
++	// every invocation takes part in the scene's reduction (barrier) before any returns
++	const float diff = SceneDiff();
++	const ivec2 p = ivec2(gl_GlobalInvocationID.xy);
++	const ivec2 size = pc.size.xy;
++	if (p.x >= size.x || p.y >= size.y)
++		return;
++	const float t = pc.tune.x;
++	const vec2 inv = 1.0 / vec2(size);
++	const vec2 pc_ = vec2(p) + 0.5;
++	if (diff > pc.tune.y)
++	{
++		imageStore(Dst, p, t < 0.5 ? textureLod(I0, pc_ * inv, 0.0) : textureLod(I1, pc_ * inv, 0.0));
++		return;
++	}
++	const vec2 fsize = vec2(pc.size.zw);
++	const vec2 to_flow = fsize / vec2(size), to_src = vec2(size) / fsize;
++	const vec2 q = pc_ * to_flow;
++	const vec2 f01 = Flow(F01, q, fsize), f10 = Flow(F10, q, fsize);
++	const vec2 ft0 = (-(1.0 - t) * t * f01 + t * t * f10);
++	const vec2 ft1 = ((1.0 - t) * (1.0 - t) * f01 - t * (1.0 - t) * f10);
++	// where the pixel comes from in A and in B (flow pixels), and how well each way's vectors agree there
++	const vec2 q0 = q + ft0, q1 = q + ft1;
++	const vec2 a01 = Flow(F01, q0, fsize), a10 = Flow(F10, q1, fsize);
++	const float e0 = length(a01 + Flow(F10, q0 + a01, fsize));
++	const float e1 = length(a10 + Flow(F01, q1 + a10, fsize));
++	const hf sigma = hf(pc.tune.z);
++	const hf v0 = hf(1.0) / (hf(1.0) + hf(e0) * hf(e0) / (sigma * sigma));
++	const hf v1 = hf(1.0) / (hf(1.0) + hf(e1) * hf(e1) / (sigma * sigma));
++	if (max(v0, v1) < hf(0.2)) // (both ways off by more than 2 flow pixels)
++	{
++		imageStore(Dst, p, t < 0.5 ? textureLod(I0, pc_ * inv, 0.0) : textureLod(I1, pc_ * inv, 0.0));
++		return;
++	}
++	const hf w0 = hf(1.0 - t) * v0, w1 = hf(t) * v1;
++	const hf3 c0 = hf3(textureLod(I0, (q0 * to_src) * inv, 0.0).rgb);
++	const hf3 c1 = hf3(textureLod(I1, (q1 * to_src) * inv, 0.0).rgb);
++	hf3 c;
++	if (w0 + w1 < hf(1e-3))
++		c = mix(c0, c1, hf(t));
++	else
++		c = (c0 * w0 + c1 * w1) / (w0 + w1);
++	imageStore(Dst, p, vec4(vec3(c), 1.0));
++}
+diff --git a/src/common.cpp b/src/common.cpp
+index 1b6a2b4..1ab99c9 100644
+--- a/src/common.cpp
++++ b/src/common.cpp
+@@ -17,7 +17,7 @@
+ 
+ namespace ps5gpu
+ {
+-const char* const kVersion = "1.1";
++const char* const kVersion = "1.2"; // 1.2: MPC 1.7's video post-processing (local patch)
+ 
+ namespace
+ {
+diff --git a/src/gpu.cpp b/src/gpu.cpp
+index be54755..a5b9c2d 100644
+--- a/src/gpu.cpp
++++ b/src/gpu.cpp
+@@ -67,7 +67,8 @@ namespace
+ #define GPU_INSTANCE_FNS(X)                                                                                          \
+ 	X(DestroyInstance) X(EnumeratePhysicalDevices) X(GetPhysicalDeviceProperties)                                      \
+ 	X(GetPhysicalDeviceQueueFamilyProperties) X(GetPhysicalDeviceMemoryProperties) X(CreateDevice)                     \
+-	X(GetDeviceProcAddr) X(EnumerateDeviceExtensionProperties) X(GetPhysicalDeviceFormatProperties)
++	X(GetDeviceProcAddr) X(EnumerateDeviceExtensionProperties) X(GetPhysicalDeviceFormatProperties)                   \
++	X(GetPhysicalDeviceFeatures)
+ #define GPU_DISPLAY_FNS(X)                                                                                           \
+ 	X(GetPhysicalDeviceDisplayPropertiesKHR) X(GetDisplayModePropertiesKHR) X(CreateDisplayPlaneSurfaceKHR)            \
+ 	X(DestroySurfaceKHR) X(GetPhysicalDeviceSurfaceSupportKHR) X(GetPhysicalDeviceSurfaceCapabilitiesKHR)              \
+@@ -87,7 +88,8 @@ namespace
+ 	X(CmdBindDescriptorSets) X(CmdBindVertexBuffers) X(CmdPushConstants) X(CmdSetViewport) X(CmdSetScissor)           \
+ 	X(CmdDraw) X(CmdClearColorImage) X(CreateQueryPool) X(DestroyQueryPool) X(CmdResetQueryPool)                       \
+ 	X(CmdWriteTimestamp) X(GetQueryPoolResults) X(FreeDescriptorSets) X(FreeCommandBuffers) X(CreatePipelineCache)          \
+-	X(DestroyPipelineCache) X(GetPipelineCacheData) X(CmdBlitImage) X(GetFenceStatus)
++	X(DestroyPipelineCache) X(GetPipelineCacheData) X(CmdBlitImage) X(GetFenceStatus) X(CreateComputePipelines)            \
++	X(CmdDispatch)
+ // 1.1 (Config::video): the host-pointer import's own call (VK_EXT_external_memory_host; null without it)
+ #define GPU_VIDEO_DEVICE_FNS(X) X(GetMemoryHostPointerPropertiesEXT)
+ #define GPU_SWAPCHAIN_FNS(X)                                                                                         \
+@@ -103,6 +105,8 @@ GPU_VIDEO_DEVICE_FNS(GPU_DECLARE)
+ // (Config::video) VK_KHR_get_physical_device_properties2's, on a Vulkan 1.0 instance -- never a 1.1 instance: the PS5's
+ // RADV took one and crashed in the physical-device step (MPC 1.6 test2 / test10), the ports' 1.0 instances never did
+ PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2 = nullptr;
++// 1.2 (MPC 1.7): its features query, for the post-processing's half-precision builds (VK_KHR_shader_float16_int8)
++PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2 = nullptr;
+ #undef GPU_DECLARE
+ 
+ // ---- resources ---------------------------------------------------------------------------------------------
+@@ -257,6 +261,10 @@ struct State
+ 	uint64_t frame_count = 0;
+ 	double gpu_ms = 0;
+ 	int gpu_frames = 0;
++	// 1.2 (MPC 1.7): what the device was made with for the video's post-processing: storage images of A2B10G10R10,
++	// R16G16_SFLOAT and R16_SFLOAT (shaderStorageImageExtendedFormats); half-precision arithmetic (shaderFloat16 of
++	// VK_KHR_shader_float16_int8, and shaderInt16)
++	bool post_formats = false, post_fp16 = false;
+ };
+ State g;
+ 
+@@ -2026,9 +2034,14 @@ struct VideoGpu
+ 	double gpu_ms_sum = 0;
+ 	int gpu_frames = 0;
+ 	bool drawn_this_frame = false;
++	uint64_t made_ids = 0; // 1.2: the ids given to pictures that came without one (VideoFrame::id 0)
+ };
+ VideoGpu gv;
+ 
++// 1.2: the post-processing's (below)
++void FreePost();
++void PostSubmitFailed();
++
+ double NowMs()
+ {
+ 	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+@@ -2165,6 +2178,7 @@ void FreeVideoPlanes()
+ 
+ void FreeVideo()
+ {
++	FreePost();
+ 	ReleasePending();
+ 	RetireVideo();
+ 	FreeVideoPlanes();
+@@ -2439,6 +2453,7 @@ void CommitVideoUpload()
+ // surface's copy didn't happen either: copied whole next time.
+ void VideoSubmitFailed()
+ {
++	PostSubmitFailed();
+ 	if (gv.upload_recorded)
+ 	{
+ 		for (Image& im : gv.planes)
+@@ -2501,9 +2516,11 @@ void RecordVideoDraw(VkCommandBuffer cmd)
+ 	gv.drawn_this_frame = true;
+ }
+ 
+-bool BuildVideoPipeline(VkRenderPass rp, VkPipeline* out)
++// video.vert's quad with a fragment shader (video.frag, or 1.2's post.frag), into `rp` (no blending: under the UI)
++bool BuildQuadPipeline(VkRenderPass rp, VkPipelineLayout layout, const uint32_t* fs_code, unsigned fs_bytes,
++	const char* what, VkPipeline* out)
+ {
+-	VkShaderModule vs = Module(kVideoVs, sizeof(kVideoVs)), fs = Module(kVideoFs, sizeof(kVideoFs));
++	VkShaderModule vs = Module(kVideoVs, sizeof(kVideoVs)), fs = Module(fs_code, fs_bytes);
+ 	bool ok = vs && fs;
+ 	if (ok)
+ 	{
+@@ -2546,9 +2563,9 @@ bool BuildVideoPipeline(VkRenderPass rp, VkPipeline* out)
+ 		pi.pMultisampleState = &ms;
+ 		pi.pColorBlendState = &cb;
+ 		pi.pDynamicState = &ds;
+-		pi.layout = gv.layout;
++		pi.layout = layout;
+ 		pi.renderPass = rp;
+-		ok = Check(vkCreateGraphicsPipelines(g.device, g.pcache, 1, &pi, nullptr, out), "vkCreateGraphicsPipelines (video)");
++		ok = Check(vkCreateGraphicsPipelines(g.device, g.pcache, 1, &pi, nullptr, out), what);
+ 	}
+ 	if (vs)
+ 		vkDestroyShaderModule(g.device, vs, nullptr);
+@@ -2557,6 +2574,11 @@ bool BuildVideoPipeline(VkRenderPass rp, VkPipeline* out)
+ 	return ok;
+ }
+ 
++bool BuildVideoPipeline(VkRenderPass rp, VkPipeline* out)
++{
++	return BuildQuadPipeline(rp, gv.layout, kVideoFs, sizeof(kVideoFs), "vkCreateGraphicsPipelines (video)", out);
++}
++
+ // HDR10 uses the same presentation method as VLC-PS5: typed 10-bit rendering, then a size-compatible raw image
+ // copy into the WSI's 32-bit buffers after VideoOut changes their scanout attribute. No 8-bit render or quantization.
+ void FreeHdr()
+@@ -2770,6 +2792,1041 @@ void InitVideo(bool host_import)
+ 		gv.sampled_ok[3] && gv.sampled_ok[4] ? "yes" : "no", gv.linear_ok[3] && gv.linear_ok[4] ? "yes" : "no",
+ 		gv.host_import ? "yes (VK_EXT_external_memory_host)" : "no (one copy each)", gv.host_align);
+ }
++
++// ---- 1.2 (Media Player Classic PS5 1.7): the video's post-processing (SetVideoPost) ------------------------------------
++// docs/POST-PROCESSING.md in the player's repository. Compute passes recorded in the frame's command buffer before the
++// final render pass (one frame in flight, as the rest: Present waited for the last one before recording):
++//   prep: the shown picture's planes to R'G'B' (deblocking, debanding) into a ring of three pictures, by their ids;
++//   motion smoothing: each picture's luma pyramid, the optical flow both ways (coarse to fine), and the picture at the
++//   display's time between the one VideoView::motion_from names and the shown one;
++//   scale: FSR 1 EASU, Lanczos, bicubic or bilinear, to the visible part of the picture's rectangle;
++// then post.frag in the render pass (RCAS, tone mapping or HDR10 out, the colour controls) in place of video.frag.
++// Images are GENERAL while written and SHADER_READ_ONLY_OPTIMAL while read (Barrier between). Each dispatch of a frame
++// has a descriptor set of its own, written as it is recorded. Nothing is made again that hasn't changed: a picture is
++// prepared once (again when the prep settings change), a pair's flows once, the warp and the scaler only when their
++// inputs or the rectangle change (a paused picture, and the repeats of 24 pictures a second at 60 Hz, cost the final
++// pass alone).
++#include "post_spv.h"
++
++constexpr int kPostRing = 3;
++constexpr int kPyrMax = 7;
++constexpr int kPostQueries = 6; // prep | motion | scale, then the final pass: before and after each
++constexpr VkFormat kPostRgb = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
++constexpr VkFormat kPostFlow = VK_FORMAT_R16G16_SFLOAT;
++constexpr VkFormat kPostLuma = VK_FORMAT_R16_SFLOAT;
++
++// the passes' push constants, as the shaders declare them
++struct PostPrepPc
++{
++	float norm[4], m0[4], m1[4], m2[4], chroma[4];
++	int32_t mode[4];
++	float band[4];
++};
++struct PostPyrPc
++{
++	int32_t mode[4];
++};
++struct PostFlowPc
++{
++	int32_t mode[4];
++	float tune[4];
++};
++struct PostWarpPc
++{
++	float tune[4];
++	int32_t size[4];
++};
++struct PostScalePc
++{
++	float map[4];
++	int32_t mode[4];
++};
++struct PostEasuPc
++{
++	uint32_t con[4][4];
++	int32_t area[4];
++};
++struct PostFinalPc // post.frag's, at offset 16 (video.vert's rectangle before it)
++{
++	int32_t area[4], tone[4];
++	float color[4];
++	uint32_t rcas[4];
++	float tm[4], pq[4];
++};
++static_assert(sizeof(PostPrepPc) == 112 && sizeof(PostEasuPc) == 80 && sizeof(PostFinalPc) == 96, "push constants");
++
++struct PostPass
++{
++	VkDescriptorSetLayout sl = VK_NULL_HANDLE;
++	VkPipelineLayout pl = VK_NULL_HANDLE;
++	VkPipeline pipe = VK_NULL_HANDLE;
++};
++
++struct PostSlot
++{
++	Image img;          // the picture after prep, at its size
++	Image pyr[kPyrMax]; // its luma pyramid (motion smoothing), made from img when a pair first needs it
++	bool pyr_ok = false;
++	uint64_t id = 0;      // the picture it holds (0: none)
++	uint32_t key = 0;     // the prep settings it was made with
++	uint64_t stamp = 0;   // the frame it was last used in
++	uint64_t version = 0; // a new number at each write: what was made from it knows whether it is still its
++};
++
++// what the scaler last wrote into the output image
++struct PostBigKey
++{
++	const Image* src = nullptr;
++	uint64_t version = 0;
++	int mode = -1, rw = 0, rh = 0, ox = 0, oy = 0, vw = 0, vh = 0;
++	bool Same(const PostBigKey& o) const
++	{
++		return src == o.src && version == o.version && mode == o.mode && rw == o.rw && rh == o.rh && ox == o.ox &&
++			   oy == o.oy && vw == o.vw && vh == o.vh;
++	}
++};
++
++struct PostGpu
++{
++	std::mutex mx; // want (SetVideoPost) and the status (TakePostStatus), from the program's threads
++	VideoPost want;
++	// the pipelines, made once, at the first picture drawn with the passes on; `failed`: why they couldn't be
++	bool tried = false, ok = false;
++	std::string failed;
++	bool fp16 = false;
++	VkDescriptorPool pool = VK_NULL_HANDLE;
++	PostPass prep, pyr, flow, warp, scale, easu;
++	VkDescriptorSetLayout final_sl = VK_NULL_HANDLE;
++	VkPipelineLayout final_pl = VK_NULL_HANDLE;
++	VkPipeline final_pipe = VK_NULL_HANDLE, final_hdr_pipe = VK_NULL_HANDLE;
++	bool final_hdr_tried = false;
++	VkDescriptorSet prep_set = VK_NULL_HANDLE, warp_set = VK_NULL_HANDLE, scale_set = VK_NULL_HANDLE,
++					easu_set = VK_NULL_HANDLE, final_set = VK_NULL_HANDLE;
++	VkDescriptorSet pyr_set[2][kPyrMax] = {}, flow_set[2][kPyrMax] = {};
++	VkQueryPool queries = VK_NULL_HANDLE;
++	bool queries_written = false;
++	// the images, for pictures of pw x ph and the output's size
++	int pw = 0, ph = 0;
++	PostSlot ring[kPostRing];
++	Image big; // the scaler's output: the visible part of the rectangle, at the image's corner (the output's size)
++	PostBigKey big_key;
++	// motion smoothing's, made at its first use
++	bool motion_made = false, motion_failed = false;
++	int levels = 0;
++	int lw[kPyrMax] = {}, lh[kPyrMax] = {};
++	Image flow_img[2][kPyrMax]; // [0] A -> B, [1] B -> A, each level
++	uint64_t flow_va = 0, flow_vb = 0; // the versions of A and B the flows were made from
++	Image mid; // the picture between two
++	uint64_t mid_va = 0, mid_vb = 0, mid_version = 0;
++	double mid_t = -1;
++	float mid_thr = -1;
++	uint64_t versions = 0, frames = 0;
++	// this frame's final pass (RecordPost, then RecordPostDraw in the render pass)
++	bool draw = false;
++	const Image* draw_img = nullptr;
++	int vx0 = 0, vy0 = 0, vx1 = 0, vy1 = 0;
++	PostFinalPc final_pc = {};
++	// the status since the last TakePostStatus
++	bool st_active = false, st_motion = false, st_fp16 = false;
++	const char* st_scaler = "none";
++	std::string st_why;
++	double st_ms[4] = {};
++	int st_frames = 0;
++};
++PostGpu pv;
++
++uint32_t FloatBits(float f)
++{
++	uint32_t u;
++	memcpy(&u, &f, 4);
++	return u;
++}
++
++// IEEE half from float, rounded to the nearest even (RCAS's packed constant)
++uint16_t ToHalf(float f)
++{
++	const uint32_t x = FloatBits(f);
++	const uint32_t sign = (x >> 16) & 0x8000u;
++	const int32_t exp8 = int32_t((x >> 23) & 0xffu);
++	uint32_t m = x & 0x7fffffu;
++	if (exp8 == 0xff)
++		return uint16_t(sign | 0x7c00u | (m ? 0x200u : 0u));
++	const int32_t e = exp8 - 127 + 15;
++	if (e >= 31)
++		return uint16_t(sign | 0x7c00u);
++	if (e <= 0)
++	{
++		if (e < -10)
++			return uint16_t(sign);
++		m |= 0x800000u;
++		const int shift = 14 - e;
++		uint32_t h = m >> shift;
++		const uint32_t rem = m & ((1u << shift) - 1), half = 1u << (shift - 1);
++		if (rem > half || (rem == half && (h & 1u)))
++			h++;
++		return uint16_t(sign | h);
++	}
++	uint32_t h = sign | (uint32_t(e) << 10) | (m >> 13);
++	const uint32_t rem = m & 0x1fffu;
++	if (rem > 0x1000u || (rem == 0x1000u && (h & 1u)))
++		h++;
++	return uint16_t(h);
++}
++
++// FSR 1's constants, made as ffx_fsr1.h's FsrEasuCon and FsrRcasCon make them (third_party/ffx-fsr1, MIT): the input's
++// viewport and image sizes, the output's size (the whole rectangle: the shader adds the visible part's corner)
++void EasuConstants(uint32_t con[4][4], float in_w, float in_h, float img_w, float img_h, float out_w, float out_h)
++{
++	con[0][0] = FloatBits(in_w / out_w);
++	con[0][1] = FloatBits(in_h / out_h);
++	con[0][2] = FloatBits(0.5f * in_w / out_w - 0.5f);
++	con[0][3] = FloatBits(0.5f * in_h / out_h - 0.5f);
++	con[1][0] = FloatBits(1.0f / img_w);
++	con[1][1] = FloatBits(1.0f / img_h);
++	con[1][2] = FloatBits(1.0f / img_w);
++	con[1][3] = FloatBits(-1.0f / img_h);
++	con[2][0] = FloatBits(-1.0f / img_w);
++	con[2][1] = FloatBits(2.0f / img_h);
++	con[2][2] = FloatBits(1.0f / img_w);
++	con[2][3] = FloatBits(2.0f / img_h);
++	con[3][0] = FloatBits(0.0f / img_w);
++	con[3][1] = FloatBits(4.0f / img_h);
++	con[3][2] = con[3][3] = 0;
++}
++
++void RcasConstants(uint32_t con[4], float sharpness)
++{
++	const float s = std::exp2(-sharpness);
++	const uint32_t h = ToHalf(s);
++	con[0] = FloatBits(s);
++	con[1] = h | (h << 16);
++	con[2] = con[3] = 0;
++}
++
++VkDescriptorSetLayout PostSetLayout(int samplers, bool storage, VkShaderStageFlags stage)
++{
++	VkDescriptorSetLayoutBinding b[8] = {};
++	const int n = samplers + (storage ? 1 : 0);
++	for (int i = 0; i < n; i++)
++	{
++		b[i].binding = uint32_t(i);
++		b[i].descriptorType = i < samplers ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
++		b[i].descriptorCount = 1;
++		b[i].stageFlags = stage;
++	}
++	VkDescriptorSetLayoutCreateInfo li = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
++	li.bindingCount = uint32_t(n);
++	li.pBindings = b;
++	VkDescriptorSetLayout l = VK_NULL_HANDLE;
++	if (!Check(vkCreateDescriptorSetLayout(g.device, &li, nullptr, &l), "vkCreateDescriptorSetLayout (post)"))
++		l = VK_NULL_HANDLE;
++	return l;
++}
++
++VkPipelineLayout PostPipelineLayout(VkDescriptorSetLayout sl, const VkPushConstantRange* ranges, uint32_t n)
++{
++	VkPipelineLayoutCreateInfo pli = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
++	pli.setLayoutCount = 1;
++	pli.pSetLayouts = &sl;
++	pli.pushConstantRangeCount = n;
++	pli.pPushConstantRanges = ranges;
++	VkPipelineLayout l = VK_NULL_HANDLE;
++	if (!Check(vkCreatePipelineLayout(g.device, &pli, nullptr, &l), "vkCreatePipelineLayout (post)"))
++		l = VK_NULL_HANDLE;
++	return l;
++}
++
++VkPipeline PostComputePipe(VkPipelineLayout pl, const uint32_t* code, unsigned bytes, const char* what)
++{
++	VkShaderModule m = Module(code, bytes);
++	if (!m)
++		return VK_NULL_HANDLE;
++	VkComputePipelineCreateInfo ci = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
++	ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
++	ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
++	ci.stage.module = m;
++	ci.stage.pName = "main";
++	ci.layout = pl;
++	VkPipeline p = VK_NULL_HANDLE;
++	if (!Check(vkCreateComputePipelines(g.device, g.pcache, 1, &ci, nullptr, &p), what))
++		p = VK_NULL_HANDLE;
++	vkDestroyShaderModule(g.device, m, nullptr);
++	return p;
++}
++
++bool MakePostPass(PostPass& p, int samplers, uint32_t push, const uint32_t* code, unsigned bytes, const char* what)
++{
++	p.sl = PostSetLayout(samplers, true, VK_SHADER_STAGE_COMPUTE_BIT);
++	const VkPushConstantRange r = {VK_SHADER_STAGE_COMPUTE_BIT, 0, push};
++	if (p.sl)
++		p.pl = PostPipelineLayout(p.sl, &r, 1);
++	if (p.pl)
++		p.pipe = PostComputePipe(p.pl, code, bytes, what);
++	return p.pipe != VK_NULL_HANDLE;
++}
++
++void FreePostPass(PostPass& p)
++{
++	if (p.pipe)
++		vkDestroyPipeline(g.device, p.pipe, nullptr);
++	if (p.pl)
++		vkDestroyPipelineLayout(g.device, p.pl, nullptr);
++	if (p.sl)
++		vkDestroyDescriptorSetLayout(g.device, p.sl, nullptr);
++	p = PostPass();
++}
++
++// the passes whose half-precision build is used when the device has it (flow, warp, EASU, the final pass)
++void FreePostHalves()
++{
++	FreePostPass(pv.flow);
++	FreePostPass(pv.warp);
++	FreePostPass(pv.easu);
++	if (pv.final_pipe)
++		vkDestroyPipeline(g.device, pv.final_pipe, nullptr);
++	if (pv.final_hdr_pipe)
++		vkDestroyPipeline(g.device, pv.final_hdr_pipe, nullptr);
++	pv.final_pipe = pv.final_hdr_pipe = VK_NULL_HANDLE;
++	pv.final_hdr_tried = false;
++}
++
++bool MakePostHalves(bool half)
++{
++#define POST_CODE(name) (half ? name##H : name), unsigned(half ? sizeof(name##H) : sizeof(name))
++	return MakePostPass(pv.flow, 3, sizeof(PostFlowPc), POST_CODE(kFlowCs), "vkCreateComputePipelines (post: flow)") &&
++		   MakePostPass(pv.warp, 6, sizeof(PostWarpPc), POST_CODE(kWarpCs), "vkCreateComputePipelines (post: warp)") &&
++		   MakePostPass(pv.easu, 1, sizeof(PostEasuPc), POST_CODE(kEasuCs), "vkCreateComputePipelines (post: EASU)") &&
++		   BuildQuadPipeline(g.final_pass, pv.final_pl, POST_CODE(kPostFs), "vkCreateGraphicsPipelines (post: final)",
++			   &pv.final_pipe);
++#undef POST_CODE
++}
++
++// the HDR10 output's final pass: made when it is first needed (the HDR render pass is made then)
++bool MakePostHdrPipe()
++{
++	if (pv.final_hdr_pipe || pv.final_hdr_tried || !g.hdr_pass)
++		return pv.final_hdr_pipe != VK_NULL_HANDLE;
++	pv.final_hdr_tried = true;
++	const bool h = pv.fp16;
++	return BuildQuadPipeline(g.hdr_pass, pv.final_pl, h ? kPostFsH : kPostFs, unsigned(h ? sizeof(kPostFsH) : sizeof(kPostFs)),
++		"vkCreateGraphicsPipelines (post: final, HDR10)", &pv.final_hdr_pipe);
++}
++
++void FreePostMotion()
++{
++	for (PostSlot& s : pv.ring)
++	{
++		for (Image& im : s.pyr)
++			FreeImage(im);
++		s.pyr_ok = false;
++	}
++	for (auto& row : pv.flow_img)
++		for (Image& im : row)
++			FreeImage(im);
++	FreeImage(pv.mid);
++	pv.motion_made = pv.motion_failed = false;
++	pv.levels = 0;
++	pv.flow_va = pv.flow_vb = 0;
++	pv.mid_va = pv.mid_vb = 0;
++	pv.mid_t = -1;
++	pv.mid_thr = -1;
++	pv.big_key = PostBigKey();
++}
++
++void FreePostImages()
++{
++	FreePostMotion();
++	for (PostSlot& s : pv.ring)
++	{
++		FreeImage(s.img);
++		s = PostSlot();
++	}
++	FreeImage(pv.big);
++	pv.big_key = PostBigKey();
++	pv.pw = pv.ph = 0;
++}
++
++void FreePostPipes()
++{
++	FreePostPass(pv.prep);
++	FreePostPass(pv.pyr);
++	FreePostPass(pv.scale);
++	FreePostHalves();
++	if (pv.final_pl)
++		vkDestroyPipelineLayout(g.device, pv.final_pl, nullptr);
++	if (pv.final_sl)
++		vkDestroyDescriptorSetLayout(g.device, pv.final_sl, nullptr);
++	pv.final_pl = VK_NULL_HANDLE;
++	pv.final_sl = VK_NULL_HANDLE;
++	if (pv.pool)
++		vkDestroyDescriptorPool(g.device, pv.pool, nullptr); // (its sets with it)
++	pv.pool = VK_NULL_HANDLE;
++	pv.prep_set = pv.warp_set = pv.scale_set = pv.easu_set = pv.final_set = VK_NULL_HANDLE;
++	for (int i = 0; i < 2; i++)
++		for (int l = 0; l < kPyrMax; l++)
++			pv.pyr_set[i][l] = pv.flow_set[i][l] = VK_NULL_HANDLE;
++	if (pv.queries)
++		vkDestroyQueryPool(g.device, pv.queries, nullptr);
++	pv.queries = VK_NULL_HANDLE;
++	pv.queries_written = false;
++}
++
++// everything (FreeVideo); the program's settings and the status stay
++void FreePost()
++{
++	if (!g.device)
++		return;
++	FreePostImages();
++	FreePostPipes();
++	pv.tried = pv.ok = pv.fp16 = false;
++	pv.failed.clear();
++	pv.draw = false;
++	pv.draw_img = nullptr;
++}
++
++bool PostFail(const std::string& why)
++{
++	pv.failed = why;
++	internal::Log("[gpu] post-processing: %s: the pictures are drawn in one pass", why.c_str());
++	FreePostPipes();
++	return false;
++}
++
++bool InitPost()
++{
++	pv.tried = true;
++#ifndef __PROSPERO__
++	// host tests: PS5GPU_TEST_POST_FAIL=1: the passes can't be made; =2: their images can't be (PostImages); =3: motion
++	// smoothing's can't be (PostMotionImages)
++	if (const char* e = getenv("PS5GPU_TEST_POST_FAIL"))
++		if (*e == '1')
++			return PostFail("a pipeline couldn't be made (PS5GPU_TEST_POST_FAIL)");
++#endif
++	if (!g.post_formats)
++		return PostFail("the GPU doesn't write the passes' image formats (no shaderStorageImageExtendedFormats)");
++	static const struct
++	{
++		VkFormat f;
++		const char* name;
++	} kFormats[3] = {{kPostRgb, "A2B10G10R10"}, {kPostFlow, "R16G16_SFLOAT"}, {kPostLuma, "R16_SFLOAT"}};
++	for (const auto& f : kFormats)
++	{
++		VkFormatProperties fp;
++		vkGetPhysicalDeviceFormatProperties(g.phys, f.f, &fp);
++		const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
++										  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
++		if ((fp.optimalTilingFeatures & need) != need)
++			return PostFail(std::string("the GPU can't write and filter ") + f.name + " images");
++	}
++	VkDescriptorPoolSize sizes[2] = {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 128}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 48}};
++	VkDescriptorPoolCreateInfo dpi = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
++	dpi.maxSets = 48;
++	dpi.poolSizeCount = 2;
++	dpi.pPoolSizes = sizes;
++	if (!Check(vkCreateDescriptorPool(g.device, &dpi, nullptr, &pv.pool), "vkCreateDescriptorPool (post)"))
++	{
++		pv.pool = VK_NULL_HANDLE;
++		return PostFail("no descriptor pool");
++	}
++	pv.final_sl = PostSetLayout(1, false, VK_SHADER_STAGE_FRAGMENT_BIT);
++	const VkPushConstantRange fr[2] = {{VK_SHADER_STAGE_VERTEX_BIT, 0, 16},
++		{VK_SHADER_STAGE_FRAGMENT_BIT, 16, uint32_t(sizeof(PostFinalPc))}};
++	if (pv.final_sl)
++		pv.final_pl = PostPipelineLayout(pv.final_sl, fr, 2);
++	const double t0 = NowMs();
++	bool ok = pv.final_pl &&
++			  MakePostPass(pv.prep, 3, sizeof(PostPrepPc), kPrepCs, sizeof(kPrepCs), "vkCreateComputePipelines (post: prep)") &&
++			  MakePostPass(pv.pyr, 1, sizeof(PostPyrPc), kPyrCs, sizeof(kPyrCs), "vkCreateComputePipelines (post: pyramid)") &&
++			  MakePostPass(pv.scale, 1, sizeof(PostScalePc), kScaleCs, sizeof(kScaleCs),
++				  "vkCreateComputePipelines (post: scale)");
++	pv.fp16 = g.post_fp16 && CurrentConfig().post_fp16;
++	if (ok && !MakePostHalves(pv.fp16))
++	{
++		FreePostHalves();
++		if (pv.fp16)
++		{
++			internal::Log("[gpu] post-processing: the half-precision builds couldn't be made: the 32-bit ones");
++			pv.fp16 = false;
++			ok = MakePostHalves(false);
++		}
++		else
++			ok = false;
++	}
++	if (!ok)
++		return PostFail("a pipeline couldn't be made");
++	// one set per dispatch of a frame
++	VkDescriptorSet* sets[] = {&pv.prep_set, &pv.warp_set, &pv.scale_set, &pv.easu_set, &pv.final_set};
++	const VkDescriptorSetLayout layouts[] = {pv.prep.sl, pv.warp.sl, pv.scale.sl, pv.easu.sl, pv.final_sl};
++	for (int i = 0; ok && i < 5; i++)
++	{
++		VkDescriptorSetAllocateInfo ai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
++		ai.descriptorPool = pv.pool;
++		ai.descriptorSetCount = 1;
++		ai.pSetLayouts = &layouts[i];
++		ok = Check(vkAllocateDescriptorSets(g.device, &ai, sets[i]), "vkAllocateDescriptorSets (post)");
++	}
++	for (int i = 0; ok && i < 2; i++)
++		for (int l = 0; ok && l < kPyrMax; l++)
++		{
++			VkDescriptorSetAllocateInfo ai = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
++			ai.descriptorPool = pv.pool;
++			ai.descriptorSetCount = 1;
++			ai.pSetLayouts = &pv.pyr.sl;
++			ok = Check(vkAllocateDescriptorSets(g.device, &ai, &pv.pyr_set[i][l]), "vkAllocateDescriptorSets (post)");
++			ai.pSetLayouts = &pv.flow.sl;
++			ok = ok && Check(vkAllocateDescriptorSets(g.device, &ai, &pv.flow_set[i][l]), "vkAllocateDescriptorSets (post)");
++		}
++	if (!ok)
++		return PostFail("no descriptor sets");
++	if (g.timestamps)
++	{
++		VkQueryPoolCreateInfo qpi = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
++		qpi.queryType = VK_QUERY_TYPE_TIMESTAMP;
++		qpi.queryCount = kPostQueries;
++		if (vkCreateQueryPool(g.device, &qpi, nullptr, &pv.queries) != VK_SUCCESS)
++			pv.queries = VK_NULL_HANDLE; // (no timings, the passes still run)
++	}
++	pv.ok = true;
++	internal::Log("[gpu] post-processing: ready (%s builds, %.0f ms to make; timings %s)",
++		pv.fp16 ? "half-precision" : "32-bit", NowMs() - t0, pv.queries ? "on" : "off");
++	SavePipelineCache();
++	return true;
++}
++
++// the ring and the scaler's output for pictures of pw x ph at the output's size (made again when either changes)
++bool PostImages(int pw, int ph)
++{
++	if (pv.pw == pw && pv.ph == ph && pv.big.img && pv.big.w == g.out_w && pv.big.h == g.out_h)
++		return true;
++	// (review L8) the sizes whose images couldn't be made: not tried again at every frame (until the sizes change)
++	static int failed_w = 0, failed_h = 0, failed_ow = 0, failed_oh = 0;
++	if (failed_w == pw && failed_h == ph && failed_ow == g.out_w && failed_oh == g.out_h)
++		return false;
++	FreePostImages();
++	const VkImageUsageFlags use = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
++	bool ok = MakeImage(pv.big, g.out_w, g.out_h, kPostRgb, use);
++#ifndef __PROSPERO__
++	if (const char* e = getenv("PS5GPU_TEST_POST_FAIL"))
++		ok = ok && *e != '2';
++#endif
++	for (PostSlot& s : pv.ring)
++		ok = ok && MakeImage(s.img, pw, ph, kPostRgb, use);
++	if (!ok)
++	{
++		FreePostImages();
++		internal::Log("[gpu] post-processing: no memory for %dx%d pictures' images", pw, ph);
++		failed_w = pw;
++		failed_h = ph;
++		failed_ow = g.out_w;
++		failed_oh = g.out_h;
++		return false;
++	}
++	failed_w = failed_h = 0;
++	pv.pw = pw;
++	pv.ph = ph;
++	internal::Log("[gpu] post-processing: images for %dx%d pictures, %dx%d output", pw, ph, g.out_w, g.out_h);
++	return true;
++}
++
++// motion smoothing's images: the pyramid (the picture's luma at a quarter of its size, at most 960 wide, halved while
++// that leaves 15 pixels or more: at most 7 levels, 960 to 15 for a 4K picture, whose +-1 searches reach 127 pixels of
++// the finest, 508 of a 4K picture's; 1080p: 6 levels, 252 pixels), the flows at each level, the picture between two
++bool PostMotionImages()
++{
++	if (pv.motion_made)
++		return true;
++	if (pv.motion_failed)
++		return false;
++	int w = std::min(960, std::max(1, (pv.pw + 3) / 4));
++	int h = std::max(1, int(std::lround(double(pv.ph) * w / pv.pw)));
++	pv.levels = 0;
++	while (pv.levels < kPyrMax)
++	{
++		pv.lw[pv.levels] = w;
++		pv.lh[pv.levels] = h;
++		pv.levels++;
++		if ((w + 1) / 2 < 15 || (h + 1) / 2 < 8)
++			break;
++		w = (w + 1) / 2;
++		h = (h + 1) / 2;
++	}
++	const VkImageUsageFlags use = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
++	bool ok = MakeImage(pv.mid, pv.pw, pv.ph, kPostRgb, use);
++#ifndef __PROSPERO__
++	if (const char* e = getenv("PS5GPU_TEST_POST_FAIL")) // host tests: =3: motion smoothing's images can't be made
++		ok = ok && *e != '3';
++#endif
++	for (int l = 0; ok && l < pv.levels; l++)
++	{
++		for (PostSlot& s : pv.ring)
++			ok = ok && MakeImage(s.pyr[l], pv.lw[l], pv.lh[l], kPostLuma, use);
++		for (int d = 0; d < 2; d++)
++			ok = ok && MakeImage(pv.flow_img[d][l], pv.lw[l], pv.lh[l], kPostFlow, use);
++	}
++	if (!ok)
++	{
++		FreePostMotion();
++		pv.motion_failed = true;
++		internal::Log("[gpu] post-processing: no memory for motion smoothing's images: the pictures as they come");
++		return false;
++	}
++	pv.motion_made = true;
++	internal::Log("[gpu] post-processing: motion smoothing's images: %d pyramid levels, %dx%d to %dx%d", pv.levels, pv.lw[0],
++		pv.lh[0], pv.lw[pv.levels - 1], pv.lh[pv.levels - 1]);
++	return true;
++}
++
++struct PostIn
++{
++	const Image* im;
++	VkSampler sampler;
++};
++
++// a dispatch's set: the images it reads (bindings 0..), then the one it writes (if any)
++void PostWrite(VkDescriptorSet set, std::initializer_list<PostIn> in, const Image* out)
++{
++	VkDescriptorImageInfo info[8] = {};
++	VkWriteDescriptorSet w[8] = {};
++	uint32_t n = 0;
++	for (const PostIn& i : in)
++	{
++		info[n] = {i.sampler, i.im->view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
++		w[n].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
++		n++;
++	}
++	if (out)
++	{
++		info[n] = {VK_NULL_HANDLE, out->view, VK_IMAGE_LAYOUT_GENERAL};
++		w[n].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
++		n++;
++	}
++	for (uint32_t i = 0; i < n; i++)
++	{
++		w[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
++		w[i].dstSet = set;
++		w[i].dstBinding = i;
++		w[i].descriptorCount = 1;
++		w[i].pImageInfo = &info[i];
++	}
++	vkUpdateDescriptorSets(g.device, n, w, 0, nullptr);
++}
++
++void PostDispatch(VkCommandBuffer cmd, const PostPass& p, VkDescriptorSet set, const void* pc, uint32_t bytes, int w, int h,
++	int tile)
++{
++	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipe);
++	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.pl, 0, 1, &set, 0, nullptr);
++	vkCmdPushConstants(cmd, p.pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, bytes, pc);
++	vkCmdDispatch(cmd, uint32_t((w + tile - 1) / tile), uint32_t((h + tile - 1) / tile), 1);
++}
++
++VkSampler PostNearest()
++{
++	return g.samplers[0][1]; // clamped to the edge
++}
++VkSampler PostLinear()
++{
++	return g.samplers[1][1];
++}
++
++// the prep settings, as one number (a picture prepared with others is prepared again)
++uint32_t PrepKey(const VideoPost& w)
++{
++	uint32_t k = 0x80000000u;
++	if (w.deband)
++		k |= 1u | (uint32_t(std::lround(w.deband_strength * 100)) & 0x3ffu) << 2;
++	if (w.deblock)
++		k |= 2u | (uint32_t(std::lround(w.deblock_strength * 100)) & 0x3ffu) << 12;
++	return k;
++}
++
++int FindPostSlot(uint64_t id)
++{
++	for (int i = 0; id && i < kPostRing; i++)
++		if (pv.ring[i].id == id)
++			return i;
++	return -1;
++}
++
++// the slot a new picture goes to: an empty one, else the one used longest ago; never the one holding `keep`
++int PickPostSlot(uint64_t keep)
++{
++	int best = -1;
++	uint64_t best_score = 0;
++	for (int i = 0; i < kPostRing; i++)
++	{
++		const PostSlot& s = pv.ring[i];
++		if (keep && s.id == keep)
++			continue;
++		const uint64_t score = s.id ? s.stamp + 1 : 0;
++		if (best < 0 || score < best_score)
++		{
++			best = i;
++			best_score = score;
++		}
++	}
++	return best;
++}
++
++// prep: the shown picture's planes into slot s
++void RecordPrep(VkCommandBuffer cmd, PostSlot& s, const VideoPost& w, uint32_t key)
++{
++	VideoUbo u;
++	FillVideoUbo(u, gv.shown, gv.view, pv.pw, pv.ph);
++	PostPrepPc pc = {};
++	memcpy(pc.norm, u.norm, sizeof(pc.norm));
++	memcpy(pc.m0, u.m0, sizeof(pc.m0));
++	memcpy(pc.m1, u.m1, sizeof(pc.m1));
++	memcpy(pc.m2, u.m2, sizeof(pc.m2));
++	pc.chroma[0] = u.csize[0] / u.lsize[0];
++	pc.chroma[1] = u.csize[1] / u.lsize[1];
++	pc.chroma[2] = u.coff[0];
++	pc.chroma[3] = u.coff[1];
++	pc.mode[0] = u.mode[0];
++	pc.mode[1] = (w.deband ? 1 : 0) | (w.deblock ? 2 : 0);
++	pc.mode[2] = (u.swz[0] & 3) | (u.swz[1] & 3) << 2 | (u.swz[2] & 3) << 4;
++	pc.mode[3] = int32_t(gv.shown.id & 0x7fffffffu);
++	// debanding: libplacebo's defaults in its units (threshold and grain 4 / 1000 of the range, radius 16 pixels)
++	pc.band[0] = 0.004f * w.deband_strength;
++	pc.band[1] = 0.004f * w.deband_strength;
++	pc.band[2] = 16.0f;
++	pc.band[3] = w.deblock_strength;
++	const Image& p0 = gv.planes[0];
++	const Image& p1 = gv.planes[gv.nplanes > 1 ? 1 : 0];
++	const Image& p2 = gv.planes[gv.nplanes > 2 ? 2 : 0];
++	Barrier(cmd, s.img, VK_IMAGE_LAYOUT_GENERAL);
++	PostWrite(pv.prep_set, {{&p0, PostNearest()}, {&p1, PostNearest()}, {&p2, PostNearest()}}, &s.img);
++	PostDispatch(cmd, pv.prep, pv.prep_set, &pc, sizeof(pc), pv.pw, pv.ph, 8);
++	Barrier(cmd, s.img, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++	s.id = gv.shown.id;
++	s.key = key;
++	s.version = ++pv.versions;
++	s.pyr_ok = false;
++}
++
++void RecordPyramid(VkCommandBuffer cmd, PostSlot& s, int which)
++{
++	for (int l = 0; l < pv.levels; l++)
++	{
++		Barrier(cmd, s.pyr[l], VK_IMAGE_LAYOUT_GENERAL);
++		const PostPyrPc pc = {{l == 0 ? 0 : 1, pv.lw[l], pv.lh[l], 0}};
++		PostWrite(pv.pyr_set[which][l], {{l == 0 ? &s.img : &s.pyr[l - 1], PostLinear()}}, &s.pyr[l]);
++		PostDispatch(cmd, pv.pyr, pv.pyr_set[which][l], &pc, sizeof(pc), pv.lw[l], pv.lh[l], 8);
++		Barrier(cmd, s.pyr[l], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++	}
++	s.pyr_ok = true;
++}
++
++// both ways' flows, coarse to fine: each level's from the coarser one's (doubled)
++void RecordFlow(VkCommandBuffer cmd, const PostSlot& a, const PostSlot& b)
++{
++	for (int l = pv.levels - 1; l >= 0; l--)
++		for (int d = 0; d < 2; d++)
++		{
++			const PostSlot& x = d == 0 ? a : b;
++			const PostSlot& y = d == 0 ? b : a;
++			Image& out = pv.flow_img[d][l];
++			const bool top = l == pv.levels - 1;
++			Barrier(cmd, out, VK_IMAGE_LAYOUT_GENERAL);
++			const PostFlowPc pc = {{top ? 0 : 1, pv.lw[l], pv.lh[l], 0}, {0.05f, 0, 0, 0}};
++			PostWrite(pv.flow_set[d][l],
++				{{&x.pyr[l], PostLinear()}, {&y.pyr[l], PostLinear()}, {top ? &g.dummy : &pv.flow_img[d][l + 1], PostLinear()}},
++				&out);
++			PostDispatch(cmd, pv.flow, pv.flow_set[d][l], &pc, sizeof(pc), pv.lw[l], pv.lh[l], 8);
++			Barrier(cmd, out, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++		}
++	pv.flow_va = a.version;
++	pv.flow_vb = b.version;
++}
++
++void RecordWarp(VkCommandBuffer cmd, const PostSlot& a, const PostSlot& b, double t, float thr)
++{
++	const int top = pv.levels - 1;
++	Barrier(cmd, pv.mid, VK_IMAGE_LAYOUT_GENERAL);
++	// the occlusion's scale: 1 pixel of the finest flow (4 of the picture's)
++	const PostWarpPc pc = {{float(t), thr, 1.0f, 0}, {pv.pw, pv.ph, pv.lw[0], pv.lh[0]}};
++	PostWrite(pv.warp_set,
++		{{&a.img, PostLinear()}, {&b.img, PostLinear()}, {&pv.flow_img[0][0], PostLinear()}, {&pv.flow_img[1][0], PostLinear()},
++			{&a.pyr[top], PostLinear()}, {&b.pyr[top], PostLinear()}},
++		&pv.mid);
++	PostDispatch(cmd, pv.warp, pv.warp_set, &pc, sizeof(pc), pv.pw, pv.ph, 8);
++	Barrier(cmd, pv.mid, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++	pv.mid_va = a.version;
++	pv.mid_vb = b.version;
++	pv.mid_t = t;
++	pv.mid_thr = thr;
++	pv.mid_version = ++pv.versions;
++}
++
++void PostStatusSet(bool active, bool motion, const char* scaler, const std::string& why)
++{
++	std::lock_guard<std::mutex> l(pv.mx);
++	pv.st_active = active;
++	pv.st_fp16 = pv.ok && pv.fp16;
++	pv.st_motion = motion;
++	pv.st_scaler = scaler;
++	pv.st_why = why;
++}
++
++// The passes for this frame's picture (before the final render pass; Present waited for the frame before). Nothing is
++// recorded when they are off or can't run: RecordPostDraw then draws nothing and video.frag draws the picture.
++void RecordPost(VkCommandBuffer cmd)
++{
++	pv.draw = false;
++	VideoPost w;
++	{
++		std::lock_guard<std::mutex> l(pv.mx);
++		w = pv.want;
++	}
++	if (!w.on)
++	{
++		if (pv.pw)
++			FreePostImages(); // (off: the pipelines kept, no image)
++		return PostStatusSet(false, false, "none", "");
++	}
++	if (!gv.ok || !gv.show || !gv.picture || gv.nplanes == 0)
++		return PostStatusSet(false, false, "none", "");
++	// the picture's rectangle on the output, in whole pixels (as video.frag's scissor), and its part on the output
++	const Rect d = gv.view.dst;
++	if (d.w <= 0 || d.h <= 0)
++		return PostStatusSet(false, false, "none", "");
++	const double sx = double(g.out_w) / g.ui_w, sy = double(g.out_h) / g.ui_h;
++	const int rx0 = int(std::floor(d.x * sx + 0.5)), ry0 = int(std::floor(d.y * sy + 0.5));
++	const int rx1 = int(std::floor((d.x + d.w) * sx + 0.5)), ry1 = int(std::floor((d.y + d.h) * sy + 0.5));
++	const int vx0 = std::max(0, rx0), vy0 = std::max(0, ry0), vx1 = std::min(g.out_w, rx1), vy1 = std::min(g.out_h, ry1);
++	if (rx1 <= rx0 || ry1 <= ry0 || vx1 <= vx0 || vy1 <= vy0)
++		return PostStatusSet(false, false, "none", "");
++	if (!pv.tried)
++		InitPost();
++	if (!pv.ok)
++		return PostStatusSet(false, false, "none", pv.failed);
++	if (g.hdr_active && !MakePostHdrPipe())
++		return PostStatusSet(false, false, "none", "no final pass for the HDR10 output");
++	if (!PostImages(gv.pw[0], gv.ph[0]))
++		return PostStatusSet(false, false, "none",
++			"no memory for the passes' images (" + std::to_string(gv.pw[0]) + "x" + std::to_string(gv.ph[0]) + ")");
++	if (!w.motion && (pv.motion_made || pv.motion_failed))
++		FreePostMotion();
++	pv.frames++;
++	auto mark = [&](uint32_t q) {
++		if (pv.queries)
++			vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pv.queries, q);
++	};
++	if (pv.queries)
++		vkCmdResetQueryPool(cmd, pv.queries, 0, kPostQueries);
++	mark(0);
++	// 1. prep: a picture once (the plane images hold a new one each upload, whatever its id), again when the settings
++	// change while it is shown
++	const uint64_t id = gv.shown.id, from = gv.view.motion_from;
++	const uint32_t key = PrepKey(w);
++	int b = FindPostSlot(id);
++	if (b < 0 || pv.ring[b].key != key || gv.upload_recorded)
++	{
++		if (b < 0)
++			b = PickPostSlot(from);
++		RecordPrep(cmd, pv.ring[b], w, key);
++	}
++	pv.ring[b].stamp = pv.frames;
++	mark(1);
++	// 2. motion smoothing: the picture motion_t of the way from the one named to this one
++	const Image* src = &pv.ring[b].img;
++	uint64_t src_version = pv.ring[b].version;
++	bool motion = false;
++	if (w.motion && from && from != id)
++	{
++		const int a = FindPostSlot(from);
++		const double t = std::isfinite(gv.view.motion_t) ? std::min(1.0, std::max(0.0, gv.view.motion_t)) : 1.0;
++		if (a >= 0)
++		{
++			PostSlot& sa = pv.ring[a];
++			PostSlot& sb = pv.ring[b];
++			sa.stamp = pv.frames;
++			// t 0, or (review M1) no in-between picture to be had (no memory for motion smoothing's images): the
++			// picture the display is at, the one before -- never the next one early for the whole interval
++			if (t <= 0 || (t < 1 && !PostMotionImages()))
++			{
++				src = &sa.img;
++				src_version = sa.version;
++			}
++			else if (t < 1)
++			{
++				if (!sa.pyr_ok)
++					RecordPyramid(cmd, sa, 0);
++				if (!sb.pyr_ok)
++					RecordPyramid(cmd, sb, 1);
++				if (pv.flow_va != sa.version || pv.flow_vb != sb.version)
++					RecordFlow(cmd, sa, sb);
++				if (pv.mid_va != sa.version || pv.mid_vb != sb.version || pv.mid_t != t || pv.mid_thr != w.scene_threshold)
++					RecordWarp(cmd, sa, sb, t, w.scene_threshold);
++				src = &pv.mid;
++				src_version = pv.mid_version;
++				motion = true;
++			}
++		}
++	}
++	mark(2);
++	// 3. scale to the rectangle (its visible part) when it isn't the picture's own size
++	const int rw = rx1 - rx0, rh = ry1 - ry0, vw = vx1 - vx0, vh = vy1 - vy0;
++	int mode = -1; // 0 bilinear, 1 bicubic, 2 Lanczos (scale.comp), 3 FSR 1 EASU
++	if (rw != pv.pw || rh != pv.ph)
++		switch (w.scaler)
++		{
++			case VideoScaler::Fsr: mode = rw >= pv.pw && rh >= pv.ph ? 3 : 1; break;
++			case VideoScaler::Lanczos: mode = 2; break;
++			case VideoScaler::Bicubic: mode = 1; break;
++			default: mode = 0; break;
++		}
++	static const char* const kScalerName[4] = {"bilinear", "bicubic", "Lanczos", "FSR 1"};
++	int ax = rx0, ay = ry0, valid_w = pv.pw, valid_h = pv.ph;
++	pv.draw_img = src;
++	if (mode >= 0)
++	{
++		PostBigKey k;
++		k.src = src;
++		k.version = src_version;
++		k.mode = mode;
++		k.rw = rw;
++		k.rh = rh;
++		k.ox = vx0 - rx0;
++		k.oy = vy0 - ry0;
++		k.vw = vw;
++		k.vh = vh;
++		if (!k.Same(pv.big_key))
++		{
++			Barrier(cmd, pv.big, VK_IMAGE_LAYOUT_GENERAL);
++			if (mode == 3)
++			{
++				PostEasuPc pc = {};
++				EasuConstants(pc.con, float(pv.pw), float(pv.ph), float(pv.pw), float(pv.ph), float(rw), float(rh));
++				pc.area[0] = k.ox;
++				pc.area[1] = k.oy;
++				pc.area[2] = vw;
++				pc.area[3] = vh;
++				PostWrite(pv.easu_set, {{src, PostLinear()}}, &pv.big);
++				PostDispatch(cmd, pv.easu, pv.easu_set, &pc, sizeof(pc), vw, vh, 16);
++			}
++			else
++			{
++				const PostScalePc pc = {{float(pv.pw) / rw, float(pv.ph) / rh, float(k.ox), float(k.oy)}, {mode, vw, vh, 0}};
++				PostWrite(pv.scale_set, {{src, PostNearest()}}, &pv.big);
++				PostDispatch(cmd, pv.scale, pv.scale_set, &pc, sizeof(pc), vw, vh, 8);
++			}
++			Barrier(cmd, pv.big, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++			pv.big_key = k;
++		}
++		pv.draw_img = &pv.big;
++		ax = vx0;
++		ay = vy0;
++		valid_w = vw;
++		valid_h = vh;
++	}
++	mark(3);
++	// 4. the final pass's numbers (drawn in the render pass: RecordPostDraw)
++	VideoUbo u;
++	FillVideoUbo(u, gv.shown, gv.view, rw, rh, g.hdr_active);
++	PostFinalPc& f = pv.final_pc;
++	f = PostFinalPc();
++	f.area[0] = ax;
++	f.area[1] = ay;
++	f.area[2] = (mode == 3 ? 1 : 0) | (g.hdr_active ? 2 : 0);
++	f.area[3] = int32_t(gv.shown.transfer);
++	f.tone[0] = int32_t(gv.view.tone_map);
++	f.tone[1] = valid_w;
++	f.tone[2] = valid_h;
++	f.color[0] = w.brightness;
++	f.color[1] = w.contrast;
++	f.color[2] = w.saturation;
++	if (mode == 3)
++		RcasConstants(f.rcas, w.sharpness);
++	memcpy(f.tm, u.tm, sizeof(f.tm));
++	memcpy(f.pq, u.pq, sizeof(f.pq));
++	pv.vx0 = vx0;
++	pv.vy0 = vy0;
++	pv.vx1 = vx1;
++	pv.vy1 = vy1;
++	pv.draw = true;
++	PostStatusSet(true, motion, mode >= 0 ? kScalerName[mode] : "none", "");
++}
++
++// The picture through post.frag (in the render pass, in place of RecordVideoDraw); false: nothing recorded by RecordPost
++bool RecordPostDraw(VkCommandBuffer cmd)
++{
++	if (!pv.draw)
++		return false;
++	pv.draw = false;
++	const VkPipeline pipe = g.hdr_active ? pv.final_hdr_pipe : pv.final_pipe;
++	if (!pipe || !pv.draw_img)
++		return false;
++	PostWrite(pv.final_set, {{pv.draw_img, PostNearest()}}, nullptr);
++	const float rect[4] = {float(double(pv.vx0) / g.out_w * 2 - 1), float(double(pv.vy0) / g.out_h * 2 - 1),
++		float(double(pv.vx1) / g.out_w * 2 - 1), float(double(pv.vy1) / g.out_h * 2 - 1)};
++	const VkViewport view = {0, 0, float(g.out_w), float(g.out_h), 0, 1};
++	const VkRect2D sc = {{pv.vx0, pv.vy0}, {uint32_t(pv.vx1 - pv.vx0), uint32_t(pv.vy1 - pv.vy0)}};
++	vkCmdSetViewport(cmd, 0, 1, &view);
++	vkCmdSetScissor(cmd, 0, 1, &sc);
++	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
++	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pv.final_pl, 0, 1, &pv.final_set, 0, nullptr);
++	vkCmdPushConstants(cmd, pv.final_pl, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(rect), rect);
++	vkCmdPushConstants(cmd, pv.final_pl, VK_SHADER_STAGE_FRAGMENT_BIT, 16, sizeof(PostFinalPc), &pv.final_pc);
++	if (pv.queries)
++		vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pv.queries, 4);
++	vkCmdDraw(cmd, 4, 1, 0, 0);
++	if (pv.queries)
++	{
++		vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pv.queries, 5);
++		pv.queries_written = true;
++	}
++	gv.drawn_this_frame = true;
++	return true;
++}
++
++// The frame wasn't submitted: what its passes wrote never happened (contents and layouts unknown). Everything is made
++// again from the next picture uploaded.
++void PostSubmitFailed()
++{
++	pv.queries_written = false;
++	pv.draw = false;
++	auto lost = [](Image& im) {
++		if (im.img)
++			im.layout = VK_IMAGE_LAYOUT_UNDEFINED;
++	};
++	for (PostSlot& s : pv.ring)
++	{
++		lost(s.img);
++		for (Image& im : s.pyr)
++			lost(im);
++		s.id = 0;
++		s.pyr_ok = false;
++		s.version = ++pv.versions;
++	}
++	for (auto& row : pv.flow_img)
++		for (Image& im : row)
++			lost(im);
++	lost(pv.mid);
++	lost(pv.big);
++	pv.flow_va = pv.flow_vb = 0;
++	pv.mid_va = pv.mid_vb = 0;
++	pv.big_key = PostBigKey();
++}
++
++// (WaitFrame) the passes' GPU times of the frame done
++void ReadPostTimes()
++{
++	if (!pv.queries_written)
++		return;
++	pv.queries_written = false;
++	uint64_t ts[kPostQueries];
++	if (vkGetQueryPoolResults(g.device, pv.queries, 0, kPostQueries, sizeof(ts), ts, sizeof(uint64_t),
++			VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
++		return;
++	auto ms = [](uint64_t a, uint64_t b) { return b > a ? double(b - a) * g.ts_period / 1e6 : 0.0; };
++	std::lock_guard<std::mutex> l(pv.mx);
++	pv.st_ms[0] += ms(ts[0], ts[1]);
++	pv.st_ms[1] += ms(ts[1], ts[2]);
++	pv.st_ms[2] += ms(ts[2], ts[3]);
++	pv.st_ms[3] += ms(ts[4], ts[5]);
++	pv.st_frames++;
++}
+ } // namespace
+ 
+ bool HdrOutputActive() { return g.ok && g.hdr_active; }
+@@ -2986,6 +4043,8 @@ bool SetVideo(const VideoFrame& f, const VideoView& view)
+ 	gv.pend = np;
+ 	gv.pend_next = use_next;
+ 	gv.meta = f;
++	if (!gv.meta.id)
++		gv.meta.id = (uint64_t(1) << 63) | ++gv.made_ids; // (1.2: the post-processing's ring knows pictures by it)
+ 	for (VideoPlane& pl : gv.meta.plane)
+ 		pl = VideoPlane();
+ 	gv.meta.memory = nullptr;
+@@ -3054,6 +4113,56 @@ VideoStats TakeVideoStats()
+ 	return s;
+ }
+ 
++void SetVideoPost(const VideoPost& p)
++{
++	auto clampf = [](float v, float lo, float hi, float def) { return std::isfinite(v) ? std::min(hi, std::max(lo, v)) : def; };
++	VideoPost c = p;
++	c.deband_strength = clampf(c.deband_strength, 0.5f, 3.0f, 1.0f);
++	c.deblock_strength = clampf(c.deblock_strength, 0.5f, 3.0f, 1.0f);
++	c.sharpness = clampf(c.sharpness, 0.0f, 2.0f, 0.25f);
++	c.scene_threshold = clampf(c.scene_threshold, 0.01f, 1.0f, 0.12f);
++	c.brightness = clampf(c.brightness, -1.0f, 1.0f, 0.0f);
++	c.contrast = clampf(c.contrast, 0.0f, 2.0f, 1.0f);
++	c.saturation = clampf(c.saturation, 0.0f, 2.0f, 1.0f);
++	if (int(c.scaler) < int(VideoScaler::Bilinear) || int(c.scaler) > int(VideoScaler::Fsr))
++		c.scaler = VideoScaler::Fsr;
++	std::lock_guard<std::mutex> l(pv.mx);
++	pv.want = c;
++}
++
++bool PostHolds(uint64_t id)
++{
++	bool motion;
++	{
++		std::lock_guard<std::mutex> l(pv.mx);
++		motion = pv.want.on && pv.want.motion;
++	}
++	// (review M1: motion smoothing off, or its images couldn't be made: the program shows its pictures as they come)
++	return motion && g.ok && pv.ok && !pv.motion_failed && FindPostSlot(id) >= 0;
++}
++
++PostStatus TakePostStatus()
++{
++	std::lock_guard<std::mutex> l(pv.mx);
++	PostStatus s;
++	s.active = pv.st_active;
++	s.fp16 = pv.st_fp16;
++	s.scaler = pv.st_active ? pv.st_scaler : "none";
++	s.motion = pv.st_active && pv.st_motion;
++	if (pv.st_frames)
++	{
++		s.prep_ms = pv.st_ms[0] / pv.st_frames;
++		s.motion_ms = pv.st_ms[1] / pv.st_frames;
++		s.scale_ms = pv.st_ms[2] / pv.st_frames;
++		s.final_ms = pv.st_ms[3] / pv.st_frames;
++	}
++	s.why_off = pv.st_why;
++	for (double& m : pv.st_ms)
++		m = 0;
++	pv.st_frames = 0;
++	return s;
++}
++
+ namespace
+ {
+ // (VideoSelfTest) the expected R'G'B' of a flat picture, as the shader computes it, 0..255
+@@ -3258,14 +4367,20 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+ 	// (Config::video) the host-pointer import's properties (minImportedHostPointerAlignment) come through
+ 	// VK_KHR_get_physical_device_properties2 on the 1.0 instance (a 1.1 instance crashed the PS5's driver: see
+ 	// vkGetPhysicalDeviceProperties2 above); its buffers need VK_KHR_external_memory_capabilities on the instance
++	// 1.2 (MPC 1.7): the same extension for the post-processing's half-precision builds (Config::post_fp16): the device's
++	// shaderFloat16 is read through its vkGetPhysicalDeviceFeatures2
+ 	bool props2 = false;
+-	if (cfg.video && cfg.host_import && HasExtension(iexts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) &&
+-		HasExtension(iexts, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME))
++	const bool import_instance = cfg.video && cfg.host_import &&
++								 HasExtension(iexts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) &&
++								 HasExtension(iexts, VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
++	if (import_instance || (cfg.video && cfg.post_fp16 &&
++							   HasExtension(iexts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)))
+ 	{
+ 		want.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+-		want.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+ 		props2 = true;
+ 	}
++	if (import_instance)
++		want.push_back(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
+ 	{
+ 		std::string list;
+ 		for (const char* w : want)
+@@ -3289,6 +4404,8 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+ 		GPU_DISPLAY_FNS(GPU_LOAD_INSTANCE)
+ 	}
+ #undef GPU_LOAD_INSTANCE
++	vkGetPhysicalDeviceProperties2 = nullptr; // (an Init after a Shutdown: never the last instance's)
++	vkGetPhysicalDeviceFeatures2 = nullptr;
+ 	if (props2)
+ 	{
+ 		vkGetPhysicalDeviceProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+@@ -3296,6 +4413,11 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+ 		if (!vkGetPhysicalDeviceProperties2)
+ 			vkGetPhysicalDeviceProperties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+ 				GPU_GET_INSTANCE_PROC(g.instance, "vkGetPhysicalDeviceProperties2"));
++		vkGetPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
++			GPU_GET_INSTANCE_PROC(g.instance, "vkGetPhysicalDeviceFeatures2KHR"));
++		if (!vkGetPhysicalDeviceFeatures2)
++			vkGetPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
++				GPU_GET_INSTANCE_PROC(g.instance, "vkGetPhysicalDeviceFeatures2"));
+ 	}
+ 	internal::Log("[gpu] Init: the GPUs: counting them");
+ 	uint32_t pc = 0;
+@@ -3362,7 +4484,7 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+ 	}
+ 	// 1.1: pictures read where they are (a hardware decoder's buffers): VK_EXT_external_memory_host and what it needs
+ 	// (VK_KHR_external_memory; the instance's properties2 and external_memory_capabilities), on the 1.0 instance
+-	const bool host_import = cfg.video && vkGetPhysicalDeviceProperties2 &&
++	const bool host_import = import_instance && vkGetPhysicalDeviceProperties2 &&
+ 							 HasExtension(dexts, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME) &&
+ 							 HasExtension(dexts, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+ 	if (host_import)
+@@ -3376,13 +4498,54 @@ bool Init(int ui_w, int ui_h, bool offscreen, int out_w, int out_h)
+ 	qi.queueFamilyIndex = g.family;
+ 	qi.queueCount = 1;
+ 	qi.pQueuePriorities = &prio;
++	// 1.2 (MPC 1.7): the video's post-processing writes A2B10G10R10 / R16G16_SFLOAT / R16_SFLOAT storage images
++	// (shaderStorageImageExtendedFormats); its half-precision builds need shaderFloat16 (VK_KHR_shader_float16_int8) and
++	// shaderInt16. Asked for only when the device has them; a device refused with them is made again without.
++	VkPhysicalDeviceFeatures have = {};
++	vkGetPhysicalDeviceFeatures(g.phys, &have);
++	VkPhysicalDeviceFeatures enable = {};
++	VkPhysicalDeviceShaderFloat16Int8FeaturesKHR f16 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR};
++	g.post_formats = cfg.video && have.shaderStorageImageExtendedFormats;
++	g.post_fp16 = false;
++	if (g.post_formats && cfg.post_fp16 && have.shaderInt16 && vkGetPhysicalDeviceFeatures2 &&
++		HasExtension(dexts, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
++	{
++		VkPhysicalDeviceShaderFloat16Int8FeaturesKHR q = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR};
++		VkPhysicalDeviceFeatures2 f2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
++		f2.pNext = &q;
++		vkGetPhysicalDeviceFeatures2(g.phys, &f2);
++		g.post_fp16 = q.shaderFloat16 == VK_TRUE;
++	}
++	enable.shaderStorageImageExtendedFormats = g.post_formats ? VK_TRUE : VK_FALSE;
++	if (g.post_fp16)
++	{
++		enable.shaderInt16 = VK_TRUE;
++		f16.shaderFloat16 = VK_TRUE;
++		dwant.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
++	}
+ 	VkDeviceCreateInfo di = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
++	di.pNext = g.post_fp16 ? &f16 : nullptr;
+ 	di.queueCreateInfoCount = 1;
+ 	di.pQueueCreateInfos = &qi;
+ 	di.enabledExtensionCount = uint32_t(dwant.size());
+ 	di.ppEnabledExtensionNames = dwant.data();
+-	internal::Log("[gpu] Init: device on %s", g.device_name);
+-	if (!Check(vkCreateDevice(g.phys, &di, nullptr, &g.device), "vkCreateDevice"))
++	di.pEnabledFeatures = &enable;
++	internal::Log("[gpu] Init: device on %s (post-processing's formats: %s, half precision: %s)", g.device_name,
++		g.post_formats ? "yes" : "no", g.post_fp16 ? "yes" : "no");
++	VkResult made = vkCreateDevice(g.phys, &di, nullptr, &g.device);
++	if (made != VK_SUCCESS && (g.post_formats || g.post_fp16))
++	{
++		internal::Log("[gpu] vkCreateDevice with the post-processing's features -> %d: again without them", int(made));
++		if (g.post_fp16)
++			dwant.pop_back();
++		g.post_formats = g.post_fp16 = false;
++		enable = VkPhysicalDeviceFeatures();
++		di.pNext = nullptr;
++		di.enabledExtensionCount = uint32_t(dwant.size());
++		di.ppEnabledExtensionNames = dwant.data();
++		made = vkCreateDevice(g.phys, &di, nullptr, &g.device);
++	}
++	if (!Check(made, "vkCreateDevice"))
+ 	{
+ 		Shutdown();
+ 		return false;
+@@ -3739,6 +4902,7 @@ void WaitFrame()
+ 		}
+ 		g.queries_written = false;
+ 	}
++	ReadPostTimes();
+ 	g.in_flight = false;
+ }
+ } // namespace
+@@ -4120,6 +5284,8 @@ bool Present(const uint32_t* ui, Rect dirty, bool wait_vsync)
+ 				Barrier(cmd, *t.im, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+ 		}
+ 	}
++	// 1.2: the video's post-processing passes (when on), before the render pass
++	RecordPost(cmd);
+ 	VkFramebuffer fb = g.hdr_active ? g.hdr_target.fb : g.offscreen ? g.offscreen_target.fb : g.swap_fbs[index];
+ 	VkClearValue cv = {};
+ 	cv.color.float32[3] = 1.0f;
+@@ -4145,8 +5311,9 @@ bool Present(const uint32_t* ui, Rect dirty, bool wait_vsync)
+ 			internal::Log("[gpu] shelf scene not drawn: game %d, pipeline %d", int(draw_game), int(g.scene_pipe != VK_NULL_HANDLE));
+ 	}
+ 	g.presents++;
+-	// 1.1: the video picture, under the surface
+-	RecordVideoDraw(cmd);
++	// 1.1: the video picture, under the surface (1.2: through the post-processing's final pass when it ran)
++	if (!RecordPostDraw(cmd))
++		RecordVideoDraw(cmd);
+ 	// the surface over everything
+ 	{
+ 		Chain& uc = g.hdr_active ? g.hdr_ui_chain : g.ui_chain;
+diff --git a/src/stub.cpp b/src/stub.cpp
+index add4e7b..8bbe424 100644
+--- a/src/stub.cpp
++++ b/src/stub.cpp
+@@ -62,4 +62,13 @@ size_t HostMemoryAlignment() { return 0; }
+ HostMemory* ImportHostMemory(void*, size_t) { return nullptr; }
+ void ReleaseHostMemory(HostMemory*) {}
+ VideoStats TakeVideoStats() { return VideoStats(); }
++// 1.2 (MPC 1.7): the post-processing: nothing to run it on
++void SetVideoPost(const VideoPost&) {}
++PostStatus TakePostStatus()
++{
++	PostStatus s;
++	s.why_off = "no GPU in this build";
++	return s;
++}
++bool PostHolds(uint64_t) { return false; }
+ } // namespace ps5gpu
+diff --git a/tests/gpu_test.cpp b/tests/gpu_test.cpp
+index 74471b7..298350b 100644
+--- a/tests/gpu_test.cpp
++++ b/tests/gpu_test.cpp
+@@ -1247,6 +1247,513 @@ int VideoKeep()
+ 	ps5gpu::Shutdown();
+ 	return g_fail;
+ }
++
++// ---- 1.2 (MPC 1.7): the video's post-processing (SetVideoPost) ---------------------------------------------------------
++ps5gpu::VideoPost PostOn(ps5gpu::VideoScaler s = ps5gpu::VideoScaler::Fsr)
++{
++	ps5gpu::VideoPost p;
++	p.on = true;
++	p.scaler = s;
++	return p;
++}
++
++// a flat 8-bit 4:2:0 picture of Y codes (chroma neutral), its planes in `y` / `uv`
++ps5gpu::VideoFrame Luma(int w, int h, std::vector<uint8_t>& y, std::vector<uint8_t>& uv, uint64_t id = 0)
++{
++	uv.assign(size_t(w) * ((h + 1) / 2), 128);
++	ps5gpu::VideoFrame f;
++	f.width = w;
++	f.height = h;
++	f.layout = ps5gpu::VideoLayout::SemiPlanarUV;
++	f.plane[0] = {y.data(), w};
++	f.plane[1] = {uv.data(), w};
++	f.id = id;
++	return f;
++}
++
++// the green of a row's pixels x0..x1-1
++std::vector<int> Row(int y, int x0, int x1)
++{
++	std::vector<int> v;
++	for (int x = x0; x < x1; x++)
++		v.push_back(At(x, y).g);
++	return v;
++}
++
++// the passes' core checks, on whichever build the device and Config::post_fp16 give
++int Post(bool fp16)
++{
++	ps5gpu::Config c = BaseConfig();
++	c.video = true;
++	c.post_fp16 = fp16;
++	if (!StartOffscreen(kOutW, kOutH, c))
++		return g_fail;
++	using L = ps5gpu::VideoLayout;
++	using M = ps5gpu::ColorMatrix;
++	using S = ps5gpu::VideoScaler;
++	std::fill(g_ui.begin(), g_ui.end(), 0u);
++	ps5gpu::TakePostStatus();
++	// off (the default): 1.1's single pass, nothing reported
++	{
++		Pic p;
++		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
++		ps5gpu::SetVideo(p.f, FullView());
++		Present();
++		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++		Check(!st.active && st.why_off.empty() && std::string(st.scaler) == "none", "off: the single pass, the status says so");
++	}
++	// on: every layout through prep and each scaler (bars 4x upscaled: their middles flat), against the reference
++	{
++		struct Case
++		{
++			const char* name;
++			L layout;
++			int bits;
++			bool msb;
++			int sx, sy;
++			M m;
++			bool full;
++		};
++		const Case cases[] = {
++			{"yuv420p", L::Planar, 8, false, 1, 1, M::BT709, false},
++			{"yuvj420p (BT.601, full)", L::Planar, 8, false, 1, 1, M::BT601, true},
++			{"yuv444p12le", L::Planar, 12, false, 0, 0, M::BT709, false},
++			{"nv12", L::SemiPlanarUV, 8, false, 1, 1, M::BT709, false},
++			{"nv21", L::SemiPlanarVU, 8, false, 1, 1, M::BT709, false},
++			{"p010le (BT.2020)", L::SemiPlanarUV, 10, true, 1, 1, M::BT2020, false},
++			{"gray10le", L::Gray, 10, false, 0, 0, M::BT709, false},
++			{"gbrp10le", L::PlanarGBR, 10, false, 0, 0, M::BT709, true},
++		};
++		const S scalers[4] = {S::Fsr, S::Lanczos, S::Bicubic, S::Bilinear};
++		const char* sname[4] = {"FSR 1", "Lanczos", "bicubic", "bilinear"};
++		for (int k = 0; k < 4; k++)
++		{
++			ps5gpu::SetVideoPost(PostOn(scalers[k]));
++			for (const Case& cs : cases)
++			{
++				Pic p;
++				Fill(p, cs.layout, cs.bits, cs.msb, cs.sx, cs.sy, kBars8);
++				p.f.matrix = cs.m;
++				p.f.full_range = cs.full;
++				ps5gpu::SetVideo(p.f, FullView());
++				Present();
++				CheckBars((std::string("post, ") + sname[k] + ": " + cs.name).c_str(), p, cs.full, cs.m, 3);
++			}
++			const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++			Check(st.active && st.why_off.empty() && std::string(st.scaler) == sname[k] && !st.motion,
++				std::string("... the status: active, scaled by ") + st.scaler + (st.fp16 ? ", half precision" : ", 32-bit"));
++			if (k == 0)
++				Check(st.fp16 == fp16, std::string("... the ") + (fp16 ? "half-precision" : "32-bit") + " builds, as asked");
++		}
++		ps5gpu::SetVideoPost(PostOn());
++		for (int order = 0; order < 2; order++)
++		{
++			Pic p;
++			Fill(p, L::Packed, 8, false, 0, 0, kBars8);
++			if (order == 1)
++			{
++				p.f.rgb_index[0] = 2, p.f.rgb_index[2] = 0;
++				for (size_t i = 0; i + 3 < p.store[0].size(); i += 4)
++					std::swap(p.store[0][i], p.store[0][i + 2]);
++			}
++			ps5gpu::SetVideo(p.f, FullView());
++			Present();
++			CheckBars(order ? "post: bgra" : "post: rgba", p, true, M::BT709, 3);
++		}
++	}
++	// the picture at its own size: not scaled; at its size partly off the screen: the visible part, in place
++	{
++		const int w = kOutW, h = kOutH;
++		std::vector<uint8_t> y(size_t(w) * h), uv;
++		for (int j = 0; j < h; j++)
++			for (int i = 0; i < w; i++)
++				y[size_t(j) * w + i] = uint8_t(((i / 4) & 1) ? 200 : 40); // 4-pixel stripes
++		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
++		ps5gpu::SetVideo(f, FullView());
++		Present();
++		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++		const Rgb a = At(1, 50), b = At(5, 50), e = At(4, 50);
++		Check(std::string(st.scaler) == "none" && a.g < 35 && b.g > 205 && e.g > 205,
++			"the picture at its own size: not scaled (stripes exact: " + Str(a) + " " + Str(e) + " " + Str(b) + ")");
++		ps5gpu::VideoView v;
++		v.dst = {-6, -10, w, h}; // the stripes 6 pixels to the left: x 0 shows the picture's x 6 (a 200 stripe)
++		ps5gpu::SetVideoView(v);
++		Present();
++		Check(At(0, 50).g > 205 && At(2, 50).g < 35 && At(kOutW - 1, 50).g < 5,
++			"partly off the screen: the visible part in place, black past the picture (" + Str(At(0, 50)) + " " + Str(At(2, 50)) +
++				" " + Str(At(kOutW - 1, 50)) + ")");
++	}
++	// shrinking: a 1-pixel checkerboard at half size is grey with every scaler (FSR 1 shrinks bicubic)
++	{
++		const int w = 512, h = 256;
++		std::vector<uint8_t> y(size_t(w) * h), uv;
++		for (int j = 0; j < h; j++)
++			for (int i = 0; i < w; i++)
++				y[size_t(j) * w + i] = ((i ^ j) & 1) ? 235 : 16;
++		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
++		const S scalers[4] = {S::Fsr, S::Lanczos, S::Bicubic, S::Bilinear};
++		const char* want[4] = {"bicubic", "Lanczos", "bicubic", "bilinear"};
++		for (int k = 0; k < 4; k++)
++		{
++			ps5gpu::SetVideoPost(PostOn(scalers[k]));
++			ps5gpu::SetVideo(f, FullView());
++			Present();
++			int lo = 255, hi = 0;
++			for (int j = 20; j < 100; j += 7)
++				for (int i = 20; i < 230; i += 5)
++				{
++					lo = std::min(lo, At(i, j).g);
++					hi = std::max(hi, At(i, j).g);
++				}
++			const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++			Check(lo >= 118 && hi <= 138 && std::string(st.scaler) == want[k],
++				std::string("shrunk by ") + st.scaler + ": a 1-pixel checkerboard at half size is grey (" + std::to_string(lo) + ".." +
++					std::to_string(hi) + ")");
++		}
++	}
++	// enlarging a black / white step 16x: bilinear ramps; bicubic, Lanczos and FSR 1 are sharper; RCAS sharpens more at 0
++	{
++		std::vector<uint8_t> y(16 * 8), uv;
++		for (int j = 0; j < 8; j++)
++			for (int i = 0; i < 16; i++)
++				y[j * 16 + i] = i < 8 ? 16 : 235;
++		ps5gpu::VideoFrame f = Luma(16, 8, y, uv);
++		auto at = [&](S s, float sharp) {
++			ps5gpu::VideoPost p = PostOn(s);
++			p.sharpness = sharp;
++			ps5gpu::SetVideoPost(p);
++			ps5gpu::SetVideo(f, FullView());
++			Present();
++			return At(128 - 4, 64).g;
++		};
++		const int bl = at(S::Bilinear, 0.25f), bc = at(S::Bicubic, 0.25f), lz = at(S::Lanczos, 0.25f), fsr = at(S::Fsr, 0.25f);
++		Check(bl > 40 && bl < 128 && bc < bl && lz < bl && fsr < bl,
++			"a step enlarged 16x, 4 pixels before it: bilinear " + std::to_string(bl) + ", bicubic " + std::to_string(bc) +
++				", Lanczos " + std::to_string(lz) + ", FSR 1 " + std::to_string(fsr) + " (sharper than bilinear)");
++		int lo = 255, hi = 0;
++		for (int x = 0; x < kOutW; x++)
++		{
++			lo = std::min(lo, At(x, 64).g);
++			hi = std::max(hi, At(x, 64).g);
++		}
++		Check(lo <= 2 && hi >= 253, "... FSR 1 and RCAS keep within black and white (" + std::to_string(lo) + ".." + std::to_string(hi) + ")");
++		// RCAS at 2x (as 1080p on a 4K screen): a grey step's two pixels across the edge, sharpness 0 (most) and 2
++		std::vector<uint8_t> y2(128 * 64), uv2;
++		for (int j = 0; j < 64; j++)
++			for (int i = 0; i < 128; i++)
++				y2[j * 128 + i] = i < 64 ? 80 : 160;
++		ps5gpu::VideoFrame f2 = Luma(128, 64, y2, uv2);
++		int across[2];
++		for (int k = 0; k < 2; k++)
++		{
++			ps5gpu::VideoPost p = PostOn();
++			p.sharpness = k == 0 ? 0.0f : 2.0f;
++			ps5gpu::SetVideoPost(p);
++			ps5gpu::SetVideo(f2, FullView());
++			Present();
++			across[k] = At(128, 64).g - At(127, 64).g;
++		}
++		Check(across[0] > across[1] && across[1] > 0, "RCAS: a step enlarged 2x is steeper at sharpness 0 (" + std::to_string(across[0]) +
++														  ") than at 2 (" + std::to_string(across[1]) + ")");
++	}
++	// colour controls: brightness, contrast, saturation on the codes (as MPC-HC's)
++	{
++		Pic p;
++		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
++		double ref[4][3];
++		for (int i = 0; i < 4; i++)
++			Reference(p.bars[i].y, p.bars[i].cb, p.bars[i].cr, 8, false, M::BT709, ref[i]);
++		struct Cc
++		{
++			const char* name;
++			float b, c, s;
++		};
++		const Cc cases[] = {{"brightness +0.2", 0.2f, 1, 1}, {"contrast 1.5", 0, 1.5f, 1}, {"saturation 0 (grey)", 0, 1, 0},
++			{"all three (-0.1, 0.8, 1.4)", -0.1f, 0.8f, 1.4f}};
++		for (const Cc& cc : cases)
++		{
++			ps5gpu::VideoPost pp = PostOn();
++			pp.brightness = cc.b;
++			pp.contrast = cc.c;
++			pp.saturation = cc.s;
++			ps5gpu::SetVideoPost(pp);
++			ps5gpu::SetVideo(p.f, FullView());
++			Present();
++			int worst = 0;
++			std::string detail;
++			for (int i = 0; i < 4; i++)
++			{
++				const double yl = 0.2126 * ref[i][0] + 0.7152 * ref[i][1] + 0.0722 * ref[i][2];
++				int want[3];
++				for (int k = 0; k < 3; k++)
++				{
++					double v = yl + (ref[i][k] - yl) * cc.s;
++					v = (v - 0.5) * cc.c + 0.5 + cc.b;
++					want[k] = int(std::lround(std::min(1.0, std::max(0.0, v)) * 255));
++				}
++				const Rgb got = BarAt(i);
++				worst = std::max({worst, std::abs(got.r - want[0]), std::abs(got.g - want[1]), std::abs(got.b - want[2])});
++				detail += " " + Str(got) + "/" + std::to_string(want[0]) + "," + std::to_string(want[1]) + "," + std::to_string(want[2]);
++			}
++			Check(worst <= 3, std::string("colour: ") + cc.name + ": worst " + std::to_string(worst) + " (got/want" + detail + ")");
++		}
++		ps5gpu::VideoPost pp = PostOn();
++		pp.brightness = std::nanf("");
++		pp.contrast = 9;
++		ps5gpu::SetVideoPost(pp); // NaN: the default (0); 9: the most (2)
++		ps5gpu::SetVideo(p.f, FullView());
++		Present();
++		const double v = std::min(1.0, std::max(0.0, (ref[3][1] - 0.5) * 2 + 0.5));
++		Check(std::abs(BarAt(3).g - int(std::lround(v * 255))) <= 3, "colour: out-of-range settings are kept in range (" + Str(BarAt(3)) + ")");
++	}
++	// HDR: PQ and HLG bars, each tone mapping, through the passes (10-bit codes between them)
++	{
++		ps5gpu::SetVideoPost(PostOn());
++		const Ycc hdr8[4] = {{180, 110, 160}, {120, 150, 100}, {200, 128, 128}, {60, 128, 128}};
++		const char* names[4] = {"off", "BT.2390", "Hable", "Reinhard"};
++		for (int hlg = 0; hlg < 2; hlg++)
++			for (int mode = 0; mode < 4; mode++)
++			{
++				Pic p;
++				Fill(p, L::SemiPlanarUV, 10, true, 1, 1, hdr8);
++				p.f.matrix = M::BT2020;
++				p.f.transfer = hlg ? ps5gpu::VideoTransfer::Hlg : ps5gpu::VideoTransfer::Pq;
++				p.f.peak_nits = 4000;
++				ps5gpu::VideoView v = FullView();
++				v.tone_map = ps5gpu::ToneMap(mode);
++				v.white_nits = 203;
++				ps5gpu::SetVideo(p.f, v);
++				Present();
++				CheckBars((std::string("post: ") + (hlg ? "HLG" : "PQ, peak 4000") + ", tone mapping " + names[mode]).c_str(), p,
++					false, M::BT2020, 4, mode, hlg != 0, 4000, 203);
++			}
++	}
++	// debanding: a gentle ramp in 8 steps; turned on while the picture is paused, it is prepared again
++	{
++		const int w = kOutW, h = kOutH;
++		std::vector<uint8_t> y(size_t(w) * h), uv;
++		for (int j = 0; j < h; j++)
++			for (int i = 0; i < w; i++)
++				y[size_t(j) * w + i] = uint8_t(i < w / 2 ? 100 + i * 8 / (w / 2) : (i < w * 3 / 4 ? 16 : 235));
++		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
++		// the ramp's largest step between neighbouring columns, each column averaged over the rows (what the eye sees of
++		// dithered steps), and its mean
++		auto ramp = [&](double* mean) {
++			std::vector<double> col(size_t(w / 2), 0.0);
++			for (int x = 0; x < w / 2; x++)
++			{
++				for (int yy = 8; yy < h - 8; yy++)
++					col[size_t(x)] += At(x, yy).g;
++				col[size_t(x)] /= double(h - 16);
++			}
++			double jump = 0, sum = 0;
++			for (int x = 4; x < w / 2 - 5; x++)
++				jump = std::max(jump, std::abs(col[size_t(x) + 1] - col[size_t(x)]));
++			for (double v : col)
++				sum += v;
++			*mean = sum / col.size();
++			return jump;
++		};
++		ps5gpu::SetVideoPost(PostOn());
++		ps5gpu::SetVideo(f, FullView());
++		Present();
++		double m0, m1;
++		const double before = ramp(&m0);
++		const std::vector<int> edge0 = Row(64, w * 3 / 4 - 24, w * 3 / 4 + 24);
++		ps5gpu::VideoPost pp = PostOn();
++		pp.deband = true;
++		ps5gpu::SetVideoPost(pp);
++		Present(); // (no new picture)
++		const double after = ramp(&m1);
++		const std::vector<int> edge1 = Row(64, w * 3 / 4 - 24, w * 3 / 4 + 24);
++		char buf[160];
++		snprintf(buf, sizeof(buf), "(the largest step %.2f -> %.2f, mean %.2f -> %.2f)", before, after, m0, m1);
++		Check(before >= 1.0 && after < before * 0.6 && std::abs(m1 - m0) < 1.0,
++			std::string("debanding (turned on over a paused picture): the ramp's 8 steps smoothed ") + buf);
++		int moved = 0;
++		for (size_t i = 0; i < edge0.size(); i++)
++			moved = std::max(moved, std::abs(edge0[i] - edge1[i]));
++		Check(moved <= 2, "... a hard edge kept (at most " + std::to_string(moved) + " apart: the grain)");
++	}
++	// deblocking: 8x8 blocks two codes apart get a softer step at their edges; a strong edge stays
++	{
++		const int w = kOutW, h = kOutH;
++		std::vector<uint8_t> y(size_t(w) * h), uv;
++		for (int j = 0; j < h; j++)
++			for (int i = 0; i < w; i++)
++				y[size_t(j) * w + i] = uint8_t(i >= 192 ? (i < 224 ? 30 : 220) : (((i / 8) + (j / 8)) & 1) ? 122 : 118);
++		ps5gpu::VideoFrame f = Luma(w, h, y, uv);
++		auto steps = [&](int* strong) {
++			int worst = 0;
++			for (int x = 7; x < 184; x += 8)
++				worst = std::max(worst, std::abs(At(x + 1, 61).g - At(x, 61).g));
++			*strong = At(224, 61).g - At(223, 61).g;
++			return worst;
++		};
++		ps5gpu::SetVideoPost(PostOn());
++		ps5gpu::SetVideo(f, FullView());
++		Present();
++		int s0, s1;
++		const int before = steps(&s0);
++		ps5gpu::VideoPost pp = PostOn();
++		pp.deblock = true;
++		ps5gpu::SetVideoPost(pp);
++		Present();
++		const int after = steps(&s1);
++		Check(before >= 4 && after <= before / 2 && s1 == s0,
++			"deblocking: the steps at the 8x8 edges " + std::to_string(before) + " -> " + std::to_string(after) +
++				", the strong edge kept (" + std::to_string(s0) + " / " + std::to_string(s1) + ")");
++	}
++	// motion smoothing: a square moving 24 pixels; between the two pictures it is half way, not a cross-fade
++	{
++		const int w = 512, h = 256;
++		auto square = [&](std::vector<uint8_t>& y, int x0, uint8_t bg, uint8_t fg) {
++			y.assign(size_t(w) * h, bg);
++			for (int j = 96; j < 160; j++)
++				for (int i = x0; i < x0 + 64; i++)
++					y[size_t(j) * w + i] = fg;
++		};
++		std::vector<uint8_t> ya, yb, yc, uva, uvb, uvc;
++		square(ya, 200, 40, 200);
++		square(yb, 224, 40, 200);
++		square(yc, 224, 200, 40); // a cut: another scene
++		ps5gpu::VideoPost pp = PostOn();
++		pp.motion = true;
++		ps5gpu::SetVideoPost(pp);
++		// at its own size, centred: the output shows the picture's x 128..383, y 64..191
++		ps5gpu::VideoView v;
++		v.dst = {-128, -64, w, h};
++		ps5gpu::SetVideo(Luma(w, h, ya, uva, 1001), v);
++		Present();
++		const int a_left = At(90, 64).g, a_right = At(154, 64).g;
++		Check(ps5gpu::PostHolds(1001) && !ps5gpu::PostHolds(999), "PostHolds: the picture shown is held, another isn't");
++		v.motion_from = 1001;
++		v.motion_t = 0.5;
++		ps5gpu::SetVideo(Luma(w, h, yb, uvb, 1002), v);
++		Present();
++		const int m_left = At(90, 64).g, m_right = At(154, 64).g; // the square at 212..275: x 90 in, x 154 out
++		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++		Check(st.motion && m_left > 170 && m_right < 70,
++			"motion smoothing at t 0.5: the square half way (" + std::to_string(m_left) + " inside, " + std::to_string(m_right) +
++				" outside; a cross-fade would be grey at both)");
++		v.motion_t = 1;
++		ps5gpu::SetVideoView(v);
++		Present();
++		const int b_left = At(90, 64).g, b_right = At(154, 64).g;
++		v.motion_t = 0;
++		ps5gpu::SetVideoView(v);
++		Present();
++		const int z_left = At(90, 64).g, z_right = At(154, 64).g;
++		Check(b_left < 40 && b_right > 200 && z_left > 200 && z_right < 40 && a_left > 200 && a_right < 40,
++			"... at t 1 the picture itself, at t 0 the one before (" + std::to_string(b_left) + "/" + std::to_string(b_right) + ", " +
++				std::to_string(z_left) + "/" + std::to_string(z_right) + ")");
++		v.motion_t = 0.25;
++		ps5gpu::SetVideoView(v);
++		Present();
++		const int q = At(84, 64).g; // the square at 206..269 at t 0.25: x 84 (the picture's 212) in it
++		Check(q > 170, "... at t 0.25 (the flows kept, the warp made again): " + std::to_string(q));
++		// a cut: never blended, the nearer picture
++		v.motion_from = 1002;
++		v.motion_t = 0.4;
++		ps5gpu::SetVideo(Luma(w, h, yc, uvc, 1003), v);
++		Present();
++		const int c4 = At(20, 10).g;
++		v.motion_t = 0.6;
++		ps5gpu::SetVideoView(v);
++		Present();
++		const int c6 = At(20, 10).g;
++		Check(c4 < 40 && c6 > 200, "a cut: at t 0.4 the picture before (" + std::to_string(c4) + "), at t 0.6 the new one (" +
++									   std::to_string(c6) + "), no blend");
++		// motion_from no longer in the ring: the picture as it is
++		v.motion_from = 999;
++		v.motion_t = 0.5;
++		ps5gpu::SetVideoView(v);
++		Present();
++		Check(At(20, 10).g > 200 && !ps5gpu::TakePostStatus().motion, "a picture before that isn't kept: this one as it is");
++	}
++	// a frame not submitted: its passes never ran; the next one draws the picture again
++	{
++		ps5gpu::SetVideoPost(PostOn());
++		Pic p;
++		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
++		ps5gpu::SetVideo(p.f, FullView());
++		setenv("PS5GPU_TEST_SUBMIT_FAIL", "1", 1);
++		const bool failed = !ps5gpu::Present(g_ui.data(), {0, 0, kOutW, kOutH}, false);
++		unsetenv("PS5GPU_TEST_SUBMIT_FAIL");
++		Check(failed, "a frame's submit failed (injected)");
++		Present();
++		CheckBars("... the next frame: the picture through the passes again", p, false, M::BT709, 3);
++	}
++	// timings and off again
++	{
++		ps5gpu::TakePostStatus();
++		Pic p;
++		Fill(p, L::Planar, 8, false, 1, 1, kBars8);
++		ps5gpu::SetVideo(p.f, FullView());
++		Present(3);
++		const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++		Check(st.prep_ms >= 0 && st.motion_ms >= 0 && st.scale_ms >= 0 && st.final_ms > 0,
++			"the passes' GPU times: prep " + std::to_string(st.prep_ms) + ", motion " + std::to_string(st.motion_ms) + ", scale " +
++				std::to_string(st.scale_ms) + ", final " + std::to_string(st.final_ms) + " ms");
++		ps5gpu::SetVideoPost(ps5gpu::VideoPost());
++		Present();
++		CheckBars("turned off again: the single pass", p, false, M::BT709, 2);
++		Check(!ps5gpu::TakePostStatus().active, "... not active");
++	}
++	ps5gpu::Shutdown();
++	return g_fail;
++}
++
++// the passes can't be made (PS5GPU_TEST_POST_FAIL=1) or have no memory (=2): the single pass draws, the status says why
++int PostFail()
++{
++	ps5gpu::Config c = BaseConfig();
++	c.video = true;
++	if (!StartOffscreen(kOutW, kOutH, c))
++		return g_fail;
++	std::fill(g_ui.begin(), g_ui.end(), 0u);
++	ps5gpu::SetVideoPost(PostOn());
++	Pic p;
++	Fill(p, ps5gpu::VideoLayout::Planar, 8, false, 1, 1, kBars8);
++	ps5gpu::SetVideo(p.f, FullView());
++	Present();
++	const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++	Check(!st.active && !st.why_off.empty(), "on, but the passes failed: not active, why: " + st.why_off);
++	CheckBars("... the single pass draws the picture", p, false, ps5gpu::ColorMatrix::BT709, 2);
++	ps5gpu::Shutdown();
++	return g_fail;
++}
++
++// motion smoothing's images can't be made (PS5GPU_TEST_POST_FAIL=3): between two pictures the one before is shown (not
++// the next one early), and PostHolds says no, so the program shows its pictures as they come
++int PostMotionFail()
++{
++	ps5gpu::Config c = BaseConfig();
++	c.video = true;
++	if (!StartOffscreen(kOutW, kOutH, c))
++		return g_fail;
++	std::fill(g_ui.begin(), g_ui.end(), 0u);
++	ps5gpu::VideoPost post = PostOn();
++	post.motion = true;
++	ps5gpu::SetVideoPost(post);
++	std::vector<uint8_t> ya(size_t(kOutW) * kOutH, 40), yb(size_t(kOutW) * kOutH, 200), uva, uvb;
++	ps5gpu::SetVideo(Luma(kOutW, kOutH, ya, uva, 11), FullView());
++	Present();
++	Check(ps5gpu::PostHolds(11), "motion smoothing on: the picture shown is held");
++	ps5gpu::VideoView v = FullView();
++	v.motion_from = 11;
++	v.motion_t = 0.5;
++	ps5gpu::SetVideo(Luma(kOutW, kOutH, yb, uvb, 12), v);
++	Present();
++	const int g = At(100, 60).g;
++	Check(g < 40 && !ps5gpu::TakePostStatus().motion, "no memory for motion smoothing: at t 0.5 the picture before (" +
++														  std::to_string(g) + "), not the next one early");
++	Check(!ps5gpu::PostHolds(11) && !ps5gpu::PostHolds(12), "... and PostHolds says no: the pictures as they come");
++	post.motion = false;
++	ps5gpu::SetVideoPost(post);
++	ps5gpu::Shutdown();
++	return g_fail;
++}
+ } // namespace vt
+ 
+ int main(int argc, char** argv)
+@@ -1274,6 +1781,15 @@ int main(int argc, char** argv)
+ 		return vt::VideoImageFail();
+ 	if (mode == "video-keep")
+ 		return vt::VideoKeep();
+-	fprintf(stderr, "usage: gpu-test unit|presets|formats|ui-straight|damaged <preset>|init|guard <marker>|params <file> set|get\n");
++	if (mode == "post") // 1.2: the video's post-processing (half precision where the device has it)
++		return vt::Post(true);
++	if (mode == "post-fp32")
++		return vt::Post(false);
++	if (mode == "post-fail") // with PS5GPU_TEST_POST_FAIL=1 or 2
++		return vt::PostFail();
++	if (mode == "post-motion-fail") // with PS5GPU_TEST_POST_FAIL=3
++		return vt::PostMotionFail();
++	fprintf(stderr, "usage: gpu-test unit|presets|formats|ui-straight|damaged <preset>|init|guard <marker>|params <file> set|get|"
++					"video|video-image-fail|video-keep|post|post-fp32|post-fail|post-motion-fail\n");
+ 	return 2;
+ }
+diff --git a/tests/run-tests.sh b/tests/run-tests.sh
+index 0d3b979..a84ec42 100755
+--- a/tests/run-tests.sh
++++ b/tests/run-tests.sh
+@@ -79,6 +79,12 @@ echo "== 1.1: video pictures (layouts, bit depths, matrices, HDR tone mapping, t
+ run video $GPU video
+ run video-image-fail env PS5GPU_TEST_VIDEO_IMAGE_FAIL=1 $GPU video-image-fail
+ run video-keep $GPU video-keep
++# 1.2 (MPC 1.7): the post-processing, on the device's half-precision builds and on the 32-bit ones; what fails
++run post $GPU post
++run post-fp32 $GPU post-fp32
++run post-fail1 env PS5GPU_TEST_POST_FAIL=1 $GPU post-fail
++run post-fail2 env PS5GPU_TEST_POST_FAIL=2 $GPU post-fail
++run post-motion-fail env PS5GPU_TEST_POST_FAIL=3 $GPU post-motion-fail
+ expect "grep -q 'video: ready' $W/video.txt.log && grep -q 'video self-test 1' $W/video.txt.log" "the video pipeline's self-test ran at Init (8-bit NV12 and 10-bit 4:4:4)"
+ 
+ echo "== damaged and missing files (the shipped folder is never written)"
+diff --git a/tests/stub_test.cpp b/tests/stub_test.cpp
+index e35eba9..7d350df 100644
+--- a/tests/stub_test.cpp
++++ b/tests/stub_test.cpp
+@@ -22,5 +22,10 @@ int main()
+ 		"the stub: the menu is Off alone, Present false, nothing to save");
+ 	const ps5gpu::Rect r = ps5gpu::Fit(320, 224, 4.0 / 3.0, {0, 0, 1920, 1080}, false);
+ 	check(r.x == 240 && r.w == 1440 && r.h == 1080, "the stub build has Fit too");
++	ps5gpu::VideoPost post;
++	post.on = true;
++	ps5gpu::SetVideoPost(post);
++	const ps5gpu::PostStatus st = ps5gpu::TakePostStatus();
++	check(!st.active && !st.why_off.empty() && !ps5gpu::PostHolds(1), "1.2: the post-processing: not active, says why");
+ 	return fail;
+ }

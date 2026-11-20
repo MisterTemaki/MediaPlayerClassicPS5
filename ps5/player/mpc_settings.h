@@ -258,7 +258,7 @@ struct Settings
 	// (<drive>/mpcps5/backup, mpc_backup.h): "/mnt/usb0".."/mnt/usb7", "/mnt/ext0", "/mnt/ext1"; "" off (the default)
 	std::string backup_drive;
 	// 1.7: Options > Miscellaneous: where the PS5's home screen lists the app: 0 Media (1.6.3's), 1 Games. Written to
-	// the installed copy's sce_sys/param.json at each start (mpc_home.h); the console reads it when it registers the
+	// the installed copy's sce_sys/param.json at each start (ProsperoHome.h); the console reads it when it registers the
 	// app (after deleting it from the home screen, ShadowMount+ registers it again)
 	int home_category = 0;
 	// 1.6.3 review: this installation's id (BackupId=, 32 hex digits): made by the first Save, kept by Reset, taken

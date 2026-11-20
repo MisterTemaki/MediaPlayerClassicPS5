@@ -2862,6 +2862,7 @@ struct Player::Impl
 			for (auto& f : frames)
 				av_frame_free(&f.f);
 			frames.clear();
+			av_frame_free(&peek); // 1.7 (review L11): NextPicture's reference to one of them, with them
 		}
 		fcv.notify_all();
 		if (opener.joinable())
@@ -3884,8 +3885,10 @@ const AVFrame* Player::NextPicture(uint64_t* id, double* t)
 		return nullptr;
 	const VFrame& n = s.frames.front();
 	const double span = n.pts - s.cur_pts;
-	// the same stream run, and two pictures of a film (not a still held, nor a jump in the times)
-	if (n.serial != s.serial || s.cur_serial != s.serial || !n.id || !(span > 0.001 && span <= 0.25))
+	// the same stream run, and two pictures of a film (not a still held, nor a jump in the times); (review L12) not when
+	// they come as often as the screen refreshes, or more (60 fps, 30 fps at twice the speed): nothing to make between
+	const double wall_span = span / std::max(0.01, double(s.rate.load()));
+	if (n.serial != s.serial || s.cur_serial != s.serial || !n.id || !(span > 0.001 && span <= 0.25) || wall_span < 0.02)
 		return nullptr;
 	// where the display is between them: the clock as UpdateVideo reads it (with the display delay)
 	const double clock = s.clock.Get() + s.display_delay.load() * s.rate.load();

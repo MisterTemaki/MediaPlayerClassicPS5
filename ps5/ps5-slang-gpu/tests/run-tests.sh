@@ -79,6 +79,12 @@ echo "== 1.1: video pictures (layouts, bit depths, matrices, HDR tone mapping, t
 run video $GPU video
 run video-image-fail env PS5GPU_TEST_VIDEO_IMAGE_FAIL=1 $GPU video-image-fail
 run video-keep $GPU video-keep
+# 1.2 (MPC 1.7): the post-processing, on the device's half-precision builds and on the 32-bit ones; what fails
+run post $GPU post
+run post-fp32 $GPU post-fp32
+run post-fail1 env PS5GPU_TEST_POST_FAIL=1 $GPU post-fail
+run post-fail2 env PS5GPU_TEST_POST_FAIL=2 $GPU post-fail
+run post-motion-fail env PS5GPU_TEST_POST_FAIL=3 $GPU post-motion-fail
 expect "grep -q 'video: ready' $W/video.txt.log && grep -q 'video self-test 1' $W/video.txt.log" "the video pipeline's self-test ran at Init (8-bit NV12 and 10-bit 4:4:4)"
 
 echo "== damaged and missing files (the shipped folder is never written)"
