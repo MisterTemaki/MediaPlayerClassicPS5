@@ -95,11 +95,22 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
 
 ### Validation and limits
 
-- **Not run on a PS5 before this release.** Nothing of 1.7 has run on a console yet: FSR 1 and the other passes,
-  their half-precision builds, motion smoothing at 60 Hz, the Shaders page, the home-screen category and its pick-up
-  by ShadowMount+. The GPU device is now created with new features even with Shaders Off: if the app falls back to the
-  software renderer on your console, please report it with `boot.log` (**Debug logs** on,
-  `/data/mpcps5/logs/boot.log`).
+- **On a PS5** (4K TV at 59.94 Hz, the console's decoder for every film): the GPU device was created with the new
+  features (A2B10G10R10 and 16-bit storage images, half precision) on the first try, and the presets ran with their
+  half-precision builds. Each preset's GPU time per frame, from View > Statistics:
+
+  | 24 fps film | Performance | Quality | Experimental |
+  |---|---|---|---|
+  | 1920×800 H.264, enlarged to 3840×1600 | 0.5 ms | 0.7 ms | 1.5 ms |
+  | 3840×1714 H.264 | 1.1 ms | 2.1 ms | 5.1 ms |
+  | 3840×2160 HEVC HDR10 | 1.3 ms | 2.4 ms | 5.2 ms |
+
+  The films kept their 24 pictures a second with 1 to 3 dropped each (at the preset changes), the HDR10 film stayed
+  in native HDR10 output with every preset, and motion smoothing looked smooth on camera pans with no blended
+  pictures at cuts and no ghosts. With Shaders Off, H.264 at 60 fps played as in 1.6.3.
+- Not run on a PS5: the Custom settings and the colour controls, the home-screen category Games and its pick-up by
+  ShadowMount+, and Stop keeping the position (1.6.4). If the app falls back to the software renderer on your console,
+  please report it with `boot.log` (**Debug logs** on, `/data/mpcps5/logs/boot.log`).
 - **Full frontend suite: 941 checks passed.** The 12 that fail (an SMB address check, and 11 comparisons of the GPU's
   4K HDR pictures with the CPU path's on the host's software Vulkan) fail the same way on 1.6.4. The new group 40
   (48 checks) covers the presets, the menu, the Shaders page (Custom's edits kept on OK), the colour controls, the
@@ -116,8 +127,7 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
 - The native PS5 GPU build and complete installer passed import, runtime-link, syscall and RADV linkage checks.
 - Three independent review rounds; the last found nothing that blocks the release.
 
-Host tests use simulated PS5 calls and software Vulkan, which is far slower than the console's GPU: the passes'
-timings on the PS5 aren't known yet.
+Host tests use simulated PS5 calls and software Vulkan; the timings above are the console's.
 
 ### Credits
 

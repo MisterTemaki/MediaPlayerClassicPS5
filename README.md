@@ -24,9 +24,10 @@ Miscellaneous** now also chooses whether the home screen lists the app under **M
 1.6.4's fixes below (1.6.4 wasn't released on its own). See [Shaders](#shaders-17), the
 [design notes](docs/POST-PROCESSING.md) and the [1.7.0 release notes](docs/RELEASE-NOTES-v1.7.0.md).
 
-> **Status (1.7.0):** tested on the host (Linux, software Vulkan); not yet run on a PS5. The GPU device is now
-> created with new features (A2B10G10R10 and 16-bit storage images, and 16-bit arithmetic on most starts) even with
-> Shaders Off. If the app falls back to the software renderer on your console, which it does by itself after a
+> **Status (1.7.0):** the presets ran on a PS5 with 1080p, 4K and 4K HDR10 films at 24 fps: 0.5 to 5.2 ms of GPU
+> time per frame, HDR10 output kept, motion smoothing without blended cuts (see the release notes). The GPU device is
+> now created with new features (A2B10G10R10 and 16-bit storage images, and 16-bit arithmetic on most starts) even
+> with Shaders Off. If the app falls back to the software renderer on your console, which it does by itself after a
 > GPU start that fails, please send `boot.log` (with **Debug logs** on).
 
 **1.6.4: Stop keeps the file's position, and an audit's fixes.** Up to 1.6.3, a file stopped with **Stop** and then
