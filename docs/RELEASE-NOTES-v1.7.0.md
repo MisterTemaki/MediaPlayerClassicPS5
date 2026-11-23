@@ -97,8 +97,8 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
 
 - **On a PS5** (4K TV at 59.94 Hz, the console's decoder for every film): the GPU device was created with the new
   features (A2B10G10R10 and 16-bit storage images, half precision) on the first try, and the presets ran with their
-  half-precision builds. Each preset's GPU time per frame (the sum the statistics show), with the player in its
-  window and View > Statistics open:
+  half-precision builds. Each preset's GPU time per frame (the sum the OSD statistics show, R3 + Square), with the
+  player in its window and View > Statistics open:
 
   | 24 fps film | Performance | Quality | Experimental |
   |---|---|---|---|
