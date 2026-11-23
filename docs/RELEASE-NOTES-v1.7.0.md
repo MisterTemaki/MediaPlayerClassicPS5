@@ -107,10 +107,11 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
 
   The films kept their 24 pictures a second with 1 to 3 dropped each (at the preset changes), the HDR10 film stayed
   in native HDR10 output with every preset, and motion smoothing looked smooth on camera pans with no blended
-  pictures at cuts and no ghosts. With Shaders Off, H.264 at 60 fps played as in 1.6.3.
-- Not run on a PS5: the Custom settings and the colour controls, the home-screen category Games and its pick-up by
-  ShadowMount+, and Stop keeping the position (1.6.4). If the app falls back to the software renderer on your console,
-  please report it with `boot.log` (**Debug logs** on, `/data/mpcps5/logs/boot.log`).
+  pictures at cuts and no ghosts. With Shaders Off, H.264 at 60 fps played as in 1.6.3. Stop keeping the position
+  (1.6.4) and the home-screen category Games, with ShadowMount+ adding the app again, worked on the same console.
+- Not run on a PS5: the Custom settings and the colour controls (host tests only). If the app falls back to the
+  software renderer on your console, please report it with `boot.log` (**Debug logs** on,
+  `/data/mpcps5/logs/boot.log`).
 - **Full frontend suite: 941 checks passed.** The 12 that fail (an SMB address check, and 11 comparisons of the GPU's
   4K HDR pictures with the CPU path's on the host's software Vulkan) fail the same way on 1.6.4. The new group 40
   (48 checks) covers the presets, the menu, the Shaders page (Custom's edits kept on OK), the colour controls, the
