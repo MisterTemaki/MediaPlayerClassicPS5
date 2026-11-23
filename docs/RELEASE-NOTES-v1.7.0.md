@@ -97,18 +97,21 @@ menus or the subtitles), with the GPU renderer. **Off** is the default: the pict
 
 - **On a PS5** (4K TV at 59.94 Hz, the console's decoder for every film): the GPU device was created with the new
   features (A2B10G10R10 and 16-bit storage images, half precision) on the first try, and the presets ran with their
-  half-precision builds. Each preset's GPU time per frame, from View > Statistics:
+  half-precision builds. Each preset's GPU time per frame (the sum the statistics show), with the player in its
+  window and View > Statistics open:
 
   | 24 fps film | Performance | Quality | Experimental |
   |---|---|---|---|
-  | 1920×800 H.264, enlarged to 3840×1600 | 0.5 ms | 0.7 ms | 1.5 ms |
-  | 3840×1714 H.264 | 1.1 ms | 2.1 ms | 5.1 ms |
-  | 3840×2160 HEVC HDR10 | 1.3 ms | 2.4 ms | 5.2 ms |
+  | 1920×800 H.264, enlarged (FSR 1) | 0.5 ms | 0.7 ms | 1.5 ms |
+  | 3840×1714 H.264, made smaller to the window (bicubic) | 1.1 ms | 2.1 ms | 5.1 ms |
+  | 3840×2160 HEVC HDR10, made smaller to the window (bicubic) | 1.3 ms | 2.4 ms | 5.2 ms |
 
-  The films kept their 24 pictures a second with 1 to 3 dropped each (at the preset changes), the HDR10 film stayed
-  in native HDR10 output with every preset, and motion smoothing looked smooth on camera pans with no blended
-  pictures at cuts and no ghosts. With Shaders Off, H.264 at 60 fps played as in 1.6.3. Stop keeping the position
-  (1.6.4) and the home-screen category Games, with ShadowMount+ adding the app again, worked on the same console.
+  Full screen, a 4K film on a 4K screen isn't scaled and costs less. The films kept their 24 pictures a second with
+  at most 3 dropped each (around the preset changes; the first while the passes were made), the HDR10 film stayed in
+  native HDR10 output with every preset, and motion smoothing looked right to the tester, with no blended pictures at
+  cuts and no ghosts. With Shaders Off, a 720×1280 H.264 clip at 60 fps showed every picture for one refresh, as
+  1.6.3 did. Stop keeping the position (1.6.4) and the home-screen category Games, with ShadowMount+ adding the app
+  again, worked on the same console.
 - Not run on a PS5: the Custom settings and the colour controls (host tests only). If the app falls back to the
   software renderer on your console, please report it with `boot.log` (**Debug logs** on,
   `/data/mpcps5/logs/boot.log`).

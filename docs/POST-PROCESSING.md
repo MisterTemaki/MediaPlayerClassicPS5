@@ -101,22 +101,24 @@ prep, motion smoothing, scale and final per frame, and the OSD statistics (View 
 Statistics, R3 + Square) their sum. On the console these are the numbers to watch:
 a 60 Hz display leaves 16.7 ms for all of it, the UI included.
 
-Measured on a PS5 (RADV, half-precision builds, 3840×2160 output at 59.94 Hz, 24 fps films):
+Measured on a PS5 (RADV, half-precision builds, 3840×2160 output at 59.94 Hz, 24 fps films), with the player in its
+window and View > Statistics open, so the picture's rectangle was smaller than the screen: the 1920×800 film was
+enlarged (FSR 1), the 4K films made smaller (bicubic). The sum is the OSD's (each part is rounded on its own):
 
 | Film | Preset | prep | motion | scale | final | sum |
 |---|---|---|---|---|---|---|
-| 1920×800 H.264 | Performance | 0.1 | — | 0.2 | 0.2 | 0.5 ms |
+| 1920×800 H.264, enlarged (FSR 1) | Performance | 0.1 | — | 0.2 | 0.2 | 0.5 ms |
 | | Quality | 0.3 | — | 0.2 | 0.2 | 0.7 ms |
 | | Experimental | 0.3 | 0.5 | 0.5 | 0.2 | 1.5 ms |
-| 3840×1714 H.264 | Performance | 0.1 | — | 0.9 | 0.1 | 1.1 ms |
+| 3840×1714 H.264, made smaller (bicubic) | Performance | 0.1 | — | 0.9 | 0.1 | 1.1 ms |
 | | Quality | 1.1 | — | 0.9 | 0.1 | 2.1 ms |
 | | Experimental | 1.1 | 1.7 | 2.3 | 0.1 | 5.1 ms |
-| 3840×2160 HEVC HDR10 | Performance | 0.2 | — | 1.0 | 0.1 | 1.3 ms |
+| 3840×2160 HEVC HDR10, made smaller (bicubic) | Performance | 0.2 | — | 1.0 | 0.1 | 1.3 ms |
 | | Quality | 1.3 | — | 1.0 | 0.1 | 2.4 ms |
 | | Experimental | 1.3 | 1.4 | 2.4 | 0.1 | 5.2 ms |
 
-With motion smoothing the scale pass runs at every refresh (each is a new picture), hence its larger share; a 4K
-picture on a 4K screen still goes through it (bicubic at 1:1), which a later version could skip.
+With motion smoothing the scale pass runs at every refresh (each is a new picture), hence its larger share. Full
+screen, a 4K film on a 4K screen isn't scaled at all (View > Statistics says "not scaled") and costs less than this.
 
 ## Presets
 
@@ -128,9 +130,9 @@ picture on a 4K screen still goes through it (bicubic at 1:1), which a later ver
 | Experimental | deband, deblock | on | FSR 1 | 88 % |
 | Custom | as set | as set | as set | as set |
 
-Sharpening in percent: 100 % is RCAS at 0 stops (the most), 0 % at 2 stops. FSR 1 enlarges; a picture made smaller,
-or kept at its size, is scaled bicubic (View > Statistics then says "bicubic"). The colour controls (brightness −100..100, contrast and saturation 0..200 %) apply with any preset
-but Off.
+Sharpening in percent: 100 % is RCAS at 0 stops (the most), 0 % at 2 stops. FSR 1 enlarges; a picture made smaller
+is scaled bicubic (View > Statistics then says "bicubic"); at its own size it isn't scaled ("not scaled"). The colour
+controls (brightness −100..100, contrast and saturation 0..200 %) apply with any preset but Off.
 
 ## Settings (mpc-hc.ini)
 

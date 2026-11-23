@@ -1,4 +1,4 @@
-## Media Player Classic PS5 1.6.4
+## Media Player Classic PS5 1.6.4 (released as part of 1.7.0)
 
 **Stop** no longer makes a file forget its position, and fixes from an audit of the app's code: settings are saved
 again when the saved network passwords can't be read, and playlists made elsewhere open whole. Application version
@@ -52,26 +52,9 @@ is **1.6.4**, content version is **01.064.000**, and the title ID remains **PPSA
   (and the USB backup, when one is chosen) is now also written when Stop is pressed with **Remember File position**
   on.
 
-### Updating
+### Not released on its own
 
-- From 1.6.3 or an older version with the updater, choose **Help > Check for updates**, install the update and
-  restart the app.
-- For manual installation, use **MediaPlayerClassicPS5-v1.6.4.elf**, the complete installer, then open the app
-  from the home screen. This is the only ELF asset for this release.
-- If an older installer ELF is configured in autoload, replace that file with the new installer.
-- Settings and media remain in `/data/mpcps5`.
-
-### Files
-
-- [MediaPlayerClassicPS5-v1.6.4.elf](https://github.com/MisterTemaki/MediaPlayerClassicPS5/releases/download/v1.6.4/MediaPlayerClassicPS5-v1.6.4.elf): complete installer.
-- [MediaPlayerClassicPS5-v1.6.4-PPSA99015.zip](https://github.com/MisterTemaki/MediaPlayerClassicPS5/releases/download/v1.6.4/MediaPlayerClassicPS5-v1.6.4-PPSA99015.zip): application package for the in-app updater.
-- [mpc-ps5-v1.6.4-src.zip](https://github.com/MisterTemaki/MediaPlayerClassicPS5/releases/download/v1.6.4/mpc-ps5-v1.6.4-src.zip): source code, tests, documentation and third-party notices.
-- The matching `.sha256` files and `SHA256SUMS.txt` contain download checksums.
-
-### Validation and limits
-
-- (to be filled in with the final runs)
-
-Host tests use simulated PS5 calls and software Vulkan.
+1.6.4 wasn't published: these fixes ship in **1.7.0**, with its downloads and its validation. See the
+[1.7.0 release notes](RELEASE-NOTES-v1.7.0.md).
 
 Port by [MisterTemaki](https://github.com/MisterTemaki).
