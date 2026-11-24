@@ -289,6 +289,8 @@ private:
 	double rate_ = 1.0; // the playing rate (Play > Increase / Decrease / Reset Rate)
 	double options_down_ = 0; // Options pressed, given another action than the menu bar: when (held: the menu bar)
 	bool opened_ok_ = false;
+	int presents_ = 0;        // (1.7.1) the window's frames so far
+	bool fullscreen_ = false; // (1.7.1) the window in full screen (Triangle, View > Full Screen, Launch files in fullscreen)
 	// 1.5.3 (#3): a jump held (its repeats) and the seek bar dragged go to keyframes, one seek at a time: the next one
 	// only once the last one's picture is shown (Player::SeekShown; one being done is never dropped), the latest
 	// target waiting meanwhile. Up to 1.5.2 each repeat (every 0.07 s) asked an exact seek that dropped the one still decoding, so a
@@ -330,7 +332,8 @@ private:
 	SubCache sub_cache_;
 
 	void Layout();
-	bool Fullscreen() const { return s_.fullscreen; }
+	// (1.7.1, issue #11) the window's state, not the setting: the app starts in its window (MPC-HC)
+	bool Fullscreen() const { return fullscreen_; }
 	bool ControlsOverlayVisible() const;
 	void Paint(CDC& dc);
 	void PaintTitleBar(CDC& dc);
@@ -359,6 +362,7 @@ private:
 	void ShowOptions(OptionsPage page);
 	void TickOptionsButton();
 	std::string Accel(PadAction a, const char* combination = "") const;
+	void MenuHint(double seconds);
 	void NextTrack(TrackType t);
 	void OnMouseMove(int x, int y);
 	void OnLButtonDown(int x, int y);
@@ -555,6 +559,10 @@ bool MainFrame::ControlsOverlayVisible() const
 	if (!s_.hide_controls_fullscreen)
 		return true;
 	if (seek_drag_ || vol_drag_ || !Loaded())
+		return true;
+	// (1.7.1, issue #11) only the logo on the screen (a file opening, failing to show a picture, an audio file without
+	// cover art): nothing to keep clear, and a screen with the logo alone looks like an app that didn't start
+	if (!(player_.HasVideo() && player_.HasPicture()) && !player_.CoverArt())
 		return true;
 	// 1.5.3: "Show when the pointer is over them" (TickBarsHover), else when it moves (anywhere: as up to 1.5.2)
 	if (s_.fs_controls_show == Settings::kShowWhenHovered)
@@ -2170,6 +2178,8 @@ void MainFrame::Command(int id)
 			break;
 		case ID_VIEW_CAPTIONMENU:
 			s.show_caption_menu = !s.show_caption_menu;
+			if (!s.show_caption_menu)
+				MenuHint(4); // (1.7.1, issue #11)
 			break;
 		case ID_VIEW_SEEKER:
 			s.show_seekbar = !s.show_seekbar;
@@ -2195,6 +2205,7 @@ void MainFrame::Command(int id)
 		case ID_VIEW_PRESETS_MINIMAL:
 			s.show_caption_menu = false;
 			s.show_seekbar = s.show_controls = s.show_info = s.show_stats = s.show_status = false;
+			MenuHint(4); // (1.7.1, issue #11)
 			break;
 		case ID_VIEW_PRESETS_COMPACT:
 			s.show_caption_menu = true;
@@ -2206,7 +2217,8 @@ void MainFrame::Command(int id)
 			s.show_info = s.show_stats = false;
 			break;
 		case ID_VIEW_FULLSCREEN:
-			s.fullscreen = !s.fullscreen;
+			fullscreen_ = !fullscreen_;
+			OrbisLog("[ui] full screen: %s", fullscreen_ ? "on" : "off");
 			break;
 		case ID_VIEW_ZOOM_50:
 			s.video_frame = VideoFrame::HalfSize;
@@ -2840,6 +2852,12 @@ void MainFrame::Tick()
 		if ((st == PlayState::Playing || st == PlayState::Paused) && !opened_ok_)
 		{
 			opened_ok_ = true;
+			// Options > Fullscreen "Launch files in fullscreen": a file with a picture, as MPC-HC (not an audio file)
+			if (s_.launch_fullscreen && !fullscreen_ && player_.HasVideo())
+			{
+				fullscreen_ = true;
+				OrbisLog("[ui] full screen: on (Launch files in fullscreen)");
+			}
 			ApplyAudio();
 			player_.SetSubtitleDelay(s_.sub_delay_ms / 1000.0);
 			player_.SetAudioDelay(s_.audio_delay_ms / 1000.0);
@@ -3173,6 +3191,19 @@ std::string MainFrame::Accel(PadAction a, const char* combination) const
 	if (*combination && s_.pad[int(PadButton::R3)] == DefaultPadAction(PadButton::R3))
 		return combination;
 	return "";
+}
+
+// (1.7.1, issue #11) the menu bar hidden (Caption&Menu off, View > Presets > Minimal): which button opens the menu, on
+// the OSD -- a window of the logo alone, with no menu or bar, looked like an app stuck at its start. The menu bar's
+// button (OPTIONS, unless the Keys page moved it), else the context menu's; none: nothing said.
+void MainFrame::MenuHint(double seconds)
+{
+	std::string b = Accel(PadAction::MenuBar);
+	if (b.empty())
+		b = Accel(PadAction::ContextMenu);
+	if (b.empty())
+		return;
+	Osd(Fmt(T("%s: the menu"), b == "Options" ? "OPTIONS" : T(b.c_str())), seconds); // (the controller's label)
 }
 
 void MainFrame::NextTrack(TrackType t)
@@ -3645,6 +3676,9 @@ int MainFrame::Run(const std::string& first)
 						 "again. Network streams still work."),
 					   MPCPS5_PS5_VERSION),
 			"Media Player Classic Home Cinema", MB_OK, 2);
+	// (1.7.1, issue #11) started with the menu bar hidden: which button opens the menu (an update's OSD below replaces it)
+	if (!s_.show_caption_menu)
+		MenuHint(6);
 	// 1.7: Options > Miscellaneous, the home screen's category, into the app's param.json (an update or another
 	// version's payload wrote its own)
 	if (have_data_)
@@ -3714,7 +3748,8 @@ int MainFrame::Run(const std::string& first)
 					{"disc1", ID_DISC_FIRST + 1}, {"title1", ID_TITLE_FIRST}, {"title2", ID_TITLE_FIRST + 1}, {"exit", ID_FILE_EXIT},
 					{"shaders0", ID_SHADERS_OFF}, {"shaders1", ID_SHADERS_PERFORMANCE}, {"shaders2", ID_SHADERS_QUALITY},
 					{"shaders3", ID_SHADERS_EXPERIMENTAL}, {"shaders4", ID_SHADERS_CUSTOM}, {"shaderoptions", ID_SHADERS_OPTIONS},
-					{"osdstats", ID_VIEW_DISPLAY_RENDERER_STATS}};
+					{"osdstats", ID_VIEW_DISPLAY_RENDERER_STATS}, {"minimal", ID_VIEW_PRESETS_MINIMAL},
+					{"normal", ID_VIEW_PRESETS_NORMAL}};
 				if (c.compare(0, 4, "cmd ") == 0)
 				{
 					int id = atoi(c.c_str() + 4);
@@ -3849,6 +3884,9 @@ int MainFrame::Run(const std::string& first)
 		if (input_.CursorVisible())
 			DrawCursor(dc, input_.CursorX(), input_.CursorY());
 		ps5video::Present(0, 0, ps5video::kWidth, ps5video::kHeight, true);
+		// (1.7.1, issue #11) the window on the screen for a moment: this start got there (logs/start-pending removed)
+		if (++presents_ == 60)
+			OrbisStartReached();
 		// (review L-d) the display delay of the renderer drawing now: 0 once the GPU is lost and the CPU flips again
 		player_.SetDisplayDelay(gpu::DisplayDelay());
 		{

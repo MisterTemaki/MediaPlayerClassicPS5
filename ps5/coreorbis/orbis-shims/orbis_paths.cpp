@@ -155,6 +155,33 @@ std::vector<std::string> OrbisRomRoots()
 	return roots;
 }
 
+static std::string StartMarker()
+{
+	return OrbisDir("logs") + "/start-pending";
+}
+
+bool OrbisStartBegin()
+{
+	const std::string path = StartMarker();
+	const bool was = access(path.c_str(), F_OK) == 0;
+	if (FILE* f = fopen(path.c_str(), "w"))
+	{
+		fprintf(f, "pid %d\n", int(getpid()));
+		fflush(f);
+		fsync(fileno(f)); // (a start that hangs is closed from the home screen: the file must be there already)
+		fclose(f);
+	}
+	return was;
+}
+
+void OrbisStartReached()
+{
+	static std::atomic<bool> done{false};
+	if (done.exchange(true))
+		return;
+	unlink(StartMarker().c_str());
+}
+
 // Lines logged before the log file is open (the native app logs its jailbreak before /data is visible).
 static std::vector<std::string>& EarlyLines()
 {
@@ -162,13 +189,13 @@ static std::vector<std::string>& EarlyLines()
 	return *lines;
 }
 
-void OrbisLogOpen(const char* name)
+void OrbisLogOpen(const char* name, bool force)
 {
 	std::lock_guard<std::mutex> lock(s_log_mutex);
 	if (s_log)
 		return;
 	s_name = name;
-	if (IniSaysLogsOff())
+	if (!force && IniSaysLogsOff())
 	{
 		// off: nothing written, and the files of earlier runs are not rotated away
 		s_enabled = false;

@@ -37,7 +37,14 @@ bool OrbisMkdirs(const std::string& path);
 // <root>/logs/<name>.log (the run before kept as <name>.prev.log): boot.log for the emulator, installer.log
 // for the installer/helper payload. Every line also goes to stdout (once the log is open). Lines logged before the file is open
 // (before the jailbreak shows /data to the app) are kept and written first.
-void OrbisLogOpen(const char* name = "boot");
+// force (1.7.1): opened although Debug logs is off (the app after a start that didn't finish: OrbisStartBegin).
+void OrbisLogOpen(const char* name = "boot", bool force = false);
+// (1.7.1, issue #11) <root>/logs/start-pending, the app's own: written at its start, removed once its window has been on
+// the screen a moment, or at a normal exit (OrbisStartReached). Still there at the next start: that one didn't get
+// there (a hang, a crash, closed from the home screen while stuck), and this start writes boot.log although Debug logs
+// is off, so there is a log to send. Returns whether it was there.
+bool OrbisStartBegin();
+void OrbisStartReached();
 void OrbisLog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 // scheme://user:password@host -> scheme://user:***@host, in place (OrbisLog does it to every line)
 void OrbisHidePasswords(char* line);

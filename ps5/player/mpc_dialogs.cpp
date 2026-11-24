@@ -1793,7 +1793,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	p = d->NewPage("Fullscreen");
 	d->Group(p, "Fullscreen monitor", 4, 2, 288, 46);
 	d->Combo(p, 8, 11, 280, 13, {"Current (TV)"}, 0)->enabled = false;
-	CheckBox* launchfs = d->Check(p, "Launch files in fullscreen", 8, 26, 280, 8, s.fullscreen);
+	CheckBox* launchfs = d->Check(p, "Launch files in fullscreen", 8, 26, 280, 8, s.launch_fullscreen);
 	d->Check(p, "Exit fullscreen at the end of playback", 8, 37, 280, 8, false, false);
 	// MPC-HC's group: the check box as its title, when they show again under it (1.5.3, #3: "Show when hovering
 	// control", for subtitles styled with Options open over the picture; MPC-HC's "hide after" delay is a fixed second)
@@ -1805,7 +1805,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	hshow->enabled = hide->checked;
 	hide->on_change = [hide, hshow] { hshow->enabled = hide->checked; };
 	d->apply_fns.push_back([&s, launchfs, hide, hshow] {
-		s.fullscreen = launchfs->checked;
+		s.launch_fullscreen = launchfs->checked;
 		s.hide_controls_fullscreen = hide->checked;
 		s.fs_controls_show = hshow->sel == 1 ? Settings::kShowWhenHovered : Settings::kShowWhenMoved;
 	});

@@ -181,7 +181,12 @@ int Run(int argc, char** argv)
 	const bool freed = jailbreak::RequestForSelf(how);
 	OrbisLog("[boot] jailbreak: %s", freed ? how.c_str() : "nobody answered");
 	const bool have_data = OrbisPathsInit();
-	OrbisLogOpen(); // also writes the lines above
+	// (1.7.1, issue #11) the start before this one didn't reach the screen: this one writes boot.log whatever the setting
+	const bool last_unfinished = have_data && OrbisStartBegin();
+	OrbisLogOpen("boot", last_unfinished); // also writes the lines above
+	if (last_unfinished)
+		OrbisLog("[boot] the start before this one didn't reach the screen (logs/start-pending was left): this boot.log "
+				 "is written although Debug logs is off");
 	crashlog::SelfTest(); // (host tests only; test6: once the log is open, for the handler's own copy of its fd)
 	ExceptionSelfTest();
 	if (!have_data)
@@ -208,6 +213,7 @@ int Run(int argc, char** argv)
 	const int status = mpc::RunApp(first, have_data);
 
 	OrbisLog("[boot] leaving");
+	OrbisStartReached(); // (a normal exit: this start finished, even before its window was up for long)
 	ps5input::Shutdown();
 	ps5audio::Shutdown();
 	ps5video::Shutdown();

@@ -425,6 +425,7 @@ const Entry kTable[] = {
 	{"Subtitle: %s", "Subtítulos: %s", "Legenda: %s", "Sous-titres : %s", "Untertitel: %s"},
 	{"Audio: %s", "Audio: %s", "Áudio: %s", "Audio : %s", "Audio: %s"},
 	{"Resumed at %s", "Reanudado en %s", "Retomado em %s", "Reprise à %s", "Fortgesetzt bei %s"},
+	{"%s: the menu", "%s: el menú", "%s: menu", "%s : le menu", "%s: Menü"},
 
 	// ---- messages
 	{"Open Directory", "Abrir carpeta", "Abrir pasta", "Ouvrir un dossier", "Ordner öffnen"},

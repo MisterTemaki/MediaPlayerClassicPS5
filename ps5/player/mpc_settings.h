@@ -173,7 +173,11 @@ struct Settings
 	bool show_stats = false;
 	bool show_playlist = false;
 	bool show_caption_menu = true; // Caption&Menu
-	bool fullscreen = false;
+	// Options > Fullscreen "Launch files in fullscreen" (MPC-HC's LaunchFullScreen): a file with a picture opens in full
+	// screen. (1.7.1, issue #11) Only that: the full-screen switch itself (Triangle, View > Full Screen) is the window's
+	// state, never saved, so the app always starts in its window, as MPC-HC does. Up to 1.7.0 the switch flipped this and
+	// it was saved as FullScreen=, so an app closed in full screen started again in full screen; that key is not read.
+	bool launch_fullscreen = false;
 	// Options > Fullscreen "Hide controls in fullscreen": the bars (seek bar, toolbar, status...) hidden over the
 	// picture, shown again as fs_controls_show says -- MPC-HC's HideFullscreenControlsPolicy (1.5.3, #3):
 	// kShowWhenMoved (the default, as up to 1.5.2): whenever the pointer moves (anywhere, a dialog over the picture too);

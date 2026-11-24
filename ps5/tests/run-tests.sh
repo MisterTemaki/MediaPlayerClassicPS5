@@ -2067,7 +2067,7 @@ bars() { $REGION "$1" "$2" 985 "$3" 1040 240 240 240 6 $(( ($3 - $2) * 20 )) >/d
 # shown
 T=$(newroot t32c)
 film "$T"
-ini "$T" "FullScreen=1
+ini "$T" "LaunchFullScreen=1
 HideFullscreenControlsPolicy=1"
 S="100:cmd options;110:mouse 900,500;115:mouse 950,520;120:mouse 1000,560;150:key escape;160:mouse 960,1075;180:mouse 960,500"
 S="$S;280:mouse 960,995;400:cmd close;440:quit"
@@ -2081,7 +2081,7 @@ nosan "$T"
 # d: Options moved to the bottom left, over the bars' band: the pointer over it there brings no bars; beside it, they show
 T=$(newroot t32d)
 film "$T"
-ini "$T" "FullScreen=1
+ini "$T" "LaunchFullScreen=1
 HideFullscreenControlsPolicy=1
 OptionsX=0
 OptionsY=1079"
@@ -2092,7 +2092,7 @@ nosan "$T"
 # the bars; saved with HideFullscreenControlsPolicy=2
 T=$(newroot t32e)
 film "$T"
-ini "$T" "FullScreen=1"
+ini "$T" "LaunchFullScreen=1"
 rc=$(run "$T" "0:0;60:0,200,128;66:0" "100:cmd options;110:mouse 900,500;115:mouse 950,520;120:mouse 1000,560;150:key escape;160:quit" "80,125" "$T/root/media/film.mp4")
 expect "[ $rc = 0 ] && bars $T/dump/flip00080.ppm 0 1920 && bars $T/dump/flip00125.ppm 0 1920 && grep -q '^HideFullscreenControlsPolicy=2$' $T/root/mpc-hc.ini" "1.5.2's mpc-hc.ini: the bars when the pointer moves (Options too), as before; the default saved"
 nosan "$T"
@@ -3611,6 +3611,90 @@ expect "waitfor $T/root/logs/installer.log 'listening on 127.0.0.1' && grep -q '
 inst40 "$T"
 expect "! grep -q 'wrote .*param.json' $T/root/logs/installer.log && grep -q 'is up to date' $T/root/logs/installer.log" "... sent again: nothing written (not the Media copy each time)"
 stop_helpers
+fi
+
+if want 41; then
+echo "== 41. 1.7.1: the window's start (issue #11: a screen with the logo alone), the start marker, the GPU start watch"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+# titled F: the light theme's white title bar at the top (the window, not full screen); face F: the toolbar's
+# COLOR_BTNFACE at the bottom (the bars shown)
+titled() { $CHECK "$1" 900 10 255 255 255 2 >/dev/null; }
+face() { $CHECK "$1" 900 1025 240 240 240 2 >/dev/null; }
+# a red film of 30 s (640x360: the whole screen in full screen)
+[ -f "$MEDIA/red30.mp4" ] || ffmpeg -loglevel error -y -f lavfi -i color=c=red:size=640x360:rate=25 -t 30 -c:v libx264 \
+	-preset ultrafast -pix_fmt yuv420p "$MEDIA/red30.mp4"
+# a: full screen switched on while a film plays, then the app closed: the next start is in the window (the title bar
+# drawn at the top), mpc-hc.ini has no FullScreen= (the window's state isn't saved) and LaunchFullScreen=0
+T=$(newroot t41a)
+cp "$MEDIA/red30.mp4" "$T/root/media/film.mp4"
+rc=$(run "$T" "0:0" "40:cmd fullscreen;70:quit" "60" "$T/root/media/film.mp4")
+rc2=$(run "$T" "0:0" "50:quit" "40")
+expect "[ $rc = 0 ] && [ $rc2 = 0 ] && grep -q 'full screen: on' $T/root/logs/boot.prev.log && ! titled $T/dump/flip00060.ppm && titled $T/dump/flip00040.ppm && ! grep -q '^FullScreen=' $T/root/mpc-hc.ini && grep -q '^LaunchFullScreen=0$' $T/root/mpc-hc.ini" "full screen during a film, the app closed: the next start in its window; the state not saved (no FullScreen=)"
+nosan "$T"
+# b: Launch files in fullscreen (LaunchFullScreen=1): a film opens in full screen; 1.7.0's FullScreen=1 alone (the
+# window's state then): read no more, the film opens in the window
+T=$(newroot t41b)
+cp "$MEDIA/red30.mp4" "$T/root/media/film.mp4"
+ini "$T" "LaunchFullScreen=1"
+rc=$(run "$T" "0:0" "60:quit" "50" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'full screen: on (Launch files in fullscreen)' && ! titled $T/dump/flip00050.ppm" "LaunchFullScreen=1: the film opens in full screen"
+nosan "$T"
+T=$(newroot t41b2)
+cp "$MEDIA/red30.mp4" "$T/root/media/film.mp4"
+ini "$T" "FullScreen=1"
+rc=$(run "$T" "0:0" "60:quit" "50" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && ! log $T 'full screen: on' && titled $T/dump/flip00050.ppm && grep -q '^LaunchFullScreen=0$' $T/root/mpc-hc.ini" "1.7.0's FullScreen=1: not read, the film in the window"
+nosan "$T"
+# c: View > Presets > Minimal: the OSD says which button opens the menu; started so: said at the start; the menu bar's
+# action moved off OPTIONS (Keys page): the context menu's button named; neither: nothing said
+T=$(newroot t41c)
+rc=$(run "$T" "0:0" "30:cmd minimal;60:quit" "")
+expect "[ $rc = 0 ] && log $T '\[osd\] OPTIONS: the menu' && grep -q '^ShowCaptionMenu=0$' $T/root/mpc-hc.ini" "Minimal chosen: 'OPTIONS: the menu' on the OSD"
+rc=$(run "$T" "0:0" "40:quit" "")
+expect "[ $rc = 0 ] && [ \$(grep -c '\[osd\] OPTIONS: the menu' $T/root/logs/boot.log) = 1 ] && grep -q '\[osd\] OPTIONS: the menu' $T/root/logs/boot.prev.log" "started with the menu bar hidden: said at the start"
+nosan "$T"
+T=$(newroot t41c2)
+ini "$T" "ShowCaptionMenu=0
+KeyOptions=None"
+rc=$(run "$T" "0:0" "40:quit" "")
+expect "[ $rc = 0 ] && log $T '\[osd\] Square: the menu'" "OPTIONS given no action: the context menu's button named (Square)"
+nosan "$T"
+T=$(newroot t41c3)
+ini "$T" "ShowCaptionMenu=0
+KeyOptions=None
+KeySquare=None"
+rc=$(run "$T" "0:0" "40:quit" "")
+expect "[ $rc = 0 ] && ! log $T ': the menu'" "no button for either menu: nothing said"
+nosan "$T"
+# d: full screen with a file that shows no picture (sound only, no cover art): the bars stay (the logo alone looked
+# like an app that hadn't started); a film in full screen: hidden while the pointer is still (as before)
+T=$(newroot t41d)
+ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=440:duration=20" -c:a aac "$T/root/media/tone.m4a"
+rc=$(run "$T" "0:0" "40:cmd fullscreen;120:quit" "100" "$T/root/media/tone.m4a")
+expect "[ $rc = 0 ] && log $T 'full screen: on' && ! titled $T/dump/flip00100.ppm && face $T/dump/flip00100.ppm" "sound only in full screen: the bars shown at the bottom"
+T2=$(newroot t41d2)
+cp "$MEDIA/red30.mp4" "$T2/root/media/film.mp4"
+rc=$(run "$T2" "0:0" "40:cmd fullscreen;300:quit" "280" "$T2/root/media/film.mp4")
+expect "[ $rc = 0 ] && ! titled $T2/dump/flip00280.ppm && ! face $T2/dump/flip00280.ppm && log $T2 'full screen: on'" "a film in full screen, the pointer still: no bars (as before)"
+nosan "$T"
+# e: logs/start-pending left by a start that didn't reach the screen: the next start writes boot.log although Debug
+# logs is off, and says why; the marker gone after it; a start after that (logs off): no new boot.log
+T=$(newroot t41e)
+mkdir -p "$T/root/logs" && echo "pid 1" >"$T/root/logs/start-pending"
+rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "90:quit" "")
+expect "[ $rc = 0 ] && log $T \"the start before this one didn't reach the screen\" && [ ! -e $T/root/logs/start-pending ] && grep -q '^debug_logs=0$' $T/root/mpc-hc.ini" "start-pending left: boot.log written with Debug logs off, the marker removed after the start"
+mv "$T/root/logs/boot.log" "$T/root/logs/first.log"
+rc=$(MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "90:quit" "")
+expect "[ $rc = 0 ] && [ ! -e $T/root/logs/boot.log ] && [ ! -e $T/root/logs/start-pending ]" "the next start, logs off: nothing written, no marker left"
+nosan "$T"
+# f: the GPU start slow to come back: after the watch's time, the log says so and a toast tells what to do
+T=$(newroot t41f)
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_INIT_DELAY_MS=2500 MPCPS5_HOST_GPU_SLOW_S=1 run "$T" "0:0" "30:quit" "")
+expect "[ $rc = 0 ] && log $T 'GPU start: still in the driver after 1 s' && log $T '\[notify\] \"Media Player Classic PS5: the video is slow to start' && log $T 'renderer: GPU'" "the GPU start slow: logged and a toast (the start goes on)"
+T2=$(newroot t41f2)
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_SLOW_S=5 run "$T2" "0:0" "30:quit" "")
+expect "[ $rc = 0 ] && ! log $T2 'still in the driver' && ! log $T2 'video is slow to start' && log $T2 'renderer: GPU'" "a GPU start in time: nothing said"
+nosan "$T"
 fi
 
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"

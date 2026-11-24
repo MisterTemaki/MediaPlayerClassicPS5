@@ -21,10 +21,17 @@
 #include "ProsperoSce.h"
 #include "ps5gpu/gpu.h"
 #include "mpc_vdec.h"
+#include "ProsperoNotify.h"
+#include "ProsperoThread.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
+#include <mutex>
 #include <string>
+#include <system_error>
+#include <thread>
 
 #include <immintrin.h>
 #include <sys/mman.h>
@@ -459,6 +466,55 @@ extern "C" void MpcHostGpuFlip(const uint8_t* bgra, int w, int h, bool wait_vsyn
 
 // VideoRenderer= in mpc-hc.ini (read here: the video comes up before the settings are): 0 the GPU (the default), 1 the
 // CPU. Host builds: the GPU only with MPCPS5_HOST_GPU=1 (the other tests keep the CPU path they were written for).
+// (1.7.1, issue #11) the GPU start watched: a driver that never answers leaves the console's launch splash up with
+// nothing said. After kGpuSlowSeconds a toast tells what to do (the next start skips the GPU: gpu-attempts above) and
+// boot.log gets the lines so far onto the storage. The driver's call can't be stopped; this only speaks.
+class GpuStartWatch
+{
+public:
+	GpuStartWatch()
+	{
+		int secs = 20;
+#ifndef __PROSPERO__
+		if (const char* e = getenv("MPCPS5_HOST_GPU_SLOW_S")) // (host tests: a shorter wait)
+			secs = std::max(1, atoi(e));
+#endif
+		try
+		{
+			t_ = ps5::StartThread("gpu-watch", [this, secs] {
+				std::unique_lock<std::mutex> lock(mx_);
+				if (cv_.wait_for(lock, std::chrono::seconds(secs), [this] { return done_; }))
+					return;
+				lock.unlock();
+				OrbisLog("[video] GPU start: still in the driver after %d s", secs);
+				OrbisLogSync();
+				ProsperoNotify("Media Player Classic PS5: the video is slow to start. If the screen stays like this, close "
+							   "the app and open it again: the next start uses the software renderer.");
+			});
+		}
+		catch (const std::system_error& e)
+		{
+			OrbisLog("[video] GPU start: no watch (%s)", e.what()); // (the start goes on unwatched)
+		}
+	}
+	~GpuStartWatch()
+	{
+		{
+			std::lock_guard<std::mutex> lock(mx_);
+			done_ = true;
+		}
+		cv_.notify_one();
+		if (t_.joinable())
+			t_.join();
+	}
+
+private:
+	std::mutex mx_;
+	std::condition_variable cv_;
+	bool done_ = false;
+	std::thread t_;
+};
+
 bool WantGpu(std::string& why)
 {
 #ifndef __PROSPERO__
@@ -604,14 +660,20 @@ bool InitGpu()
 	}
 	g.gpu_guard = true;
 	setting_up = true;
+	bool ok;
+	{
+		GpuStartWatch watch; // (1.7.1)
 #ifdef __PROSPERO__
-	const bool ok = ps5gpu::Init(kWidth, kHeight, false, 0, 0);
+		ok = ps5gpu::Init(kWidth, kHeight, false, 0, 0);
 #else
-	int ow = kWidth, oh = kHeight;
-	if (const char* o = getenv("MPCPS5_HOST_GPU_OUT"))
-		sscanf(o, "%dx%d", &ow, &oh);
-	const bool ok = ps5gpu::Init(kWidth, kHeight, true, ow, oh);
+		if (const char* d = getenv("MPCPS5_HOST_GPU_INIT_DELAY_MS")) // (host tests: a driver slow to answer)
+			std::this_thread::sleep_for(std::chrono::milliseconds(atoi(d)));
+		int ow = kWidth, oh = kHeight;
+		if (const char* o = getenv("MPCPS5_HOST_GPU_OUT"))
+			sscanf(o, "%dx%d", &ow, &oh);
+		ok = ps5gpu::Init(kWidth, kHeight, true, ow, oh);
 #endif
+	}
 	setting_up = false;
 	MPCPS5_STAGE(Boot, "video"); // (the boot stage again, not the GPU's last line)
 	if (!ok)
