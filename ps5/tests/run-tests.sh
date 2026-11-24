@@ -3947,5 +3947,51 @@ expect "[ $rc = 0 ] && grep -q 'smb://127.0.0.1:1/VIDEOS/a@b.mp4 - Media Player 
 nosan "$T"
 fi
 
+if want 44; then
+echo "== 44. 1.7.1 (Sulfurico-One64, #12): the fonts folder in the backup; what Games brings, said on the page"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+D=$WORK/t44d
+rm -rf "$D" && mkdir -p "$D/u0"
+DRIVES="$D/u0"
+BKF=$D/u0/mpcps5/backup/fonts
+TO_BACKUP=""
+for frame in 20 22 24 26 28 30 32 34 36 38; do TO_BACKUP="$TO_BACKUP;$frame:key down"; done
+TO_MISC=""
+for frame in 20 22 24 26 28 30 32 34 36; do TO_MISC="$TO_MISC;$frame:key down"; done
+# a: a backup drive chosen, a font in the fonts folder: the settings' backup takes it along (by the backup thread,
+# waited for at the exit); a second save with nothing new in the fonts folder copies nothing again
+T=$(newroot t44a)
+mkdir -p "$T/root/fonts"
+cp assets/fonts/Roboto-Regular.ttf "$T/root/fonts/MyFont.ttf"
+printf 'not a font\n' >"$T/root/fonts/readme.txt"
+printf '[Settings]\nBackupDrive=%s\n' "$D/u0" >"$T/root/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd voldown;30:quit" "")
+expect "[ $rc = 0 ] && cmp -s $T/root/fonts/MyFont.ttf $BKF/MyFont.ttf && [ ! -e $BKF/readme.txt ] && [ ! -e $BKF/MyFont.ttf.part ] && log $T 'fonts: 1 copied to $BKF'" "the fonts folder's font backed up with the settings (not its other files)"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd voldown;30:quit" "")
+expect "[ $rc = 0 ] && log $T 'backed up to' && ! log $T 'fonts: [0-9]* copied'" "... saved again: the font, unchanged, isn't copied again"
+nosan "$T"
+# b: a fresh installation (after a factory reset): Import brings the settings and the fonts back
+T=$(newroot t44c)
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
+IMPORT="10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;90:quit" "")
+expect "[ $rc = 0 ] && log $T '\[backup\] imported' && cmp -s $BKF/MyFont.ttf $T/root/fonts/MyFont.ttf && log $T 'fonts: 1 copied back from $BKF' && grep -q 'Fonts copied back to the fonts folder: 1.' $T/drawn.txt" "Import: the backup's font copied back to the fonts folder, and said"
+expect "grep -qx 'Volume=[0-9]*' $T/root/mpc-hc.ini && [ \"\$(sed -n 's/^Volume=//p' $T/root/mpc-hc.ini)\" = \"\$(sed -n 's/^Volume=//p' $D/u0/mpcps5/backup/mpc-hc.ini)\" ]" "... with the settings"
+nosan "$T"
+# (a fresh installation whose fonts folder has the font already: not copied again)
+T=$(newroot t44b2)
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
+mkdir -p "$T/root/fonts" && cp assets/fonts/Roboto-Regular.ttf "$T/root/fonts/MyFont.ttf"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;90:quit" "")
+expect "[ $rc = 0 ] && log $T '\[backup\] imported' && log $T 'fonts: 0 copied back from $BKF, 1 there already'" "... a font already in the fonts folder isn't copied again"
+nosan "$T"
+# c: Options > Miscellaneous says what Games brings
+T=$(newroot t44d)
+rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "10:cmd options$TO_MISC;60:key escape;80:quit" "50")
+expect "[ $rc = 0 ] && grep -q \"Games: the PS5's screenshots, video clips and play time\" $T/drawn.txt && grep -q \"On the PS5's home screen, under:\" $T/drawn.txt" "Miscellaneous: under the home screen's choice, what Games brings"
+cp "$T/dump/flip00050.ppm" "$WORK/t44-misc-page.ppm" 2>/dev/null
+nosan "$T"
+fi
+
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]

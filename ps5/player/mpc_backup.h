@@ -6,8 +6,12 @@
 // - The backup is a copy of mpc-hc.ini (everything Options and the menus keep: Keys, audio, subtitles, the
 //   window, favorites, recent files, file positions, network locations) in <drive>/mpcps5/backup/mpc-hc.ini.
 //   mpc-hc.ini has had no passwords in it since 1.6.2 (they are in the encrypted store, whose key never leaves
-//   the console): network passwords are not in a backup, and are typed again after an import. The fonts folder
-//   (fonts the user added for subtitles) isn't copied either.
+//   the console): network passwords are not in a backup, and are typed again after an import.
+// - 1.7.1 (Sulfurico-One64, #12): the fonts folder too (the fonts the user added for subtitles), in
+//   <drive>/mpcps5/backup/fonts: after each backup of the settings that is this installation's, the backup thread
+//   copies the fonts not there yet or changed since (beside them, then renamed). A font removed from the fonts folder
+//   stays in the backup (nothing is deleted there). An import copies them back: those missing from the fonts folder
+//   or of another size.
 // - Whose backup: mpc-hc.ini has a random BackupId= (made once, kept by Reset and by an import). A backup is this
 //   installation's when its BackupId is the same. The automatic backup only writes over this installation's backup
 //   (or where there is none): a drive holding another one -- the backup of a console before its factory reset,
@@ -66,6 +70,16 @@ Result WriteTo(const std::string& drive, const std::string& id, std::string& err
 void AfterSave(const Settings& s);
 // waits (up to ms) until the backup thread has written what it was given (the app's exit)
 void Flush(int ms);
+
+// 1.7.1 (#12): the fonts folder's copy on a drive (<drive>/mpcps5/backup/fonts)
+std::string FontsOn(const std::string& drive);
+struct FontsResult
+{
+	int copied = 0, same = 0, failed = 0;
+};
+// the backup's fonts copied back to the fonts folder (an import; on the calling thread): those missing there or of
+// another size
+FontsResult RestoreFonts(const std::string& drive);
 
 // why a write failed: kept as a code and its details, made into words on the thread that shows them (T() reads
 // the language setting, which only the UI thread changes)

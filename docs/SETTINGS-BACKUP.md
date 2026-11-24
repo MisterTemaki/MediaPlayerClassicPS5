@@ -1,4 +1,4 @@
-# Settings backup (1.6.3)
+# Settings backup (1.6.3; the fonts folder: 1.7.1)
 
 [Issue #10](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/10): a console that has to be reset to
 factory settings loses `/data/mpcps5`, and with it everything set up in the app. 1.6.3 keeps a copy of the
@@ -41,6 +41,14 @@ Everything `mpc-hc.ini` holds: Options (Player, Playback, Output, Fullscreen, Su
 Audio Switcher, Miscellaneous), the controller's Keys, the theme and language, recent files, file positions,
 favorites and network locations.
 
+**The fonts folder** (1.7.1, [issue #12](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/12)): the
+fonts you added to `/data/mpcps5/fonts` for subtitles (`.ttf`, `.otf`, `.ttc`, `.otc`) go to
+`<drive>/mpcps5/backup/fonts`. After each backup of the settings (when it is this installation's), the backup thread
+copies the fonts that aren't there yet, or that changed since; each is written beside its place, then renamed. A
+font removed from the fonts folder stays in the backup: delete it from `mpcps5/backup/fonts` on the drive if you
+don't want it back. **Import...** copies the backup's fonts back into the fonts folder (those missing there, or of
+another size) before the settings are applied, and says how many.
+
 **Not in a backup:**
 
 - **Network passwords.** They are in the encrypted store, whose key never leaves the console
@@ -48,8 +56,7 @@ favorites and network locations.
   password again when it is asked for. A backup has no password in it, and an older settings file with passwords
   in its addresses has them dropped when imported, never used. As with any change to the lists, a saved password
   whose network location, favorite or recent file isn't in the imported settings is removed from the store.
-- **The fonts folder** (`/data/mpcps5/fonts`): copy back the fonts you had added. A Default Style font that isn't
-  there is replaced by the default one.
+- (Up to 1.7.0, the fonts folder: 1.7.1 backs it up, above.)
 
 ## Notes
 

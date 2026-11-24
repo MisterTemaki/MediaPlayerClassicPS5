@@ -10,12 +10,14 @@
 #include "OrbisPaths.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <fcntl.h>
 #include <mutex>
 #include <sys/stat.h>
@@ -58,6 +60,9 @@ struct Shared
 	std::condition_variable job_cv;
 	bool thread_started = false, thread_failed = false, job_pending = false, busy = false;
 	std::string job_drive, job_id, job_text;
+	// 1.7.1 (#12): the fonts to copy to a drive (Back up now hands them over: the screen doesn't wait for them)
+	bool fonts_pending = false;
+	std::string fonts_drive;
 };
 Shared& G()
 {
@@ -219,25 +224,184 @@ Status Write(const std::string& drive, const std::string& id, const std::string&
 	return Note(drive, Result::Written);
 }
 
+// ---- 1.7.1 (Sulfurico-One64, #12): the fonts folder ----------------------------------------------------------
+// a font file's name (as the fonts folder lists them: .ttf, .otf, .ttc, .otc); not a hidden or half-copied one
+constexpr long long kMaxFontBytes = 256ll << 20;
+
+bool FontFileName(const std::string& n)
+{
+	if (n.empty() || n[0] == '.' || n.size() < 5)
+		return false;
+	std::string ext = n.substr(n.size() - 4);
+	for (char& c : ext)
+		c = char(tolower(static_cast<unsigned char>(c)));
+	return ext == ".ttf" || ext == ".otf" || ext == ".ttc" || ext == ".otc";
+}
+
+struct FontFile
+{
+	std::string name;
+	long long size = 0;
+	time_t mtime = 0;
+};
+
+std::vector<FontFile> FontsIn(const std::string& dir)
+{
+	std::vector<FontFile> out;
+	DIR* d = opendir(dir.c_str());
+	if (!d)
+		return out;
+	while (dirent* e = readdir(d))
+	{
+		const std::string n = e->d_name;
+		struct stat st = {};
+		if (FontFileName(n) && stat((dir + "/" + n).c_str(), &st) == 0 && S_ISREG(st.st_mode))
+			out.push_back({n, (long long)st.st_size, st.st_mtime});
+	}
+	closedir(d);
+	return out;
+}
+
+// one file copied: beside its place (.part), synced, then renamed over it; why: the reason on a failure
+bool CopyFile(const std::string& from, const std::string& to, std::string& why)
+{
+	const std::string part = to + ".part";
+	FILE* in = fopen(from.c_str(), "rb");
+	if (!in)
+	{
+		why = ErrnoText(errno);
+		return false;
+	}
+	FILE* out = fopen(part.c_str(), "wb");
+	if (!out)
+	{
+		why = ErrnoText(errno);
+		fclose(in);
+		return false;
+	}
+	char buf[65536];
+	size_t n;
+	bool ok = true;
+	while (ok && (n = fread(buf, 1, sizeof(buf), in)) > 0)
+		ok = fwrite(buf, 1, n, out) == n;
+	ok = ok && !ferror(in);
+	ok = fflush(out) == 0 && ok;
+	if (ok && fsync(fileno(out)) != 0)
+		OrbisLog("[backup] fsync of %s: %s (written without it)", part.c_str(), ErrnoText(errno).c_str());
+	if (!ok)
+		why = ErrnoText(errno);
+	ok = fclose(out) == 0 && ok;
+	fclose(in);
+	if (ok && rename(part.c_str(), to.c_str()) != 0)
+	{
+		// (a file system that won't rename over a file: the old copy goes first)
+		unlink(to.c_str());
+		ok = rename(part.c_str(), to.c_str()) == 0;
+		if (!ok)
+			why = ErrnoText(errno);
+	}
+	if (!ok)
+	{
+		if (why.empty())
+			why = "write error";
+		unlink(part.c_str());
+	}
+	return ok;
+}
+
+// the fonts folder's fonts to a drive's backup: those not there yet, of another size, or changed since their copy
+// was made (the source newer than it). Nothing is deleted there. (The write lock held: the backup thread.)
+FontsResult SyncFonts(const std::string& drive)
+{
+	FontsResult r;
+	const std::vector<FontFile> local = FontsIn(OrbisDir("fonts"));
+	if (local.empty() || !OrbisIsDir(drive))
+		return r;
+	const std::string dest = FontsOn(drive);
+	if (!OrbisMkdirs(dest))
+	{
+		OrbisLog("[backup] fonts: can't create %s (%s)", dest.c_str(), ErrnoText(errno).c_str());
+		r.failed = int(local.size());
+		return r;
+	}
+	for (const FontFile& f : local)
+	{
+		struct stat st = {};
+		const std::string to = dest + "/" + f.name;
+		if (stat(to.c_str(), &st) == 0 && S_ISREG(st.st_mode) && (long long)st.st_size == f.size && st.st_mtime >= f.mtime)
+		{
+			r.same++;
+			continue;
+		}
+		if (f.size > kMaxFontBytes)
+		{
+			OrbisLog("[backup] fonts: %s left out (%lld MB)", f.name.c_str(), f.size >> 20);
+			r.failed++;
+			continue;
+		}
+		std::string why;
+		if (CopyFile(OrbisDir("fonts") + "/" + f.name, to, why))
+			r.copied++;
+		else
+		{
+			OrbisLog("[backup] fonts: %s not copied to %s (%s)", f.name.c_str(), dest.c_str(), why.c_str());
+			r.failed++;
+		}
+	}
+	if (r.copied || r.failed)
+		OrbisLog("[backup] fonts: %d copied to %s, %d there already, %d not copied", r.copied, dest.c_str(), r.same,
+			r.failed);
+	return r;
+}
+
 void Thread()
 {
 	Shared& g = G();
 	std::unique_lock<std::mutex> lock(g.job_mutex);
 	for (;;)
 	{
-		g.job_cv.wait(lock, [&g] { return g.job_pending; });
+		g.job_cv.wait(lock, [&g] { return g.job_pending || g.fonts_pending; });
+		const bool ini = g.job_pending;
 		const std::string drive = g.job_drive, id = g.job_id, text = g.job_text;
-		g.job_pending = false;
+		std::string fonts = g.fonts_pending ? g.fonts_drive : "";
+		g.job_pending = g.fonts_pending = false;
 		g.busy = true;
 		lock.unlock();
 		{
 			std::lock_guard<std::mutex> write(g.write_mutex);
-			Write(drive, id, text, false);
+			if (ini)
+			{
+				const Status s = Write(drive, id, text, false);
+				// 1.7.1 (#12): the fonts follow a backup that is this installation's
+				if (s.result == Result::Written || s.result == Result::Unchanged)
+					fonts = drive;
+			}
+			if (!fonts.empty())
+				SyncFonts(fonts);
 		}
 		lock.lock();
 		g.busy = false;
 		g.job_cv.notify_all();
 	}
+}
+
+// the thread started once (false: none could be)
+bool StartThread(Shared& g)
+{
+	if (!g.thread_started && !g.thread_failed)
+	{
+		try
+		{
+			std::thread(Thread).detach(); // waits on job_cv for the rest of the process
+			g.thread_started = true;
+		}
+		catch (...)
+		{
+			g.thread_failed = true;
+			OrbisLog("[backup] no backup thread: the backups are written as the settings are saved");
+		}
+	}
+	return g.thread_started;
 }
 } // namespace
 
@@ -290,6 +454,48 @@ std::string FileOn(const std::string& drive)
 	return FolderOn(drive) + "/mpc-hc.ini";
 }
 
+std::string FontsOn(const std::string& drive)
+{
+	return FolderOn(drive) + "/fonts";
+}
+
+FontsResult RestoreFonts(const std::string& drive)
+{
+	FontsResult r;
+	const std::vector<FontFile> saved = FontsIn(FontsOn(drive));
+	if (saved.empty())
+		return r;
+	const std::string dir = OrbisDir("fonts");
+	if (!OrbisMkdirs(dir))
+	{
+		OrbisLog("[backup] fonts: can't create %s (%s)", dir.c_str(), ErrnoText(errno).c_str());
+		r.failed = int(saved.size());
+		return r;
+	}
+	std::lock_guard<std::mutex> write(G().write_mutex); // (not while the thread copies to the same drive)
+	for (const FontFile& f : saved)
+	{
+		struct stat st = {};
+		const std::string to = dir + "/" + f.name;
+		if (stat(to.c_str(), &st) == 0 && S_ISREG(st.st_mode) && (long long)st.st_size == f.size)
+		{
+			r.same++;
+			continue;
+		}
+		std::string why;
+		if (f.size <= kMaxFontBytes && CopyFile(FontsOn(drive) + "/" + f.name, to, why))
+			r.copied++;
+		else
+		{
+			OrbisLog("[backup] fonts: %s not copied back (%s)", f.name.c_str(), why.empty() ? "too big" : why.c_str());
+			r.failed++;
+		}
+	}
+	OrbisLog("[backup] fonts: %d copied back from %s, %d there already, %d not copied", r.copied, FontsOn(drive).c_str(),
+		r.same, r.failed);
+	return r;
+}
+
 std::string NewId()
 {
 	unsigned char b[16] = {};
@@ -336,9 +542,30 @@ Result WriteTo(const std::string& drive, const std::string& id, std::string& err
 	std::string text;
 	if (!ReadAll(SettingsPath(), text))
 		text.clear();
-	std::lock_guard<std::mutex> write(G().write_mutex);
-	const Status s = Write(drive, id, text, force);
+	Status s;
+	{
+		std::lock_guard<std::mutex> write(G().write_mutex);
+		s = Write(drive, id, text, force);
+	}
 	error = ErrorText(s, true);
+	// 1.7.1 (#12): the fonts, by the backup thread (the screen doesn't wait for them)
+	if (s.result == Result::Written || s.result == Result::Unchanged)
+	{
+		Shared& g = G();
+		std::unique_lock<std::mutex> lock(g.job_mutex);
+		if (StartThread(g))
+		{
+			g.fonts_drive = drive;
+			g.fonts_pending = true;
+			g.job_cv.notify_all();
+		}
+		else
+		{
+			lock.unlock();
+			std::lock_guard<std::mutex> write(g.write_mutex);
+			SyncFonts(drive);
+		}
+	}
 	return s.result;
 }
 
@@ -351,25 +578,14 @@ void AfterSave(const Settings& s)
 		text.clear(); // the thread says why
 	Shared& g = G();
 	std::unique_lock<std::mutex> lock(g.job_mutex);
-	if (!g.thread_started && !g.thread_failed)
-	{
-		try
-		{
-			std::thread(Thread).detach(); // waits on job_cv for the rest of the process
-			g.thread_started = true;
-		}
-		catch (...)
-		{
-			g.thread_failed = true;
-			OrbisLog("[backup] no backup thread: the backups are written as the settings are saved");
-		}
-	}
-	if (!g.thread_started)
+	if (!StartThread(g))
 	{
 		// no thread: written here (the screen waits for the drive)
 		lock.unlock();
 		std::lock_guard<std::mutex> write(g.write_mutex);
-		Write(s.backup_drive, s.backup_id, text, false);
+		const Status st = Write(s.backup_drive, s.backup_id, text, false);
+		if (st.result == Result::Written || st.result == Result::Unchanged)
+			SyncFonts(s.backup_drive);
 		return;
 	}
 	g.job_drive = s.backup_drive;
@@ -383,7 +599,7 @@ void Flush(int ms)
 {
 	Shared& g = G();
 	std::unique_lock<std::mutex> lock(g.job_mutex);
-	if (!g.job_cv.wait_for(lock, std::chrono::milliseconds(ms), [&g] { return !g.job_pending && !g.busy; }))
+	if (!g.job_cv.wait_for(lock, std::chrono::milliseconds(ms), [&g] { return !g.job_pending && !g.fonts_pending && !g.busy; }))
 		OrbisLog("[backup] the backup thread didn't finish within %d ms", ms);
 }
 

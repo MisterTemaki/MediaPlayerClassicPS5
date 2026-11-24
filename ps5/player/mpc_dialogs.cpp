@@ -2101,7 +2101,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 
 	// ---- Miscellaneous (PS5: the interface scale, the pointer, the shares) ----
 	p = d->NewPage("Miscellaneous");
-	d->Group(p, "Interface (PlayStation 5)", 5, 5, 286, 88);
+	d->Group(p, "Interface (PlayStation 5)", 5, 5, 286, 98);
 	d->Text(p, "Size of the window's text and controls:", 10, 18, 160, 8);
 	ComboBox* scale = d->Combo(p, 175, 16, 110, 13, {"100%", "125%", "150% (recommended)", "175%", "200%"},
 		s.dpi == 96 ? 0 : s.dpi == 120 ? 1 : s.dpi == 168 ? 3 : s.dpi == 192 ? 4 : 2);
@@ -2113,8 +2113,10 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	// 1.7: where the home screen lists the app (mpc_home: param.json's applicationCategoryType)
 	d->Text(p, "On the PS5's home screen, under:", 10, 77, 160, 8);
 	ComboBox* home = d->Combo(p, 175, 75, 110, 13, {"Media", "Games"}, s.home_category);
-	d->Group(p, "Network locations", 5, 97, 286, 93);
-	ListView* servers = d->P(p, new ListView, 10, 109, 220, 75);
+	// 1.7.1 (Sulfurico-One64, #12): what Games brings
+	d->Text(p, "Games: the PS5's screenshots, video clips and play time", 22, 89, 264, 8);
+	d->Group(p, "Network locations", 5, 107, 286, 87);
+	ListView* servers = d->P(p, new ListView, 10, 119, 220, 69);
 	servers->columns = {{T("Name"), servers->rect.Width() * 40 / 100}, {T("Address"), servers->rect.Width() * 58 / 100}};
 	auto fill_servers = [&s, servers] {
 		servers->rows.clear();
@@ -2124,9 +2126,9 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 			servers->sel = int(servers->rows.size()) - 1;
 	};
 	fill_servers();
-	Button* addsrv = d->P(p, new Button, 235, 109, 50, 14);
+	Button* addsrv = d->P(p, new Button, 235, 119, 50, 14);
 	addsrv->text = T("Add...");
-	Button* delsrv = d->P(p, new Button, 235, 127, 50, 14);
+	Button* delsrv = d->P(p, new Button, 235, 137, 50, 14);
 	delsrv->text = T("Delete");
 	addsrv->on_click = [&s, fill_servers] {
 		ShowAddNetworkDialog([&s, fill_servers](const std::string& n, const std::string& u) {
@@ -2139,8 +2141,8 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 			s.servers.erase(s.servers.begin() + servers->sel);
 		fill_servers();
 	};
-	d->Group(p, "Settings management", 5, 194, 286, 28);
-	Button* reset = d->P(p, new Button, 10, 204, 86, 14);
+	d->Group(p, "Settings management", 5, 198, 286, 28);
+	Button* reset = d->P(p, new Button, 10, 208, 86, 14);
 	reset->text = T("Reset");
 	reset->on_click = [o] {
 		MessageBox(T("Restore all the settings to their defaults? (Recent files, favorites and network locations are kept.)"),
@@ -2293,8 +2295,8 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 	d->Text(p, "Replaces all the settings with the newest backup found on the connected drives.", 10, 161, 276, 18);
 	Button* imp = d->P(p, new Button, 10, 182, 104, 14);
 	imp->text = T("Import...");
-	d->Text(p, "Network passwords and the fonts folder aren't backed up: type the passwords again after an import.",
-		5, 207, 286, 18);
+	d->Text(p, "The fonts folder is backed up too. Network passwords aren't: type them again after an import.", 5, 207,
+		286, 18);
 	imp->on_click = [o] {
 		const std::vector<backup::Found> found = backup::FindBackups();
 		if (found.empty())
@@ -2326,6 +2328,9 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 				st = imported;
 				sys::SetDarkTheme(st.dark_mode);
 				OrbisLog("[backup] imported %s", b.path.c_str());
+				// 1.7.1 (#12): the backup's fonts back in the fonts folder, before the settings are applied (the
+				// subtitles' font may be one of them)
+				const backup::FontsResult fonts = backup::RestoreFonts(b.drive);
 				o->EndDialog(1);
 				if (o->applied)
 					o->applied(); // applied and saved
@@ -2339,9 +2344,14 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 				}
 				std::string werror;
 				backup::WriteTo(b.drive, st.backup_id, werror, true);
-				MessageBox(T("The settings were imported. Type the network passwords again when they are asked for. "
-							 "The video renderer and HDR output are used from the next start of the app."),
-					T("Import"), MB_OK, 1);
+				std::string text = T("The settings were imported. Type the network passwords again when they are asked "
+									 "for. The video renderer and HDR output are used from the next start of the app.");
+				if (fonts.copied)
+					text += "\n\n" + Fmt(T("Fonts copied back to the fonts folder: %d."), fonts.copied);
+				if (fonts.failed)
+					text += "\n\n" + Fmt(T("Fonts that couldn't be copied back: %d (see the backup's fonts folder)."),
+										  fonts.failed);
+				MessageBox(text, T("Import"), MB_OK, 1);
 			});
 	};
 
