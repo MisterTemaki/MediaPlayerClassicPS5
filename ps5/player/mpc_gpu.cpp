@@ -56,6 +56,7 @@ void InPlaceArm()
 	if (FILE* f = fopen(InPlaceMarker().c_str(), "w"))
 		fclose(f);
 	g_inplace_armed = true;
+	ps5video::GpuStartHandOver(); // (1.7.1: a crash from here is this guard's)
 #ifndef __PROSPERO__
 	// host tests: MPCPS5_HOST_DIE_AT_IMPORT=1: the app ends here, as a crash in the import would
 	if (getenv("MPCPS5_HOST_DIE_AT_IMPORT") && *getenv("MPCPS5_HOST_DIE_AT_IMPORT") == '1')

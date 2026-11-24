@@ -28,6 +28,11 @@ void GpuFailed(const char* why);
 void SetGpuLostHook(void (*hook)());
 // How many frames the GPU has presented (review M-B: the in-place start guard waits for one after its picture)
 uint64_t GpuPresents();
+// (1.7.1) the player's in-place start guard takes over from here (its marker is written before the first import of the
+// decoder's buffers): the GPU start, which has presented frames already, counts as working, so a crash in the import
+// leaves the next start on the GPU with the pictures copied (that guard's own fallback), not on the CPU. A crash with
+// the pictures copied then is the GPU start's again. (The start watch goes on to its kGuardPresents.)
+void GpuStartHandOver();
 // "GPU: <device>, 3840x2160" or "CPU (<why>)", for the statistics and the log
 const char* RendererName();
 // (test13) the GPU start's variant this run uses (0: the GPU isn't started); 3 and 4 turn the console's decoder off

@@ -724,6 +724,15 @@ uint64_t GpuPresents()
 	return g.gpu_presents;
 }
 
+void GpuStartHandOver()
+{
+	if (!g.gpu || !g.gpu_guard || g.gpu_presents == 0)
+		return;
+	OrbisLog("[video] GPU start: present %llu, the in-place start guard takes over", (unsigned long long)g.gpu_presents);
+	GpuReachedScreen();
+	g.gpu_guard = false;
+}
+
 const char* RendererName()
 {
 	return g.renderer.c_str();
@@ -955,11 +964,14 @@ void Present(int x, int y, int w, int h, bool wait_vsync)
 			// only queues a frame (its fence is waited at the next one, the flip comes later), and the first one is
 			// Init's own black screen. Up to 1.7.0 the guard ended there, so a driver that hangs or crashes in the first
 			// frames (a wait, the swapchain's acquire, the first flip) was marked as working and tried at every launch.
-			if (g.gpu_guard && g.gpu_presents >= kGuardPresents)
+			if (g.gpu_presents >= kGuardPresents)
 			{
-				GpuReachedScreen(); // frames have reached the screen
-				g.gpu_guard = false;
-				EndGpuStartWatch();
+				if (g.gpu_guard)
+				{
+					GpuReachedScreen(); // frames have reached the screen
+					g.gpu_guard = false;
+				}
+				EndGpuStartWatch(); // (also after GpuStartHandOver: the watch covers the first frames either way)
 			}
 			return;
 		}
