@@ -4371,7 +4371,8 @@ std::string FormatTime(double seconds, bool force_hours)
 {
 	if (seconds < 0 || std::isnan(seconds))
 		seconds = 0;
-	const long t = long(seconds);
+	// (1.7.1, audit C14) no conversion out of long's range (an odd chapter table, a huge duration)
+	const long t = long(std::min(seconds, 1e12));
 	char b[32];
 	if (force_hours || t >= 3600)
 		snprintf(b, sizeof(b), "%02ld:%02ld:%02ld", t / 3600, (t / 60) % 60, t % 60);

@@ -3917,6 +3917,12 @@ ini "$T" "$favs"
 rc=$(run "$T" "0:0;30:$OPTIONS;32:0;40:$RIGHT;42:0;50:$RIGHT;52:0;60:$RIGHT;62:0;70:$RIGHT;72:0;90:$UP;92:0" "120:quit" "85,110")
 expect "[ $rc = 0 ] && log $T 'a menu of 6[0-9] items taller than the screen: it scrolls' && $REGION $T/dump/flip00110.ppm 0 700 1920 1076 145 201 247 6 3000 >/dev/null && ! $REGION $T/dump/flip00085.ppm 0 700 1920 1076 145 201 247 6 3000 >/dev/null" "60 favorites: the menu scrolls, Up from the top shows the last one highlighted"
 nosan "$T"
+# e (audit C15): an smb:// address with '@' in a file name, in the title (full path): shown whole (1.7.0: "smb://b.mp4")
+T=$(newroot t43e)
+ini "$T" "TitleBarTextStyle=0"
+rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "90:key enter;110:quit" "" "smb://127.0.0.1:1/VIDEOS/a@b.mp4")
+expect "[ $rc = 0 ] && grep -q 'smb://127.0.0.1:1/VIDEOS/a@b.mp4 - Media Player Classic' $T/drawn.txt && ! grep -q 'smb://b.mp4' $T/drawn.txt" "'@' in an smb:// file name: the address shown whole"
+nosan "$T"
 fi
 
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"

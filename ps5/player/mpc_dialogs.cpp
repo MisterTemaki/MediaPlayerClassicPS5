@@ -1159,10 +1159,14 @@ void ShowGoToDialog(double pos, double fps, std::function<void(double)> done)
 						d += c;
 				while (d.size() < 6)
 					d = "0" + d;
-				t = atoi(d.substr(0, d.size() - 4).c_str()) * 3600 + atoi(d.substr(d.size() - 4, 2).c_str()) * 60 +
+				// (1.7.1, audit C14) the hours in a double: 7 digits and more overflowed an int
+				t = atof(d.substr(0, d.size() - 4).c_str()) * 3600 + atoi(d.substr(d.size() - 4, 2).c_str()) * 60 +
 					atoi(d.substr(d.size() - 2).c_str());
 			}
-			return t;
+			// (1.7.1, audit C14) a time that means something: finite, 0 to a year (a run of digits gave inf)
+			if (!std::isfinite(t) || t < 0)
+				return 0;
+			return std::min(t, 366.0 * 86400);
 		}
 		void GoTime()
 		{

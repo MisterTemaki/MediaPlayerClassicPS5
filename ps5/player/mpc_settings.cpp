@@ -624,6 +624,14 @@ bool Settings::ReadFile(const std::string& path, bool migrate)
 	fclose(f);
 	if (recent.size() > 20)
 		recent.resize(20);
+	// (1.7.1, audit C10) the other lists capped too (a hand-edited file, an imported backup of 4 MB): favorites past
+	// 999 had no menu command, and from 2000 on their ids were the discs' and the titles'
+	if (positions.size() > 50)
+		positions.resize(50);
+	if (favorites.size() > 999)
+		favorites.resize(999);
+	if (servers.size() > 64)
+		servers.resize(64);
 	// Do not put credentials back into UI/model addresses. Preserve legacy files until the user
 	// has committed a verified encrypted copy.
 	Secrets legacy;

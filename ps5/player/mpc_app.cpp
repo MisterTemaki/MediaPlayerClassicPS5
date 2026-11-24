@@ -467,6 +467,22 @@ bool MainFrame::Loaded() const
 	return st == PlayState::Playing || st == PlayState::Paused || st == PlayState::Stopped;
 }
 
+namespace
+{
+// an address as shown: no password; an smb:// one without its user either (only the part before the server: up to
+// 1.7.0 any '@' cut it, so smb://nas/films/a@b.mkv showed as "smb://b.mkv": audit C15)
+std::string ShownAddress(const std::string& url)
+{
+	if (url.compare(0, 6, "smb://") != 0)
+		return HidePassword(url);
+	const size_t end = std::min(url.find('/', 6), url.size());
+	const size_t at = url.rfind('@', end);
+	if (at == std::string::npos || at < 6 || at >= end)
+		return url;
+	return "smb://" + url.substr(at + 1);
+}
+} // namespace
+
 std::string MainFrame::Title() const
 {
 	// CMainFrame::OpenSetupWindowTitle
@@ -475,11 +491,7 @@ std::string MainFrame::Title() const
 		return app;
 	std::string name = s_.title_bar == 0 ? current_url_ : FileName(current_url_);
 	// a password in an smb:// address stays off the screen (1.5.2: in any address, http:// and the others too)
-	const size_t at = name.find('@');
-	if (name.compare(0, 6, "smb://") == 0 && at != std::string::npos)
-		name = "smb://" + name.substr(at + 1);
-	else
-		name = HidePassword(name);
+	name = ShownAddress(name);
 	if (s_.title_bar == 2)
 		return name;
 	return name + " - " + app;
@@ -1468,13 +1480,9 @@ std::vector<MenuItem> MainFrame::FileMenu() const
 	std::vector<M> recent;
 	for (size_t i = 0; i < s_.recent.size() && i < 20; i++)
 	{
-		std::string shown = s_.recent[i];
-		const size_t at = shown.find('@');
-		if (shown.compare(0, 6, "smb://") == 0 && at != std::string::npos)
-			shown = "smb://" + shown.substr(at + 1);
-		else
-			shown = HidePassword(shown); // 1.5.2: http://user:password@... too
-		recent.push_back(M::Cmd("&" + std::to_string((i + 1) % 10) + " " + shown, ID_RECENT_FIRST + int(i)));
+		const std::string shown = ShownAddress(s_.recent[i]); // 1.5.2: http://user:password@... too
+		// (1.7.1, audit C16: an address isn't a text to translate)
+		recent.push_back(M::Shown("&" + std::to_string((i + 1) % 10) + " " + shown, ID_RECENT_FIRST + int(i)));
 	}
 	if (recent.empty())
 		recent.push_back(M::Cmd("<empty>", 0).Enable(false));
@@ -1704,12 +1712,12 @@ std::vector<MenuItem> MainFrame::FavoritesMenu() const
 	using M = MenuItem;
 	std::vector<M> v = {M::Cmd("&Add to Favorites...", ID_FAVORITES_ADD).Enable(Loaded()),
 		M::Cmd("&Organize Favorites...", ID_FAVORITES_ORGANIZE), M::Sep()};
-	for (size_t i = 0; i < s_.favorites.size(); i++)
+	for (size_t i = 0; i < s_.favorites.size() && i < 999; i++) // (1.7.1, audit C10: the ids' room)
 	{
 		std::string name = s_.favorites[i].name;
 		if (s_.favorites[i].pos > 0)
 			name += "\t[" + FormatTime(s_.favorites[i].pos) + "]";
-		M item = M::Cmd(s_.favorites[i].name, ID_FAVORITE_FIRST + int(i));
+		M item = M::Shown(s_.favorites[i].name, ID_FAVORITE_FIRST + int(i)); // (audit C16: a name, not a text to translate)
 		if (s_.favorites[i].pos > 0)
 			item.accel = FormatTime(s_.favorites[i].pos);
 		v.push_back(item);
@@ -1847,7 +1855,8 @@ void MainFrame::Seek(double t)
 	const double dur = player_.Duration();
 	if (dur > 0)
 		t = std::min(t, dur);
-	t = std::max(0.0, t);
+	// (1.7.1, audit C14) a length unknown (a stream): still a year at most, and a number
+	t = std::isfinite(t) ? std::max(0.0, std::min(t, 366.0 * 86400)) : 0.0;
 	player_.Seek(t, true);
 	stop_pos_ = -1; // (stopped: the place sought is the file's position now)
 	Osd(FormatTime(t, dur >= 3600) + (dur > 0 ? " / " + FormatTime(dur, dur >= 3600) : ""));
