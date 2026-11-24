@@ -721,6 +721,7 @@ struct Decoder
 	// 0 when the stream doesn't say; and the first picture's layout, which the later ones must keep
 	unsigned expect_bps = 0, seen_bps = 0;
 	uint32_t seen_format = 0;
+	uint32_t seen_w = 0, seen_h = 0; // (1.7.1) the first picture's size, which the later ones must keep
 	// colour, from the stream
 	AVColorPrimaries prim = AVCOL_PRI_UNSPECIFIED;
 	AVColorTransferCharacteristic trc = AVCOL_TRC_UNSPECIFIED;
@@ -1088,6 +1089,12 @@ void Output(Decoder* d, const VdecOutput& o)
 		bad = d->expect_bps == 1 ? "16-bit samples for an 8-bit stream" : "8-bit samples for a 10-bit stream";
 	else if (d->seen_bps && (bps != d->seen_bps || o.frame_format != d->seen_format))
 		bad = "the pictures' layout changed in the middle of the stream";
+	// (1.7.1, audit B2) a new picture size (clips of different sizes joined, a broadcast switching between 720p and
+	// 1080, VP9 at a key frame): the size shown is the stream's at the open, so up to 1.7.0 the new pictures were cut to
+	// it (or showed the decoder's padding rows) to the end of the file. FFmpeg, which follows the size, takes it from
+	// the next keyframe.
+	else if (d->seen_w && (o.frame_width != d->seen_w || o.frame_height != d->seen_h))
+		bad = "the picture size changed in the middle of the stream";
 	if (bad)
 	{
 		OrbisLog("[hwdec] %s: %ux%u, pitch %u samples / %u bytes, format %u, buffer %llu of %zu bytes", bad,
@@ -1102,6 +1109,8 @@ void Output(Decoder* d, const VdecOutput& o)
 	{
 		d->seen_bps = bps;
 		d->seen_format = o.frame_format;
+		d->seen_w = o.frame_width;
+		d->seen_h = o.frame_height;
 		// Sony's numbers for frame_format aren't public, and VLC for PS5 (whose console runs showed NV12 and 10-bit
 		// pictures right) reads the layout from the pitch as this does. The numbers seen on a console go into
 		// kConfirmedFormats once a boot.log shows them with a right picture; until then each new one is logged.

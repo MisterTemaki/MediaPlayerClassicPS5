@@ -3828,6 +3828,52 @@ rc=$(run "$T" "0:0" "60:state;70:quit" "" "smb://guest@127.0.0.1:$SP/VIDEOS/sub.
 expect "[ $rc = 0 ] && log $T 'subtitles loaded: smb://guest@127.0.0.1:$SP/VIDEOS/SUB.SRT' && [ \"\$(grep -c '\[smb\] connect' $T/root/logs/boot.log)\" = 0 ]" "a film's subtitles on a share: SUB.SRT found by the listing"
 nosan "$T"
 kill $SPID 2>/dev/null
+# e (audit B2): the console decoder and a picture size that changes mid-stream (640x360, then 1280x720 with its right
+# half green): FFmpeg takes the video from the next keyframe (1 s), and the whole new picture is shown (1.7.0: cut to
+# the 640x360 at the top left, blue, to the end of the file)
+T=$(newroot t42e)
+ffmpeg -loglevel error -y -f lavfi -i color=c=blue:s=640x360:r=25:d=2 -c:v libx264 -g 25 -preset ultrafast -pix_fmt yuv420p \
+	-f mpegts "$T/a.ts"
+ffmpeg -loglevel error -y -f lavfi -i "color=c=blue:s=1280x720:r=25:d=3,drawbox=x=640:y=0:w=640:h=720:color=green:t=fill" \
+	-c:v libx264 -g 25 -preset ultrafast -pix_fmt yuv420p -f mpegts -output_ts_offset 2 "$T/b.ts"
+cat "$T/a.ts" "$T/b.ts" >"$T/root/media/sizes.ts"
+rc=$(MPCPS5_HOST_HWDEC=1 run "$T" "0:0" "260:state;270:quit" "255" "$T/root/media/sizes.ts")
+expect "[ $rc = 0 ] && log $T 'handing the video to FFmpeg: the picture size changed in the middle of the stream' && $CHECK $T/dump/flip00255.ppm 1400 500 green >/dev/null && $CHECK $T/dump/flip00255.ppm 500 500 blue >/dev/null" "a picture size that changes: FFmpeg from the next keyframe, the new picture whole (its right half green)"
+nosan "$T"
+# f (audit B3): the end of a file is played out: a 2 s clip whose last 0.2 s are blue, After Playback "do nothing"
+# (paused at the end): the position is at the end and the last (blue) picture is on the screen (1.7.0: about 0.3 s
+# before it, a red picture: the queued pictures and the sound in the ring dropped)
+T=$(newroot t42f)
+ffmpeg -loglevel error -y -f lavfi -i "color=c=red:s=320x240:r=25:d=1.8[a];color=c=blue:s=320x240:r=25:d=0.2[b];[a][b]concat=n=2:v=1:a=0" \
+	-f lavfi -i "sine=frequency=440:duration=2" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -shortest "$T/root/media/end2.mp4"
+rc=$(run "$T" "0:0" "240:state;250:quit" "235" "$T/root/media/end2.mp4")
+p=$(field $T 1 2)
+expect "[ $rc = 0 ] && near $p 1.98 0.06 && $CHECK $T/dump/flip00235.ppm 960 400 blue >/dev/null" "a file's end played out: paused at $p s of 2.0, the last (blue) picture shown"
+nosan "$T"
+# g (audit B5): an audio track chosen while the file is still opening (a menu left open while a playlist moved on):
+# not taken (1.7.0: the opener's decoder freed under it, two threads given to athread: the app ended); once open: taken
+T=$(newroot t42g)
+cp "$MEDIA/chapters.mkv" "$T/root/media/ch.mkv"
+# (the file's default track is #2: #1 chosen)
+rc=$(run "$T" "0:0" "40:open $T/root/media/ch.mkv;40:cmd 2001;100:state;110:cmd 2001;170:state;180:quit" "")
+expect "[ $rc = 0 ] && log $T 'audio track 1: not now' && [ \"\$(field $T 1 5)\" = 2 ] && [ \"\$(field $T 2 5)\" = 1 ]" "an audio track chosen during the open: not taken; once open: taken (tracks $(field $T 1 5), then $(field $T 2 5))"
+nosan "$T"
+# h (audit B8): an embedded subtitle line lasting 8000 hours (a Matroska file whose time scale is 10 ms; FFmpeg's own
+# text demuxers keep times under 2^32 ms): its end in ms isn't converted out of uint32's range (1.7.0: undefined,
+# UBSan's report)
+T=$(newroot t42h)
+printf 'WEBVTT\n\n00:00:00.100 --> 2000:00:00.000\nA very long line\n' >"$T/long.vtt"
+ffmpeg -loglevel error -y -f lavfi -i color=c=red:s=320x240:r=25:d=4 -i "$T/long.vtt" -c:v libx264 -preset ultrafast \
+	-pix_fmt yuv420p -c:s srt "$T/long.mkv"
+python3 - "$T/long.mkv" "$T/root/media/long.mkv" <<'PY'
+import sys
+d = bytearray(open(sys.argv[1], "rb").read())
+i = d.find(bytes([0x2A, 0xD7, 0xB1, 0x83, 0x0F, 0x42, 0x40]))  # TimestampScale 1000000 (1 ms)
+d[i + 4:i + 7] = bytes([0x98, 0x96, 0x80])  # 10000000 (10 ms): every time 10 times longer
+open(sys.argv[2], "wb").write(d)
+PY
+rc=$(run "$T" "0:0" "120:state;130:quit" "" "$T/root/media/long.mkv")
+expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ]" "a subtitle line of 8000 hours: the film plays"
 fi
 
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"

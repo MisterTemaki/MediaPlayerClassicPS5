@@ -549,6 +549,16 @@ struct MemReader
 	}
 };
 
+// (1.7.1, audit B8) a subtitle's duration in ms from the file's own numbers: a huge one (a cue to 99999:00:00) isn't
+// converted out of uint32's range (undefined); UINT32_MAX itself means "until the next one" (ItemTimes)
+uint32_t DurationMs(double seconds)
+{
+	const double ms = seconds * 1000;
+	if (!(ms > 0))
+		return 0;
+	return ms >= double(UINT32_MAX - 1) ? UINT32_MAX - 1 : uint32_t(ms);
+}
+
 bool ReadWholeFile(const std::string& path, std::vector<uint8_t>& out, size_t max_bytes)
 {
 	if (path.compare(0, 6, "smb://") == 0)
@@ -1004,6 +1014,30 @@ struct Player::Impl
 	static int Interrupt(void* p)
 	{
 		return static_cast<Impl*>(p)->quit.load() ? 1 : 0;
+	}
+
+	// (1.7.1, audit B3) the end of a file is the end once it has been played: the pictures still queued shown and the
+	// sound in the console's ring (about 0.34 s) heard. Up to 1.7.0 "ended" came with the decoders' end, and what the app
+	// does then (the next file, a pause, a seek to 0, Exit) cut the last third of a second of every file. Paused: not
+	// yet (the ring isn't played). A ring or a queue that doesn't empty (no sound out, no picture taken): 2 s at most.
+	// (the demuxer's thread: played_out_since is its own)
+	double played_out_since = 0;
+	bool PlayedOut(double& since)
+	{
+		const double now = NowS();
+		if (paused.load() || since == 0)
+		{
+			since = now;
+			if (paused.load())
+				return false;
+		}
+		bool pictures_left;
+		{
+			std::lock_guard<std::mutex> l(fmu);
+			pictures_left = !frames.empty();
+		}
+		const bool sound_left = astream >= 0 && ps5audio::Queued() > 256;
+		return (!pictures_left && !sound_left) || now - since > 2.0;
 	}
 
 	void SetFailed(const std::string& e)
@@ -1705,6 +1739,7 @@ struct Player::Impl
 				seek_done = taken_gen;
 				eof = false;
 				ended = false;
+				played_out_since = 0;
 				show_after_seek = true;
 				{
 					std::lock_guard<std::mutex> l(fmu);
@@ -1775,10 +1810,12 @@ struct Player::Impl
 				// (third review: neither counts as failing -- the end drains the decoders to vdone_serial, and full
 				// queues with no video left show up as the sound run past the target)
 				av_usleep(10000);
-				if (eof && vdone_serial == serial && (astream < 0 || adone_serial == serial) && !ended)
+				const bool decoded = (vstream < 0 || vdone_serial == serial) && (astream < 0 || adone_serial == serial) &&
+									 (vstream >= 0 || astream >= 0);
+				if (eof && decoded && !ended && PlayedOut(played_out_since))
 					ended = true;
-				else if (eof && vstream < 0 && astream >= 0 && adone_serial == serial && !ended)
-					ended = true;
+				else if (!decoded)
+					played_out_since = 0;
 				continue;
 			}
 			ProgressReading(true);
@@ -1851,10 +1888,16 @@ struct Player::Impl
 			{
 				if (pts_s > -1e17)
 					v_read = std::max(v_read, pts_s);
-				vq.Put(av_packet_clone(pkt), serial);
+				// (1.7.1, audit B10) a copy that failed (no memory) is left out: a null packet is the queue's end
+				// mark, which drained the decoder in the middle of the film
+				if (AVPacket* c = av_packet_clone(pkt))
+					vq.Put(c, serial);
 			}
 			else if (idx == astream)
-				aq.Put(av_packet_clone(pkt), serial);
+			{
+				if (AVPacket* c = av_packet_clone(pkt))
+					aq.Put(c, serial);
+			}
 			else
 			{
 				auto it = sdecs.find(idx);
@@ -2191,7 +2234,7 @@ struct Player::Impl
 				pts -= ic->start_time / double(AV_TIME_BASE);
 			if (pkt->duration > 0 && sub.end_display_time == 0 && c->codec_descriptor &&
 				(c->codec_descriptor->props & AV_CODEC_PROP_TEXT_SUB))
-				sub.end_display_time = uint32_t(pkt->duration * av_q2d(st->time_base) * 1000);
+				sub.end_display_time = DurationMs(pkt->duration * av_q2d(st->time_base));
 			int rw = c->width, rh = c->height;
 			if ((rw <= 0 || rh <= 0) && vdec)
 			{
@@ -2816,6 +2859,24 @@ struct Player::Impl
 				const int rr = avcodec_receive_frame(adec, frame);
 				if (rr == AVERROR_EOF)
 				{
+					// (1.7.1, audit B3) the filter's tail (aresample and atempo hold samples back) heard too; the
+					// graph, at its end now, is made again for what comes next (a seek)
+					if (agraph && av_buffersrc_add_frame(asrc, nullptr) >= 0)
+					{
+						const double tempo = rate;
+						while (av_buffersink_get_frame(asink, out) >= 0)
+						{
+							const double dur = out->nb_samples / double(ps5audio::kRate) * tempo;
+							out_pos += dur;
+							const bool ok = PushAudio(reinterpret_cast<const int16_t*>(out->data[0]), out->nb_samples,
+								dec_serial, out_pos, dur);
+							av_frame_unref(out);
+							if (!ok)
+								break;
+						}
+					}
+					avfilter_graph_free(&agraph);
+					asrc = asink = nullptr;
 					adone_serial = dec_serial;
 					avcodec_flush_buffers(adec);
 					break;
@@ -3248,8 +3309,7 @@ struct Player::Impl
 							{
 								double pts = pkt->pts != AV_NOPTS_VALUE ? pkt->pts * av_q2d(sc->streams[0]->time_base) : 0;
 								if (pkt->duration > 0 && sub.end_display_time == 0)
-									sub.end_display_time =
-										uint32_t(pkt->duration * av_q2d(sc->streams[0]->time_base) * 1000);
+									sub.end_display_time = DurationMs(pkt->duration * av_q2d(sc->streams[0]->time_base));
 								sub.start_display_time = 0;
 								StoreSubtitle(track, sub, pts, 0, 0);
 								avsubtitle_free(&sub);
@@ -3627,6 +3687,17 @@ void Player::SelectTrack(TrackType type, int id)
 		m->sstream = id;
 		return;
 	}
+	// (1.7.1, audit B5) only once the file is open: while the opener runs it fills ic, opens the audio decoder and
+	// starts the audio thread itself (a menu left open while a playlist moved on: two threads given to athread ended
+	// the app); the opener done (it ends as it starts the threads: no wait to speak of)
+	const PlayState st = m->state.load();
+	if (st != PlayState::Playing && st != PlayState::Paused && st != PlayState::Stopped)
+	{
+		OrbisLog("[player] audio track %d: not now (the file isn't open)", id);
+		return;
+	}
+	if (m->opener.joinable())
+		m->opener.join();
 	if (type != TrackType::Audio || !m->ic || id == m->astream || id < 0 || id >= int(m->ic->nb_streams))
 		return;
 	if (m->ic->streams[id]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO)
