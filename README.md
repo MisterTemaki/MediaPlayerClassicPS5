@@ -21,7 +21,7 @@ showed only the logo. With the menu bar hidden, the OSD says which button opens 
 stops answering no longer freezes the app (Close, the next file, the Open dialog), the end of every file is played
 to its end, the file position is kept when the app is closed from the home screen, and menus taller than the screen
 scroll. The settings backup now keeps the fonts folder too, and Options > Miscellaneous says what listing the app
-under Games brings (the PS5's screenshots, video clips and play time) (#12). **If you had ticked "Launch files in
+under Games brings: the PS5's screenshots, video clips and play time (#12). **If you had ticked "Launch files in
 fullscreen", tick it again.** See the
 [1.7.1 release notes](docs/RELEASE-NOTES-v1.7.1.md) and the [audit report](docs/AUDIT-v1.7.1.md).
 

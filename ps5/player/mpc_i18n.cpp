@@ -1461,7 +1461,7 @@ const Entry kTable[] = {
 	{"The fonts folder is backed up too. Network passwords aren't: type them again after an import.",
 		"La carpeta fonts también se copia. Las contraseñas de red no: escríbelas de nuevo tras importar.",
 		"A pasta fonts também entra no backup. As senhas de rede não: digite-as de novo depois de importar.",
-		"Le dossier fonts est aussi sauvegardé. Les mots de passe réseau non : saisissez-les à nouveau après une "
+		"Le dossier fonts est aussi sauvegardé. Les mots de passe réseau, non : saisissez-les à nouveau après une "
 		"importation.",
 		"Der Ordner fonts wird auch gesichert. Netzwerkpasswörter nicht: Gib sie nach dem Importieren neu ein."},
 	{"Fonts copied back to the fonts folder: %d.", "Fuentes copiadas de vuelta a la carpeta fonts: %d.",

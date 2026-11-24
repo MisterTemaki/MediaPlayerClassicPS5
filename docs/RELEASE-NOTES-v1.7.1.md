@@ -23,13 +23,15 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
 ### Issue #12: Games or Media, and the fonts in the backup
 
 - **The fonts folder is in the settings backup** (View > Options > Miscellaneous > Backup): the fonts you added for
-  subtitles are copied to `<drive>/mpcps5/backup/fonts` with the settings, and **Import...** copies them back.
+  subtitles are copied to `<drive>/mpcps5/backup/fonts` with the settings, and **Import...** copies back the ones
+  missing from the fonts folder (a font of the same name already there is kept).
 - **Listing the app under Games again** is the option 1.7.0 added: **View > Options > Miscellaneous > "On the PS5's
   home screen, under: Games"**. The page now says what it brings: under Games, the PS5 allows screenshots and video
   clips and counts the play time, as for a game. The choice is written into the app's `param.json`, which
   ShadowMount+ reads when it adds the app to the home screen: after changing it, delete the app from the home screen
-  (OPTIONS on its tile > Delete) and ShadowMount+ adds it again where you chose. The complete installer and the
-  updater keep the choice.
+  (OPTIONS on its tile > Delete) and ShadowMount+ adds it again where you chose. The complete installer writes the
+  choice into the app it installs; after an in-app update the app writes it back when it starts (restart it before
+  you re-add the tile). The choice is in the settings backup too, so an import brings it back.
 - The play time itself is counted and kept by the PS5, not by the app: the app can't save it or bring it back after
   a reinstall or a factory reset.
 

@@ -2331,6 +2331,8 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 				// 1.7.1 (#12): the backup's fonts back in the fonts folder, before the settings are applied (the
 				// subtitles' font may be one of them)
 				const backup::FontsResult fonts = backup::RestoreFonts(b.drive);
+				if (fonts.copied)
+					LoadExtraFonts(OrbisDir("fonts")); // (review I1: the subtitles' font among them, used at once)
 				o->EndDialog(1);
 				if (o->applied)
 					o->applied(); // applied and saved

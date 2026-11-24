@@ -44,10 +44,11 @@ favorites and network locations.
 **The fonts folder** (1.7.1, [issue #12](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues/12)): the
 fonts you added to `/data/mpcps5/fonts` for subtitles (`.ttf`, `.otf`, `.ttc`, `.otc`) go to
 `<drive>/mpcps5/backup/fonts`. After each backup of the settings (when it is this installation's), the backup thread
-copies the fonts that aren't there yet, or that changed since; each is written beside its place, then renamed. A
-font removed from the fonts folder stays in the backup: delete it from `mpcps5/backup/fonts` on the drive if you
-don't want it back. **Import...** copies the backup's fonts back into the fonts folder (those missing there, or of
-another size) before the settings are applied, and says how many.
+copies the fonts that aren't there yet, or that changed since; each is written beside its place, then renamed, and
+keeps the font's time. A font removed from the fonts folder stays in the backup: delete it from
+`mpcps5/backup/fonts` on the drive if you don't want it back. **Import...** copies back the fonts missing from the
+fonts folder (a font of the same name already there is kept) before the settings are applied, and says how many.
+The copies are logged (Debug logs): a font over 256 MB, or one the drive refuses, is left out.
 
 **Not in a backup:**
 
@@ -65,7 +66,7 @@ another size) before the settings are applied, and says how many.
 - A drive that isn't connected keeps its place in the list as "(not connected)"; backups resume when a drive is at
   that place again, if its backup is this installation's (or it has none).
 - The backup is written by its own thread: the picture never waits for the drive. Closing the app waits up to three
-  seconds for the last one. **Back up now** stops (and says so) when the settings can't be saved first.
+  seconds for the last one (the fonts' copies included; fonts not copied by then are copied at the next backup). **Back up now** stops (and says so) when the settings can't be saved first.
 - The backup is written beside the old one and then renamed over it: a backup interrupted halfway (the drive pulled
   out, the console switched off) leaves the previous one whole. On a drive that won't rename over a file, the old
   backup is removed first; if the rename still fails, the new one stays as `mpc-hc.ini.tmp` and the page says so.

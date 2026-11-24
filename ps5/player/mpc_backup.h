@@ -9,9 +9,9 @@
 //   the console): network passwords are not in a backup, and are typed again after an import.
 // - 1.7.1 (Sulfurico-One64, #12): the fonts folder too (the fonts the user added for subtitles), in
 //   <drive>/mpcps5/backup/fonts: after each backup of the settings that is this installation's, the backup thread
-//   copies the fonts not there yet or changed since (beside them, then renamed). A font removed from the fonts folder
-//   stays in the backup (nothing is deleted there). An import copies them back: those missing from the fonts folder
-//   or of another size.
+//   copies the fonts not there yet or changed since (beside them, then renamed, with the font's time). A font removed
+//   from the fonts folder stays in the backup (nothing is deleted there). An import copies back those missing from
+//   the fonts folder (a font of the same name there is kept).
 // - Whose backup: mpc-hc.ini has a random BackupId= (made once, kept by Reset and by an import). A backup is this
 //   installation's when its BackupId is the same. The automatic backup only writes over this installation's backup
 //   (or where there is none): a drive holding another one -- the backup of a console before its factory reset,
@@ -77,8 +77,7 @@ struct FontsResult
 {
 	int copied = 0, same = 0, failed = 0;
 };
-// the backup's fonts copied back to the fonts folder (an import; on the calling thread): those missing there or of
-// another size
+// the backup's fonts copied back to the fonts folder (an import; on the calling thread): those missing there
 FontsResult RestoreFonts(const std::string& drive);
 
 // why a write failed: kept as a code and its details, made into words on the thread that shows them (T() reads

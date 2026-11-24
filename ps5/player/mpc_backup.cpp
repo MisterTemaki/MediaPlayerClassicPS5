@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <mutex>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <thread>
 #include <unistd.h>
 
@@ -54,7 +55,9 @@ struct Shared
 	std::mutex status_mutex;
 	Status status;
 	unsigned generation = 0;
-	std::mutex write_mutex; // one writer at a time: the backup thread, Back up now
+	std::mutex write_mutex; // one writer of the settings' backup at a time: the backup thread, Back up now
+	// (1.7.1 review I2) the fonts' copies have their own: Back up now doesn't wait for a long font copy
+	std::mutex fonts_mutex; // SyncFonts (the backup thread), RestoreFonts (an import)
 	// the backup thread's work: the newest text handed over, written when the thread gets to it
 	std::mutex job_mutex;
 	std::condition_variable job_cv;
@@ -262,8 +265,9 @@ std::vector<FontFile> FontsIn(const std::string& dir)
 	return out;
 }
 
-// one file copied: beside its place (.part), synced, then renamed over it; why: the reason on a failure
-bool CopyFile(const std::string& from, const std::string& to, std::string& why)
+// one file copied: beside its place (.part), synced, then renamed over it, with the source's time (so an unchanged
+// font isn't copied again: review I4); why: the reason on a failure
+bool CopyFile(const std::string& from, const std::string& to, time_t mtime, std::string& why)
 {
 	const std::string part = to + ".part";
 	FILE* in = fopen(from.c_str(), "rb");
@@ -294,26 +298,41 @@ bool CopyFile(const std::string& from, const std::string& to, std::string& why)
 	fclose(in);
 	if (ok && rename(part.c_str(), to.c_str()) != 0)
 	{
-		// (a file system that won't rename over a file: the old copy goes first)
+		// (a file system that won't rename over a file: the old copy goes first; if the rename still fails, the new
+		// one stays as .part, as the settings' .tmp does: review I6)
 		unlink(to.c_str());
-		ok = rename(part.c_str(), to.c_str()) == 0;
-		if (!ok)
-			why = ErrnoText(errno);
+		if (rename(part.c_str(), to.c_str()) != 0)
+		{
+			why = ErrnoText(errno) + " (the copy is in " + part + ")";
+			return false;
+		}
 	}
 	if (!ok)
 	{
 		if (why.empty())
 			why = "write error";
 		unlink(part.c_str());
+		return false;
 	}
-	return ok;
+	struct timeval tv[2] = {{mtime, 0}, {mtime, 0}};
+	utimes(to.c_str(), tv); // (best effort: a copy without it is only copied again)
+	return true;
+}
+
+// a copy that is the file's: the same size, and its time the same (2 s: FAT's precision) or later
+bool SameCopy(const struct stat& copy, const FontFile& f)
+{
+	return S_ISREG(copy.st_mode) && (long long)copy.st_size == f.size && copy.st_mtime + 2 >= f.mtime;
 }
 
 // the fonts folder's fonts to a drive's backup: those not there yet, of another size, or changed since their copy
-// was made (the source newer than it). Nothing is deleted there. (The write lock held: the backup thread.)
+// was made (the source newer than it). Nothing is deleted there. (The backup thread; it stops between two fonts when
+// the settings are to be backed up: review I2.)
+bool SettingsWaiting();
 FontsResult SyncFonts(const std::string& drive)
 {
 	FontsResult r;
+	std::lock_guard<std::mutex> fonts_lock(G().fonts_mutex);
 	const std::vector<FontFile> local = FontsIn(OrbisDir("fonts"));
 	if (local.empty() || !OrbisIsDir(drive))
 		return r;
@@ -328,10 +347,15 @@ FontsResult SyncFonts(const std::string& drive)
 	{
 		struct stat st = {};
 		const std::string to = dest + "/" + f.name;
-		if (stat(to.c_str(), &st) == 0 && S_ISREG(st.st_mode) && (long long)st.st_size == f.size && st.st_mtime >= f.mtime)
+		if (stat(to.c_str(), &st) == 0 && SameCopy(st, f))
 		{
 			r.same++;
 			continue;
+		}
+		if (SettingsWaiting())
+		{
+			OrbisLog("[backup] fonts: the settings first (the rest of the fonts after them)");
+			break;
 		}
 		if (f.size > kMaxFontBytes)
 		{
@@ -340,7 +364,7 @@ FontsResult SyncFonts(const std::string& drive)
 			continue;
 		}
 		std::string why;
-		if (CopyFile(OrbisDir("fonts") + "/" + f.name, to, why))
+		if (CopyFile(OrbisDir("fonts") + "/" + f.name, to, f.mtime, why))
 			r.copied++;
 		else
 		{
@@ -367,22 +391,26 @@ void Thread()
 		g.job_pending = g.fonts_pending = false;
 		g.busy = true;
 		lock.unlock();
+		if (ini)
 		{
 			std::lock_guard<std::mutex> write(g.write_mutex);
-			if (ini)
-			{
-				const Status s = Write(drive, id, text, false);
-				// 1.7.1 (#12): the fonts follow a backup that is this installation's
-				if (s.result == Result::Written || s.result == Result::Unchanged)
-					fonts = drive;
-			}
-			if (!fonts.empty())
-				SyncFonts(fonts);
+			const Status s = Write(drive, id, text, false);
+			// 1.7.1 (#12): the fonts follow a backup that is this installation's
+			if (s.result == Result::Written || s.result == Result::Unchanged)
+				fonts = drive;
 		}
+		if (!fonts.empty())
+			SyncFonts(fonts); // (its own lock: review I2)
 		lock.lock();
 		g.busy = false;
 		g.job_cv.notify_all();
 	}
+}
+
+bool SettingsWaiting()
+{
+	std::lock_guard<std::mutex> lock(G().job_mutex);
+	return G().job_pending;
 }
 
 // the thread started once (false: none could be)
@@ -472,18 +500,19 @@ FontsResult RestoreFonts(const std::string& drive)
 		r.failed = int(saved.size());
 		return r;
 	}
-	std::lock_guard<std::mutex> write(G().write_mutex); // (not while the thread copies to the same drive)
+	std::lock_guard<std::mutex> fonts_lock(G().fonts_mutex); // (not while the thread copies to the same drive)
 	for (const FontFile& f : saved)
 	{
+		// (review I5) a font of that name already in the fonts folder stays as it is: only the missing ones come back
 		struct stat st = {};
 		const std::string to = dir + "/" + f.name;
-		if (stat(to.c_str(), &st) == 0 && S_ISREG(st.st_mode) && (long long)st.st_size == f.size)
+		if (lstat(to.c_str(), &st) == 0)
 		{
 			r.same++;
 			continue;
 		}
 		std::string why;
-		if (f.size <= kMaxFontBytes && CopyFile(FontsOn(drive) + "/" + f.name, to, why))
+		if (f.size <= kMaxFontBytes && CopyFile(FontsOn(drive) + "/" + f.name, to, f.mtime, why))
 			r.copied++;
 		else
 		{
@@ -562,7 +591,6 @@ Result WriteTo(const std::string& drive, const std::string& id, std::string& err
 		else
 		{
 			lock.unlock();
-			std::lock_guard<std::mutex> write(g.write_mutex);
 			SyncFonts(drive);
 		}
 	}
@@ -582,8 +610,11 @@ void AfterSave(const Settings& s)
 	{
 		// no thread: written here (the screen waits for the drive)
 		lock.unlock();
-		std::lock_guard<std::mutex> write(g.write_mutex);
-		const Status st = Write(s.backup_drive, s.backup_id, text, false);
+		Status st;
+		{
+			std::lock_guard<std::mutex> write(g.write_mutex);
+			st = Write(s.backup_drive, s.backup_id, text, false);
+		}
 		if (st.result == Result::Written || st.result == Result::Unchanged)
 			SyncFonts(s.backup_drive);
 		return;
