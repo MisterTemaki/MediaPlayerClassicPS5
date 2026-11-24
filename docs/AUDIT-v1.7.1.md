@@ -151,7 +151,7 @@ fixed, the rest in [residual risks](#10-residual-risks)), **Open** (not changed 
 | E1 | medium | probable | The DNS fallback holds one lock across the console's resolver (5 s, 2 retries) | Mitigated: no SMB lookup runs on the UI thread now; the serialisation stays | -- |
 | E2 | medium | confirmed | Sanitizer reports of earlier runs in a test folder went unchecked | Fixed: `nosan` reads every run | full suite |
 | E3 | medium | confirmed | `make test` didn't run the runtime layer's own tests | Fixed (`test-mitrt`) | `make test` |
-| E4 | low | confirmed | The DNS fallback answered for any failure, a service name as port 0 | Fixed | PS5 build only (compiled out on the host) |
+| E4 | low | confirmed | The DNS fallback answered for any failure, a service name as port 0 | Fixed: not for a bad service, socket type, family, flags or no memory (review R4), and a numeric port | PS5 build only (compiled out on the host) |
 | E5 | low | hypothesis | The pthread wrap changes the caller's attribute object | Open (no caller) | -- |
 | E6-E9 | low | confirmed | Test timing, missing timeouts, checks that pass without data, dead steps | Open (test quality) | -- |
 | E10, E11 | low | confirmed | TLS, fuzzers and some library modes not wired into tests | Open (test gaps) | -- |
@@ -228,18 +228,40 @@ The new tests (groups 41, 42, 43) were run against two other builds with the 1.7
 | `5c50e09` | C10, C14, C15, C16 |
 | `bce9cec` | A8, A9, D4, D5, D9, D10, E2, E3, E4 |
 | `d67a7c8` | A11, B9, C9, D6; the GPU start harness |
+| `b7ebffe` | The review's R1-R9 |
+| `084d6f0` | The GPU start guard hands over to the in-place guard |
+| `11177fb`, `1e76553`, `0ff04d1` | The review's R10; group 34 k; group 42 h's description |
 
 Source files: `coreorbis/main-boot.cpp`, `coreorbis/include-orbis/OrbisPaths.h`, `coreorbis/orbis-shims/orbis_paths.cpp`,
 `ProsperoVideo.cpp`, `ProsperoUpdate.cpp`, `ProsperoHome.cpp`; `player/mpc_app.cpp`, `mpc_dialogs.cpp`, `mpc_smb.cpp`,
 `mpc_smb.h`, `mpc_player.cpp`, `mpc_vdec.cpp`, `mpc_menu.cpp`, `mpc_font.cpp`, `mpc_settings.cpp`, `mpc_settings.h`,
-`mpc_console.cpp`, `mpc_i18n.cpp`; `ps5-slang-gpu/src/gpu.cpp` and `VENDOR.txt` (patch in
+`mpc_console.cpp`, `mpc_i18n.cpp`, `mpc_gpu.cpp`; `coreorbis/orbis-shims/ProsperoVideo.h`; `ps5-slang-gpu/src/gpu.cpp` and `VENDOR.txt` (patch in
 [patches/gpu-audit-171.diff](patches/gpu-audit-171.diff)); `Makefile`, `app/sce_sys/param.json`.
 Tests: `tests/run-tests.sh` (groups 41, 42, 43, and 16, 32, 34), `tests/smb_stall.py` (new),
 `tests/gpu_startup_test.cpp`.
 
 ## 8. Checks run
 
-Filled in with the results of the final runs (see the release notes for the numbers).
+On the code of the test build (`0ff04d1`), the host's GCC 13 with ASan, UBSan and float-cast-overflow:
+
+- **`make test`:** the frontend suite **1010 passed, 12 failed**. The 12 are the baseline's (an SMB address check and
+  11 comparisons of the GPU's HDR pictures with the CPU path's on lavapipe), failing with the same values as on 1.7.0.
+  New groups: 41 (38 checks), 42 (20), 43 (9). Every run's output is checked for sanitizer reports (E2): none.
+- **Harnesses in `make test`:** update transaction, log password, install content, GPU start (14 checks; it didn't link
+  before `d67a7c8`), decoder memory, console HDR, theme (43), credentials (36), credentials UI (31), and the runtime
+  layer's own host and platform tests (new in `make test`, E3): all pass.
+- **Fail-before:** section 6 (the 1.7.0 binary: 31 of 67 new checks fail; 1.7.1 without A1 and A3: those 5 fail).
+- **Translations:** 762 texts, five languages, no format or key problem (`tests/check_i18n.py`).
+- **Vendor check:** `ps5-slang-gpu` matches its VENDOR.txt (420 files).
+- **PS5 build** (`make ps5`, the native GPU build and the complete installer): the app profile (content version
+  01.071.000), imports, syscalls, the runtime's link check and the RADV link (338 Vulkan entry points) pass.
+  `MediaPlayerClassicPS5.elf`: 21,485,712 bytes, SHA-256 `936525c173034f0ca83e446effc4e040db136934ec38c12e429aaa3a33b7db57`.
+- **On screen** (host screenshots): the file browser at a share that doesn't answer ("Reading the network
+  folder..."), the Minimal preset's "OPTIONS: the menu", the save failure message, a menu of 60 favorites scrolled to
+  its last item.
+- **One independent review** of the changes (4.7).
+- **Not run:** anything on a PS5 (the console test comes before the release); the PS5-only DNS fallback (E4) on a
+  console; TSan.
 
 ## 9. Findings not confirmed
 
