@@ -3876,8 +3876,8 @@ rc=$(run "$T" "0:0" "40:open $T/root/media/ch.mkv;40:cmd 2001;100:state;110:cmd 
 expect "[ $rc = 0 ] && log $T 'audio track 1: not now' && [ \"\$(field $T 1 5)\" = 2 ] && [ \"\$(field $T 2 5)\" = 1 ]" "an audio track chosen during the open: not taken; once open: taken (tracks $(field $T 1 5), then $(field $T 2 5))"
 nosan "$T"
 # h (audit B8): an embedded subtitle line lasting 8000 hours (a Matroska file whose time scale is 10 ms; FFmpeg's own
-# text demuxers keep times under 2^32 ms): its end in ms isn't converted out of uint32's range (1.7.0: undefined,
-# UBSan's report)
+# text demuxers keep times under 2^32 ms): the film plays, no sanitizer report. (FFmpeg's subtitle decoders set the
+# line's end themselves, so the player's own conversion, now clamped, isn't reached here: 1.7.0 passes this too)
 T=$(newroot t42h)
 printf 'WEBVTT\n\n00:00:00.100 --> 2000:00:00.000\nA very long line\n' >"$T/long.vtt"
 ffmpeg -loglevel error -y -f lavfi -i color=c=red:s=320x240:r=25:d=4 -i "$T/long.vtt" -c:v libx264 -preset ultrafast \
