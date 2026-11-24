@@ -491,7 +491,12 @@ $(HOST_OUT)/mpc-hdr-test: tests/hdr_output_test.cpp $(HOST_GPU_OBJ)
 $(HOST_OUT)/mpc-gpu-library-test: $(SLANG_GPU)/tests/gpu_test.cpp $(HOST_GPU_OBJ)
 	$(HOST_CXX) -std=c++17 $(HOST_OPT) $(HOST_SAN) $(SLANG_GPU_WARN) $(SLANG_GPU_INC) -o $@ $< $(HOST_GPU_OBJ) -lvulkan -lpthread
 
-test: host test-audit test-theme test-credentials test-credentials-ui $(HOST_OUT)/mpc-credentials-fixture \
+# (1.7.1, audit E3) the PS5 runtime layer's own host tests (memstream, the stdio wrap that every fclose / fflush of the
+# eboot goes through, the link checks): run with the rest
+test-mitrt:
+	$(MAKE) -C mitrt test
+
+test: host test-audit test-theme test-credentials test-credentials-ui test-mitrt $(HOST_OUT)/mpc-credentials-fixture \
 	$(HOST_OUT)/mpc-gpu-library-test $(HOST_OUT)/mpc-hdr-test
 	bash tests/run-tests.sh
 
@@ -508,5 +513,5 @@ bench: $(BENCH_OUT)/mpc-gpu-bench
 clean:
 	rm -rf build/ps5 build/host build/app build/dist build/bench build/gen
 
-.PHONY: ps5 host test test-audit test-theme test-credentials test-credentials-ui send app dist clean deps deps-subs deps-disc bench
+.PHONY: test-mitrt ps5 host test test-audit test-theme test-credentials test-credentials-ui send app dist clean deps deps-subs deps-disc bench
 .SECONDARY:

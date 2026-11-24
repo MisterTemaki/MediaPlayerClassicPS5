@@ -61,6 +61,21 @@ int __wrap_getaddrinfo(const char* node, const char* service, const struct addri
 	const int r = __real_getaddrinfo(node, service, hints, res);
 	if (r == 0 || !node || !*node)
 		return r;
+	// (1.7.1, audit E4) only a name that couldn't be found: not a bad service, socket type or flags (up to 1.7.0 any
+	// failure was answered, as a success); and a port that is a number (a service name became port 0)
+	if (r != EAI_NONAME && r != EAI_AGAIN && r != EAI_FAIL
+#ifdef EAI_NODATA
+		&& r != EAI_NODATA
+#endif
+	)
+		return r;
+	if (service && *service)
+	{
+		char* end = nullptr;
+		const long port = strtol(service, &end, 10);
+		if (!end || *end || port < 0 || port > 65535)
+			return r;
+	}
 	if (hints && hints->ai_family != AF_UNSPEC && hints->ai_family != AF_INET)
 		return r;
 	if (hints && (hints->ai_flags & AI_NUMERICHOST))

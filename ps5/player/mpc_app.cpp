@@ -2791,6 +2791,11 @@ void MainFrame::CheckForUpdates()
 		case update::Phase::Available: OfferUpdate(st); break;
 		case update::Phase::Done: upd_seen_ = update::Phase::Idle; break; // TickUpdate asks again about the restart
 		case update::Phase::Checking:
+			// (1.7.1, audit D9) the start's own check still running: its answer is said as this one's (up to 1.7.0 an
+			// "up to date" or a failure then said nothing)
+			upd_user_ = true;
+			Osd(T("Checking for updates..."), 3);
+			break;
 		case update::Phase::Downloading:
 		case update::Phase::Installing: Osd(T("The update is on its way..."), 2); break;
 		default:
@@ -2896,13 +2901,19 @@ void MainFrame::TickUpdate()
 				upd_user_ = upd_auto_ = false;
 				break;
 			case update::Phase::Failed:
+			{
+				// (1.7.1, audit D5) "Nothing was changed" only when nothing was: not after an error that asks for the
+				// payload to repair the app (the old version not wholly put back, the journal not confirmed)
+				const bool repair = st.error.find("payload again") != std::string::npos ||
+									st.error.find("couldn't be put back") != std::string::npos;
 				if (upd_user_ || upd_installing_)
 					MessageBox(Fmt(T("Media Player Classic PS5 could not be updated:\n%s"), T(st.error).c_str()) +
-								   (upd_installing_ ? T("\n\nNothing was changed.") : ""),
+								   (upd_installing_ && !repair ? T("\n\nNothing was changed.") : ""),
 						T("Check for updates"), MB_OK, 3);
 				OrbisLog("[update] failed: %s", st.error.c_str());
 				upd_user_ = upd_auto_ = upd_installing_ = false;
 				break;
+			}
 			case update::Phase::Done:
 				OrbisLog("[update] %s installed (in %s): offering the restart", st.latest.c_str(), mpcupdate::Place().dir.c_str());
 				upd_installing_ = false;

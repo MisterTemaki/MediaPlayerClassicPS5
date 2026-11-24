@@ -288,11 +288,16 @@ void RotatedMvp(int quarters, float* m)
 	m[15] = 1;
 }
 
+// (MPC 1.7.1, audit A9) a lost device seen by any call: the self-test's failure said as that, not as wrong pictures
+std::atomic<bool> g_device_lost{false};
+
 bool Check(VkResult r, const char* what)
 {
 	if (r != VK_SUCCESS)
 	{
 		internal::Log("[gpu] %s -> %d", what, int(r));
+		if (r == VK_ERROR_DEVICE_LOST)
+			g_device_lost = true;
 		return false;
 	}
 	return true;
@@ -742,8 +747,9 @@ bool UploadImage(Image& im, const uint8_t* rgba, int w, int h)
 		std::lock_guard<std::mutex> q(g.queue_mx);
 		ok = Check(vkQueueSubmit(g.queue, 1, &si, done), "vkQueueSubmit (upload)");
 	}
+	// (MPC 1.7.1, audit A9) the copy is done only when its fence says so (a lost device: not done)
 	if (ok)
-		vkWaitForFences(g.device, 1, &done, VK_TRUE, UINT64_MAX);
+		ok = Check(vkWaitForFences(g.device, 1, &done, VK_TRUE, UINT64_MAX), "vkWaitForFences (upload)");
 	vkDestroyFence(g.device, done, nullptr);
 	vkFreeCommandBuffers(g.device, g.upload_pool, 1, &c);
 	FreeBuffer(st);
@@ -1079,8 +1085,10 @@ bool MakeTarget(int want_w, int want_h)
 		return false;
 	VkBool32 sup = VK_FALSE;
 	vkGetPhysicalDeviceSurfaceSupportKHR(g.phys, g.family, g.surface, &sup);
-	VkSurfaceCapabilitiesKHR caps;
-	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g.phys, g.surface, &caps);
+	// (MPC 1.7.1, audit A8) the capabilities checked, not read uninitialised when the call fails
+	VkSurfaceCapabilitiesKHR caps = {};
+	if (!Check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g.phys, g.surface, &caps), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"))
+		return false;
 	VkSurfaceFormatKHR fmts[16];
 	uint32_t fc = 16;
 	vkGetPhysicalDeviceSurfaceFormatsKHR(g.phys, g.surface, &fc, fmts);
@@ -1115,6 +1123,11 @@ bool MakeTarget(int want_w, int want_h)
 	g.swap_images.resize(ic);
 	vkGetSwapchainImagesKHR(g.device, g.swapchain, &ic, g.swap_images.data());
 	g.final_pass = MakeRenderPass(g.target_format, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
+	if (!g.final_pass || g.swap_images.empty()) // (MPC 1.7.1, audit A8)
+	{
+		internal::Log("[gpu] display: no render pass or no swapchain images");
+		return false;
+	}
 	for (VkImage im : g.swap_images)
 	{
 		VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -1127,6 +1140,11 @@ bool MakeTarget(int want_w, int want_h)
 			return false;
 		g.swap_views.push_back(v);
 		g.swap_fbs.push_back(MakeFramebuffer(g.final_pass, v, g.out_w, g.out_h));
+		if (!g.swap_fbs.back()) // (MPC 1.7.1, audit A8)
+		{
+			internal::Log("[gpu] display: a swapchain framebuffer couldn't be made");
+			return false;
+		}
 	}
 	internal::Log("[gpu] display %s: %dx%d at %.3f Hz, %u images, format %d", disp.displayName ? disp.displayName : "?",
 		g.out_w, g.out_h, mp.refreshRate / 1000.0, ic, int(g.target_format));
@@ -2780,7 +2798,9 @@ void InitVideo(bool host_import)
 	gv.ok = true; // (the self-test draws through SetVideo's own path)
 	if (!VideoSelfTest())
 	{
-		internal::Log("[gpu] video: the self-test's pictures came out wrong on this driver: pictures stay on the CPU");
+		internal::Log(g_device_lost ? "[gpu] video: the GPU stopped answering during the self-test (device lost): pictures "
+									  "stay on the CPU"
+									: "[gpu] video: the self-test's pictures came out wrong on this driver: pictures stay on the CPU");
 		FreeVideo();
 		return;
 	}

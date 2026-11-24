@@ -307,6 +307,27 @@ bool WriteFile(const std::string& path, const uint8_t* data, size_t size)
 	return close(fd) == 0 && ok;
 }
 
+// (1.7.1, audit D4) a file something else reads (the home screen's art): written beside it (.part), then put in its
+// place; on any failure the old one stays whole (up to 1.7.0 it was rewritten in place, and deleted on a short write)
+bool WriteFileReplacing(const std::string& path, const uint8_t* data, size_t size)
+{
+	const std::string part = path + ".part";
+#ifndef __PROSPERO__
+	if (const char* fail = getenv("MPCPS5_HOST_UPDATE_FAIL_APPMETA")) // host tests: this file's write fails
+		if (path.size() >= strlen(fail) && path.compare(path.size() - strlen(fail), std::string::npos, fail) == 0)
+		{
+			unlink(part.c_str());
+			return false;
+		}
+#endif
+	if (!WriteFile(part, data, size) || rename(part.c_str(), path.c_str()) != 0)
+	{
+		unlink(part.c_str());
+		return false;
+	}
+	return true;
+}
+
 std::string ReadText(const std::string& path)
 {
 	FILE* f = fopen(path.c_str(), "rb");
@@ -1124,8 +1145,9 @@ std::string InstallZip(const std::vector<uint8_t>& zip, const std::string& expec
 			if (kv.first.compare(0, 8, "sce_sys/") == 0 && kv.first.find('/', 8) == std::string::npos)
 			{
 				const ZipEntry* e = files[kv.first];
-				if (!WriteFile(c.appmeta_dir + "/" + kv.first.substr(8), e->data, e->size))
-					OrbisLog("[update] couldn't refresh %s/%s", c.appmeta_dir.c_str(), kv.first.substr(8).c_str());
+				if (!WriteFileReplacing(c.appmeta_dir + "/" + kv.first.substr(8), e->data, e->size))
+					OrbisLog("[update] couldn't refresh %s/%s (the old one kept)", c.appmeta_dir.c_str(),
+						kv.first.substr(8).c_str());
 			}
 	return "";
 }

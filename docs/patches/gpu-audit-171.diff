@@ -1,0 +1,107 @@
+diff --git a/VENDOR.txt b/VENDOR.txt
+index 09ce1be..749a240 100644
+--- a/VENDOR.txt
++++ b/VENDOR.txt
+@@ -1,9 +1,10 @@
+ # Base commit below, with MPC local patches; hashes pin the delivered modified copy.
+ # Patches: native HDR10 target, VideoOut callbacks, PQ/HLG output, HDR UI and enumeration errors (MPC 1.6);
+ # the video post-processing (SetVideoPost: shaders/prep, pyr, flow, warp, scale, easu .comp, post.frag; FSR 1 vendored
+-# in third_party/ffx-fsr1, MIT) and its device features (MPC 1.7).
+-# See docs/GPU-HDR-CHANGES.md, docs/POST-PROCESSING.md, docs/patches/gpu-hdr.diff and docs/patches/gpu-post.diff
+-# (repository root); this is not an untouched upstream checkout.
++# in third_party/ffx-fsr1, MIT) and its device features (MPC 1.7); the display's set-up and the upload's fence checked
++# (MPC 1.7.1's audit, A8 and A9).
++# See docs/GPU-HDR-CHANGES.md, docs/POST-PROCESSING.md, docs/patches/gpu-hdr.diff, docs/patches/gpu-post.diff and
++# docs/patches/gpu-audit-171.diff (repository root); this is not an untouched upstream checkout.
+ commit 5531e732bc76b4eb1c1165f3044e5c0471fe44fa
+ 181314065df2f2fdaf920b1a8b5311daa216a2d6489a06ada5b49cc514d89417  .gitignore
+ 4e35910329ed8442c5babfee979c4e200c884c08553b357e763e6cc82e115b6a  LICENSE
+@@ -301,7 +302,7 @@ fcf83d9a5add36a7e6bccc007da5a7587da12fd8d0209adc8b20730440552c38  shaders/video.
+ 1e510fdd5b0837d1d5d73e66898c87de847de080e62d86c4fe6edc4756f64e36  shaders/video.vert
+ c7e34bf6c28f100161fead3ec8a23ec19623bec08142da165226be769547871a  shaders/warp.comp
+ cd52c87107bec3309bae8a2ddeef4e7d2ed43d6d325e53a42233b3afa6d20c4b  src/common.cpp
+-e8e128e0448c2452cc32f494024cc319b30604c9abb6ae6db93dcaacb3319d8d  src/gpu.cpp
++46b6d364326690751084a150277101bb0f20fd3e6b71234fa495efe1b8b3b6e1  src/gpu.cpp
+ e813596cc2836f4effa0e7cbda637f38efa6b713d9ee822668e47deb27cac2fa  src/internal.h
+ d5b9a8c5869e75560b0bb40a5e13a39d70be14c9f4149d7bd7031f85f05b206b  src/sha256.cpp
+ 9d8233eb7a92de340f7d928fd38f76ca3e84e1759d4bdff315fd79370e87d261  src/slang_loader.cpp
+diff --git a/src/gpu.cpp b/src/gpu.cpp
+index 3bd32ec..b09c684 100644
+--- a/src/gpu.cpp
++++ b/src/gpu.cpp
+@@ -288,11 +288,16 @@ void RotatedMvp(int quarters, float* m)
+ 	m[15] = 1;
+ }
+ 
++// (MPC 1.7.1, audit A9) a lost device seen by any call: the self-test's failure said as that, not as wrong pictures
++std::atomic<bool> g_device_lost{false};
++
+ bool Check(VkResult r, const char* what)
+ {
+ 	if (r != VK_SUCCESS)
+ 	{
+ 		internal::Log("[gpu] %s -> %d", what, int(r));
++		if (r == VK_ERROR_DEVICE_LOST)
++			g_device_lost = true;
+ 		return false;
+ 	}
+ 	return true;
+@@ -742,8 +747,9 @@ bool UploadImage(Image& im, const uint8_t* rgba, int w, int h)
+ 		std::lock_guard<std::mutex> q(g.queue_mx);
+ 		ok = Check(vkQueueSubmit(g.queue, 1, &si, done), "vkQueueSubmit (upload)");
+ 	}
++	// (MPC 1.7.1, audit A9) the copy is done only when its fence says so (a lost device: not done)
+ 	if (ok)
+-		vkWaitForFences(g.device, 1, &done, VK_TRUE, UINT64_MAX);
++		ok = Check(vkWaitForFences(g.device, 1, &done, VK_TRUE, UINT64_MAX), "vkWaitForFences (upload)");
+ 	vkDestroyFence(g.device, done, nullptr);
+ 	vkFreeCommandBuffers(g.device, g.upload_pool, 1, &c);
+ 	FreeBuffer(st);
+@@ -1079,8 +1085,10 @@ bool MakeTarget(int want_w, int want_h)
+ 		return false;
+ 	VkBool32 sup = VK_FALSE;
+ 	vkGetPhysicalDeviceSurfaceSupportKHR(g.phys, g.family, g.surface, &sup);
+-	VkSurfaceCapabilitiesKHR caps;
+-	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g.phys, g.surface, &caps);
++	// (MPC 1.7.1, audit A8) the capabilities checked, not read uninitialised when the call fails
++	VkSurfaceCapabilitiesKHR caps = {};
++	if (!Check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g.phys, g.surface, &caps), "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"))
++		return false;
+ 	VkSurfaceFormatKHR fmts[16];
+ 	uint32_t fc = 16;
+ 	vkGetPhysicalDeviceSurfaceFormatsKHR(g.phys, g.surface, &fc, fmts);
+@@ -1115,6 +1123,11 @@ bool MakeTarget(int want_w, int want_h)
+ 	g.swap_images.resize(ic);
+ 	vkGetSwapchainImagesKHR(g.device, g.swapchain, &ic, g.swap_images.data());
+ 	g.final_pass = MakeRenderPass(g.target_format, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, true);
++	if (!g.final_pass || g.swap_images.empty()) // (MPC 1.7.1, audit A8)
++	{
++		internal::Log("[gpu] display: no render pass or no swapchain images");
++		return false;
++	}
+ 	for (VkImage im : g.swap_images)
+ 	{
+ 		VkImageViewCreateInfo vi = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+@@ -1127,6 +1140,11 @@ bool MakeTarget(int want_w, int want_h)
+ 			return false;
+ 		g.swap_views.push_back(v);
+ 		g.swap_fbs.push_back(MakeFramebuffer(g.final_pass, v, g.out_w, g.out_h));
++		if (!g.swap_fbs.back()) // (MPC 1.7.1, audit A8)
++		{
++			internal::Log("[gpu] display: a swapchain framebuffer couldn't be made");
++			return false;
++		}
+ 	}
+ 	internal::Log("[gpu] display %s: %dx%d at %.3f Hz, %u images, format %d", disp.displayName ? disp.displayName : "?",
+ 		g.out_w, g.out_h, mp.refreshRate / 1000.0, ic, int(g.target_format));
+@@ -2780,7 +2798,9 @@ void InitVideo(bool host_import)
+ 	gv.ok = true; // (the self-test draws through SetVideo's own path)
+ 	if (!VideoSelfTest())
+ 	{
+-		internal::Log("[gpu] video: the self-test's pictures came out wrong on this driver: pictures stay on the CPU");
++		internal::Log(g_device_lost ? "[gpu] video: the GPU stopped answering during the self-test (device lost): pictures "
++									  "stay on the CPU"
++									: "[gpu] video: the self-test's pictures came out wrong on this driver: pictures stay on the CPU");
+ 		FreeVideo();
+ 		return;
+ 	}

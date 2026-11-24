@@ -48,8 +48,10 @@ bool WriteText(const std::string& path, const std::string& text)
 		}
 		off += size_t(n);
 	}
-	const bool ok = fsync(fd) == 0 && close(fd) == 0;
-	if (!ok || rename(part.c_str(), path.c_str()) != 0)
+	// (1.7.1, audit D10) closed whatever fsync said (up to 1.7.0 a failed fsync left the descriptor open)
+	const bool synced = fsync(fd) == 0;
+	const bool closed = close(fd) == 0;
+	if (!synced || !closed || rename(part.c_str(), path.c_str()) != 0)
 	{
 		unlink(part.c_str());
 		return false;

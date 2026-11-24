@@ -46,9 +46,12 @@ run() {
 	MPCPS5_HOST_OFFLINE=${OFFLINE-1} MPCPS5_HOST_REALTIME=1 MPCPS5_HOST_SCRIPT="$script" \
 	MPCPS5_PS5_ROOT=$t/root MPCPS5_PS5_HOMEBREW=$t/homebrew MPCPS5_HOST_DUMP_DIR=$t/dump MPCPS5_HOST_DUMP=$dumps \
 		MPCPS5_HOST_MAX_FLIPS=${MAXFLIPS-3000} MPCPS5_HOST_PAD=$pad ASAN_OPTIONS=detect_leaks=0 timeout 180 "$BIN" "$@" >"$t/out.txt" 2>&1
-	echo $?
+	local rc=$?
+	cat "$t/out.txt" >>"$t/out-all.txt" 2>/dev/null # (1.7.1, audit E2: every run's output, for nosan)
+	echo $rc
 }
-nosan() { expect "! grep -q 'runtime error\|AddressSanitizer' $1/out.txt" "no sanitizer reports"; }
+# (1.7.1, audit E2) every run of that folder, not only the last (UBSan goes on after a report: the exit code is 0)
+nosan() { expect "! grep -q 'runtime error\|AddressSanitizer' $1/out.txt $(ls $1/out-all.txt 2>/dev/null)" "no sanitizer reports"; }
 state() { grep "\[test\] state" "$1/root/logs/boot.log" | sed -n "${2}p"; }
 # the n-th state line's field: st pos dur video audio sub picture
 field() { state "$1" "$2" | sed -E "s/.* state ([0-9]+) pos ([0-9.]+) dur ([0-9.]+) video (-?[0-9]+) audio (-?[0-9]+) sub (-?[0-9]+) picture ([0-9]+).*/\\$3/"; }
@@ -528,8 +531,9 @@ expect "sums | cmp -s - $T/before.sums" "... and the old version put back (the o
 # the next start puts it back (and the start after a failed put-back tells the user)
 release v9.9 99.000.000
 rm -f $T/root/logs/boot.log
-rc=$(MPCPS5_HOST_UPDATE_FAIL_RENAME=sce_sys/param.json MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
+rc=$(MPCPS5_HOST_DRAWN=$T/drawn-b5.txt MPCPS5_HOST_UPDATE_FAIL_RENAME=sce_sys/param.json MPCPS5_HOST_UPDATE_FAIL_RESTORE=sce_sys/icon0.png u16run "$T" "0:0" "100:cmd 601;200:key enter;400:key enter;800:quit" "")
 expect "grep -q \"\[update\] failed: Couldn't replace sce_sys/param.json .*couldn't be put back completely (1 file(s))\" $T/root/logs/boot.log" "a put-back that fails too: the error says the old version isn't completely back"
+expect "grep -q 'payload' $T/drawn-b5.txt && ! grep -q 'Nothing was changed' $T/drawn-b5.txt" "... and its box doesn't add 'Nothing was changed' (audit D5)"
 expect "[ \$(grep -c '	sce_sys/icon0.png$' $H/update.journal) = 1 ] && [ \$(wc -l <$H/update.journal) = 3 ] && tail -1 $H/update.journal | grep -qx end && ls $H/sce_sys/icon0.png.old.* >/dev/null" "... the journal kept (whole: header, that file, end), and its old copy kept"
 # b5b: a new install while that one isn't put back: refused, the old copy kept
 rm -f $T/root/logs/boot.log
@@ -590,7 +594,10 @@ expect "grep -q 'an update wasn.t finished; repairing the app' $T/inst-repair.tx
 release v9.9 99.000.000
 echo 0 >"$T/root/update-check.txt"
 rm -f $T/root/logs/boot.log
-rc=$(u16run "$T" "0:0" "200:key enter;450:key enter;520:key enter;560:quit" "300")
+# (1.7.1, audit D4: the home screen's param.json can't be written: the old one stays whole, no .part left)
+echo "old param" >"$T/appmeta/PPSA99015/param.json"
+rc=$(MPCPS5_HOST_UPDATE_FAIL_APPMETA=param.json u16run "$T" "0:0" "200:key enter;450:key enter;520:key enter;560:quit" "300")
+expect "grep -q \"couldn't refresh .*/param.json (the old one kept)\" $T/root/logs/boot.log && grep -qx 'old param' $T/appmeta/PPSA99015/param.json && [ ! -e $T/appmeta/PPSA99015/param.json.part ]" "the home screen's param.json not written: the old one kept whole (1.7.0: rewritten in place, deleted on a failed write)"
 expect "grep -q '\[update\] 9.9 is available ([0-9]* bytes): offered' $T/root/logs/boot.log" "the daily check offers 9.9"
 expect "grep -q '\[update\] 9.9 installed (in .*): offering the restart' $T/root/logs/boot.log && grep -q \"the release's Ed25519 signature checks out\" $T/root/logs/boot.log" "Yes: downloaded, signature and every file checked, installed"
 expect "grep -q 'eboot v9.9' $T/homebrew/PPSA99015/eboot.bin && grep -q '\"contentVersion\": \"99.000.000\"' $T/homebrew/PPSA99015/sce_sys/param.json" "the new eboot.bin and param.json in place"
