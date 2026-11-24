@@ -242,7 +242,8 @@ Tests: `tests/run-tests.sh` (groups 41, 42, 43, and 16, 32, 34), `tests/smb_stal
 
 ## 8. Checks run
 
-On the code of the test build (`0ff04d1`), the host's GCC 13 with ASan, UBSan and float-cast-overflow:
+On the code of the first test build (`0ff04d1`), the host's GCC 13 with ASan, UBSan and float-cast-overflow (and
+again on the second, `a49b4de`, with issue #12's change and its group 44: 1025 passed, the same 12 failed):
 
 - **`make test`:** the frontend suite **1010 passed, 12 failed**. The 12 are the baseline's (an SMB address check and
   11 comparisons of the GPU's HDR pictures with the CPU path's on lavapipe), failing with the same values as on 1.7.0.
@@ -251,7 +252,7 @@ On the code of the test build (`0ff04d1`), the host's GCC 13 with ASan, UBSan an
   before `d67a7c8`), decoder memory, console HDR, theme (43), credentials (36), credentials UI (31), and the runtime
   layer's own host and platform tests (new in `make test`, E3): all pass.
 - **Fail-before:** section 6 (the 1.7.0 binary: 31 of 67 new checks fail; 1.7.1 without A1 and A3: those 5 fail).
-- **Translations:** 762 texts, five languages, no format or key problem (`tests/check_i18n.py`).
+- **Translations:** 762 texts (765 with #12), five languages, no format or key problem (`tests/check_i18n.py`).
 - **Vendor check:** `ps5-slang-gpu` matches its VENDOR.txt (420 files).
 - **PS5 build** (`make ps5`, the native GPU build and the complete installer): the app profile (content version
   01.071.000), imports, syscalls, the runtime's link check and the RADV link (338 Vulkan entry points) pass.

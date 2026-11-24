@@ -112,15 +112,15 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
 ### Validation and limits
 
 - **On a PS5:** VALIDATION-PS5
-- **Full frontend suite: 1010 checks passed.** The 12 that fail (an SMB address check and 11 comparisons of the GPU's
+- **Full frontend suite: 1025 checks passed.** The 12 that fail (an SMB address check and 11 comparisons of the GPU's
   4K HDR pictures with the CPU path's on the host's software Vulkan) fail the same way on 1.7.0. The new groups 41,
   42 and 43 (67 checks) cover issue #11, the GPU start guard, a share that stalls or never answers, the end of a file,
   the picture size change, the position kept when the app is killed, the scrolling menus and the rest; on the 1.7.0
-  build, 31 of them fail.
+  build, 31 of them fail. Group 44 covers the fonts in the backup (#12).
 - The harnesses pass (update, logs, installer, GPU start, decoder memory, HDR, theme, credentials), now with the PS5
   runtime layer's own tests. The suite runs with ASan, UBSan and float-cast-overflow, and every run is checked for
   their reports.
-- The translation table (762 texts) passed validation in all five languages.
+- The translation table (765 texts) passed validation in all five languages.
 - The native PS5 build and complete installer passed import, runtime-link, syscall and RADV linkage checks.
 - An audit in five parts and an independent review of the fixes (see the audit report).
 
