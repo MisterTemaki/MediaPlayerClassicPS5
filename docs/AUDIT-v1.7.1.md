@@ -74,7 +74,7 @@ fixed, the rest in [residual risks](#10-residual-risks)), **Open** (not changed 
 
 | ID | Severity | Certainty | Location | Finding | State | Check |
 |---|---|---|---|---|---|---|
-| A1 | high | confirmed | `ProsperoVideo.cpp`: Present | The start guard ended at Init's own black present, before any frame was shown: a driver that hangs or dies in its first frames was tried again at every start | Fixed: the guard ends after 8 presents; the watch covers them | group 41 g, g2, g3; fail-before below |
+| A1 | high | confirmed | `ProsperoVideo.cpp`: Present | The start guard ended at Init's own black present, before any frame was shown: a driver that hangs or dies in its first frames was tried again at every start | Fixed: the guard ends after 8 presents (or hands over to the in-place guard at the first import of the decoder's buffers); the watch covers the 8 | group 41 g, g2, g3; group 34 k |
 | A2 | medium | confirmed | `gpu.cpp`: fences, acquire, WaitOneFlip | Every GPU wait is unbounded | Mitigated: the watch speaks during the start (20 s), the next start uses the CPU | group 41 g2 |
 | A3 | medium | confirmed | `ProsperoVideo.cpp`: three failed presents | A GPU lost while running was saved as a failed start: every later start on the CPU, "a previous GPU start failed" | Fixed: after a start that worked, the next start tries the GPU again | group 41 h, h2; group 34 l |
 | A4 | low | confirmed | `gpu.cpp`: Present | A failure after a successful acquire leaks the image and leaves the semaphore signalled | Open | -- |
@@ -94,10 +94,10 @@ fixed, the rest in [residual risks](#10-residual-risks)), **Open** (not changed 
 | B2 | medium | probable | The console decoder cut pictures to the size at the open after a size change | Fixed: FFmpeg takes the video from the next keyframe | group 42 e |
 | B3 | medium | confirmed | "Ended" came before the last ~0.3 s were played (ring, queued pictures, filter tail) | Fixed | group 42 f |
 | B4 | low | probable | The UI thread reads the stream list and tags while the demuxer can change them (chained Ogg, MPEG-TS) | Open | -- |
-| B5 | low | probable | An audio track chosen while the file opens raced the opener (std::terminate) | Fixed | group 42 g |
+| B5 | low | probable | An audio track chosen while the file opens raced the opener (std::terminate) | Fixed (the race itself is rare: 1.7.0 didn't crash in the test) | group 42 g |
 | B6 | low | probable | Timestamp jumps are never re-synchronised | Open | -- |
 | B7 | low | probable | Mixed interlaced streams through the deinterlacer | Open | -- |
-| B8 | low | confirmed | A huge subtitle duration converted to uint32 (undefined) | Fixed | group 42 h (UBSan) |
+| B8 | low | confirmed (code) | A huge subtitle duration converted to uint32 (undefined) | Fixed, defensively: FFmpeg's subtitle decoders set the line's end themselves, so the conversion wasn't reached in the test | group 42 h checks no sanitizer report only |
 | B9 | low | confirmed | The queues' byte counts read unlocked | Fixed (atomic) | build; suite |
 | B10 | low | confirmed | A failed packet copy queued as the end mark | Fixed | code review (out of memory only) |
 | B11 | low | hypothesis | A packet lost when the decoder answers EAGAIN | Open (unconfirmed) | -- |
@@ -157,6 +157,32 @@ fixed, the rest in [residual risks](#10-residual-risks)), **Open** (not changed 
 | E10, E11 | low | confirmed | TLS, fuzzers and some library modes not wired into tests | Open (test gaps) | -- |
 | E12-E15 | low | mixed | Link guards, a host-dependent mitrt test, a memstream lock-order hypothesis, POSIX details | Open | -- |
 
+### 4.7 The review of the fixes
+
+An independent review of the 1.7.1 changes (read-only, against the pinned libsmb2 and FFmpeg) found no HIGH issue;
+it confirmed the SMB request loop (no use-after-free or double callback in the paths traced) and the GPU start guard.
+Its findings and what was done:
+
+| ID | Severity | Finding | State |
+|---|---|---|---|
+| R1 | medium | libsmb2 keeps its contexts in a global list without a lock; 1.7.1 makes and destroys contexts on several threads | Fixed: one lock around `smb2_init_context` / `smb2_destroy_context` |
+| R2 | medium | A folder still being read could be applied late (Open Directory after another file opened; Play next after the film was played again); a second Open Directory dropped | Fixed: dropped by Open and Close; the newest request wins; Play next checks the end still stands |
+| R3 | medium | The B8 test couldn't fail: GCC's UBSan leaves out float-cast-overflow | The host build adds float-cast-overflow; the test's description corrected (see B8) |
+| R4 | low | The E4 change sent fewer failures to the console's resolver; which code the system's libc gives in a title wasn't recorded | Changed to a deny list: every failure but a bad service, socket type, family, flags or no memory still goes to it |
+| R5 | low | UI-thread joins can wait on a DNS lookup; a `.sup` from a share read on the UI thread had no limit | The `.sup` read: 20 s at most (`smb::DeadlineScope`); the DNS wait is a residual risk (E1) |
+| R6 | low | The SMB backstop timed whole requests from their start | 30 s from the socket's last activity |
+| R7 | low | libsmb2's fstat callback dereferences a reply a timeout or a destroy doesn't carry | No fstat after the open (its end-of-file is the size) |
+| R8 | low | An address with a raw '%' kept by 1.7.0 didn't match the escaped listing | Next / Previous / Play next compare the decoded name; a remembered position under the old spelling isn't carried over |
+| R9 | low | The subtitle search gave up when the folder can't be listed | Each name asked then, as 1.7.0 |
+| R10 | low | Missing `nosan` checks; fixed timings in 41g3, 42a, 42c, 43a | Fixed |
+| R11 | low | The position saved each minute does an fsync on the UI thread | Left: to watch on the console |
+
+The full suite then showed two failures in group 34 k. The 8-present guard caught a crash in the first import of the
+decoder's buffers, which the in-place guard is made for (the next start went to the CPU instead of copying the
+pictures on the GPU): the GPU start now hands over to the in-place guard at that import. And the test read the
+state line at the end of a 2 s film, which B3 now plays to its end (its last pictures are copies): it counts the
+pictures read in place at the decoder's close.
+
 ## 5. The main fixes
 
 **SMB requests that can be stopped (B1, C1, D1, D2).** libsmb2's sync calls wait in a loop of their own (a poll of a
@@ -178,9 +204,17 @@ at most), and the audio filter's tail is flushed.
 
 ## 6. Evidence
 
-Each fix has a host test that fails without it. Where the test needs no new hook, it was run against the 1.7.0 host
-binary (`MPC_HOST_BIN`); where it needs one, against the 1.7.1 code with the fix taken out. Results are in the
-[checks run](#8-checks-run).
+The new tests (groups 41, 42, 43) were run against two other builds with the 1.7.1 test script (`MPC_HOST_BIN`):
+
+- **The 1.7.0 host binary** (built from `493c5da` with the same sanitizers): 31 of the 67 checks fail, 36 pass (the
+  negative checks and the `nosan` lines). For example: with the share stalled, Close came back after 26.15 s (1.7.1:
+  1.07 s); the file browser at a share that doesn't answer took 18.30 s for 60 frames, Next on a stalled share 17.02 s
+  (1.7.1: about 1 s each); a 2 s clip ended paused at 1.73 s (1.7.1: 2.00 s, its last picture shown); the app killed
+  while playing had no position written (1.7.1: about 6 s); the issue #11 checks, the menu hint, start-pending, the
+  scrolling menu, the save failure message, the subtitle cue cap and the '@' address all fail. Two checks pass on
+  1.7.0 as well and don't prove their fix: B8 (see 4.3) and the B5 race (1.7.0 didn't crash in that run).
+- **1.7.1 with A1 and A3 taken out** (the guard ended at the first present, a GPU lost while running keeping
+  `attempts 4`): exactly the five A1 / A3 checks fail (41 g, g2, h), the other 33 pass.
 
 ## 7. Files changed
 
