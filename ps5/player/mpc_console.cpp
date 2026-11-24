@@ -61,13 +61,11 @@ int __wrap_getaddrinfo(const char* node, const char* service, const struct addri
 	const int r = __real_getaddrinfo(node, service, hints, res);
 	if (r == 0 || !node || !*node)
 		return r;
-	// (1.7.1, audit E4) only a name that couldn't be found: not a bad service, socket type or flags (up to 1.7.0 any
-	// failure was answered, as a success); and a port that is a number (a service name became port 0)
-	if (r != EAI_NONAME && r != EAI_AGAIN && r != EAI_FAIL
-#ifdef EAI_NODATA
-		&& r != EAI_NODATA
-#endif
-	)
+	// (1.7.1, audit E4) not for a request the resolver can't answer either: a bad service, socket type, family or flags,
+	// or no memory (up to 1.7.0 every failure was answered, as a success). (Review R4: the other failures still go to
+	// it, as before: which one the system's libc gives inside a title wasn't recorded.) And a port that is a number (a
+	// service name became port 0).
+	if (r == EAI_SERVICE || r == EAI_SOCKTYPE || r == EAI_BADFLAGS || r == EAI_FAMILY || r == EAI_MEMORY)
 		return r;
 	if (service && *service)
 	{

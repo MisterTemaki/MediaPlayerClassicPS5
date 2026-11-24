@@ -469,6 +469,17 @@ bool MainFrame::Loaded() const
 
 namespace
 {
+// a file in a folder's listing; on a share, by its name as the share knows it (review R8: an address kept by 1.7.0
+// with a raw '%' in a name, and the listing's %25)
+std::vector<std::string>::const_iterator FindFile(const std::vector<std::string>& files, const std::string& url)
+{
+	auto it = std::find(files.begin(), files.end(), url);
+	if (it != files.end() || url.compare(0, 6, "smb://") != 0)
+		return it;
+	const std::string name = smb::FileNameOf(url);
+	return std::find_if(files.begin(), files.end(), [&](const std::string& f) { return smb::FileNameOf(f) == name; });
+}
+
 // an address as shown: no password; an smb:// one without its user either (only the part before the server: up to
 // 1.7.0 any '@' cut it, so smb://nas/films/a@b.mkv showed as "smb://b.mkv": audit C15)
 std::string ShownAddress(const std::string& url)
@@ -1962,7 +1973,7 @@ void MainFrame::SkipBack()
 	{
 		// the previous file in the folder
 		ListFolderThen(ParentFolder(current_url_), current_url_, [this](const std::vector<std::string>& files) {
-			auto it = std::find(files.begin(), files.end(), current_url_);
+			auto it = FindFile(files, current_url_);
 			if (it != files.end() && it != files.begin())
 				Open(*(it - 1));
 			else if (stop_pos_ < 0)
@@ -1988,7 +1999,7 @@ void MainFrame::SkipForward()
 	else if (!current_url_.empty())
 	{
 		ListFolderThen(ParentFolder(current_url_), current_url_, [this](const std::vector<std::string>& files) {
-			auto it = std::find(files.begin(), files.end(), current_url_);
+			auto it = FindFile(files, current_url_);
 			if (it != files.end() && it + 1 != files.end())
 				Open(*(it + 1));
 			else
@@ -2007,12 +2018,12 @@ void MainFrame::ListFolderThen(const std::string& folder, const std::string& for
 	}
 	if (folder_job_)
 	{
-		if (folder_job_->for_url == for_url && !folder_job_->done.load())
+		if (folder_job_->folder == folder && folder_job_->for_url == for_url && !folder_job_->done.load())
 		{
 			Osd(T("Reading the network folder...")); // (R1 held: one listing, not one per repeat)
 			return;
 		}
-		DropFolderJob();
+		DropFolderJob(); // (another request: the newest wins)
 	}
 	std::unique_ptr<FolderJob> j(new FolderJob);
 	j->folder = folder;
@@ -2676,6 +2687,7 @@ void MainFrame::Open(const std::string& url, bool use_saved_pos)
 	SavePosition();
 	stop_pos_ = -1;
 	MPCPS5_STAGE(Emu, "open");
+	DropFolderJob(); // (review R2: a folder still being read for the last file: its answer isn't this one's)
 	current_url_ = url;
 	// (not for a disc's titles: dvd://cd0 names the drive, not the disc in it)
 	const double pos = use_saved_pos && s_.remember_file_pos && !disc::IsTitleUrl(url) ? s_.FilePos(url) : 0;
@@ -2710,6 +2722,7 @@ void MainFrame::OpenPlaylistItem(int i)
 
 void MainFrame::CloseMedia()
 {
+	DropFolderJob(); // (review R2)
 	SavePosition();
 	stop_pos_ = -1;
 	player_.Close();
@@ -3052,7 +3065,9 @@ void MainFrame::Tick()
 		{
 			player_.Pause(); // (1.7.1: a share's folder answers later; meanwhile the end isn't handled again)
 			ListFolderThen(ParentFolder(current_url_), current_url_, [this](const std::vector<std::string>& files) {
-				auto it = std::find(files.begin(), files.end(), current_url_);
+				if (!player_.Ended())
+					return; // (review R2: played again or sought meanwhile: not moved on)
+				auto it = FindFile(files, current_url_);
 				if (it != files.end() && it + 1 != files.end())
 					Open(*(it + 1));
 				else

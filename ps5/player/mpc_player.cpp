@@ -1622,9 +1622,16 @@ struct Player::Impl
 		// names above, each up to 15 s when the server didn't answer), the names matched as the share does (without
 		// regard to case), and the file opened by its own name
 		std::vector<smb::Entry> listing;
-		const bool on_smb = url.compare(0, 6, "smb://") == 0;
-		if (on_smb && (slash == std::string::npos || !smb::List(url.substr(0, slash), listing, nullptr)))
+		bool on_smb = url.compare(0, 6, "smb://") == 0;
+		if (on_smb && slash == std::string::npos)
 			return;
+		if (on_smb && !smb::List(url.substr(0, slash), listing, nullptr))
+		{
+			// (review R9) a share that lets the film be read but not its folder listed: each name asked, as up to 1.7.0
+			// (Close stops it: quit, and the requests' own cancel)
+			OrbisLog("[player] subtitles: the film's folder can't be listed: each name asked");
+			on_smb = false;
+		}
 		bool any = false;
 		for (const char* e : exts)
 		{
@@ -3039,6 +3046,8 @@ struct Player::Impl
 		AVIOContext* io = nullptr;
 		void* owner = nullptr;
 		std::string ioerr;
+		// (1.7.1 review R5) a .sup from a share is read whole here (File > Load Subtitle: on the UI thread): 20 s at most
+		smb::DeadlineScope deadline(20);
 		if (on_smb)
 			io = smb::OpenAvio(path, &owner, &ioerr);
 		else if (on_disc)

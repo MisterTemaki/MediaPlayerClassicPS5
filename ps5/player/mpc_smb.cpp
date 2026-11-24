@@ -111,6 +111,21 @@ bool Parse(const std::string& in, Url& u)
 // context's destroy: a connection with a request given up is "lost", never used again, only destroyed).
 
 thread_local const std::atomic<bool>* t_cancel = nullptr;
+
+// (1.7.1 review R1) libsmb2 keeps every context in a global list without a lock (smb2_init_context adds,
+// smb2_destroy_context removes): with shares now read from several threads at once (the opener, the file browser's
+// and the folder's threads, the UI), a context is made or destroyed under this lock
+std::mutex g_ctx_mu;
+smb2_context* NewContext()
+{
+	std::lock_guard<std::mutex> l(g_ctx_mu);
+	return smb2_init_context();
+}
+void DestroyContext(smb2_context* ctx)
+{
+	std::lock_guard<std::mutex> l(g_ctx_mu);
+	smb2_destroy_context(ctx);
+}
 thread_local double t_deadline = 0; // (steady seconds; 0: none) ReadFile's limit
 
 double SteadyNow()
@@ -181,7 +196,7 @@ int Run(Conn& k, Call::Kind kind, Start start, Call** result, int limit_s = 30)
 		delete c; // (nothing queued: no callback will come)
 		return q;
 	}
-	const double t0 = SteadyNow();
+	double t0 = SteadyNow();
 	while (!c->finished)
 	{
 		const double now = SteadyNow();
@@ -189,7 +204,7 @@ int Run(Conn& k, Call::Kind kind, Start start, Call** result, int limit_s = 30)
 		if (k.cancel && k.cancel->load())
 			why = kCancelled;
 		else if ((k.deadline > 0 && now > k.deadline) || now - t0 > limit_s)
-			why = kTimedOut; // (a backstop: libsmb2 times each request out at 15 s itself)
+			why = kTimedOut; // (a backstop, 30 s with no traffic: libsmb2 times each request out at 15 s itself)
 		if (why)
 		{
 			c->abandoned = true;
@@ -207,6 +222,8 @@ int Run(Conn& k, Call::Kind kind, Start start, Call** result, int limit_s = 30)
 			k.lost = true;
 			return -EIO;
 		}
+		if (r > 0 && p.revents)
+			t0 = SteadyNow(); // (review R6: the backstop counts from the socket's last activity, not the start)
 		// (revents 0 too: libsmb2 times its requests out in smb2_service)
 		if (p.fd >= 0 && smb2_service(k.ctx, r > 0 ? p.revents : 0) < 0)
 		{
@@ -249,7 +266,7 @@ void Destroy(Conn* k)
 	if (!k)
 		return;
 	if (k->ctx)
-		smb2_destroy_context(k->ctx); // (calls the callbacks of requests still queued)
+		DestroyContext(k->ctx); // (calls the callbacks of requests still queued)
 	delete k;
 }
 
@@ -269,12 +286,12 @@ void Disconnect(Conn* k)
 
 Conn* Connect(const Url& u, const std::string& share, std::string* error)
 {
-	smb2_context* ctx = smb2_init_context();
+	smb2_context* ctx = NewContext();
 	Conn* k = ctx ? new (std::nothrow) Conn : nullptr;
 	if (!k)
 	{
 		if (ctx)
-			smb2_destroy_context(ctx);
+			DestroyContext(ctx);
 		if (error)
 			*error = T("Out of memory");
 		return nullptr;
@@ -415,26 +432,13 @@ File* OpenFile(const std::string& url, std::string* error)
 	}
 	f->conn = k;
 	f->fh = fh;
-	// the size: the open's end-of-file (no round trip), else a query
+	// the size: the open's end-of-file (no round trip). (1.7.1 review R7) no fstat after it: libsmb2's fstat callback
+	// reads a reply that a timeout or the context's end doesn't carry (and the open's end-of-file is the file's size)
 	const int64_t end = smb2_lseek(k->ctx, fh, 0, SEEK_END, nullptr);
 	if (end > 0)
 		f->size = uint64_t(end);
-	else
-	{
-		const int s = Run(*k, Call::kPlain, [&](Call* x) { return smb2_fstat_async(k->ctx, fh, &x->st, Done, x); }, &c);
-		if (s == 0 && c)
-			f->size = c->st.smb2_size;
-		else
-			OrbisLog("[smb] fstat %s: %s", u.path.c_str(), s < 0 ? ErrorText(*k, s) : smb2_get_error(k->ctx));
-		delete c;
-		if (k->lost)
-		{
-			if (error)
-				*error = Fmt(T("Can't open %s: %s"), u.path.c_str(), ErrorText(*k, s));
-			CloseFile(f);
-			return nullptr;
-		}
-	}
+	else if (end < 0)
+		OrbisLog("[smb] %s: no size from the open", u.path.c_str());
 	smb2_lseek(k->ctx, fh, 0, SEEK_SET, nullptr);
 	f->max_read = std::max<uint32_t>(65536, std::min<uint32_t>(smb2_get_max_read_size(k->ctx), 8u << 20));
 	return f;
@@ -456,6 +460,16 @@ std::string EscapeName(const std::string& name)
 	for (char c : name)
 		out += c == '%' ? std::string("%25") : std::string(1, c);
 	return out;
+}
+
+DeadlineScope::DeadlineScope(double seconds) : prev_(t_deadline)
+{
+	t_deadline = SteadyNow() + seconds;
+}
+
+DeadlineScope::~DeadlineScope()
+{
+	t_deadline = prev_;
 }
 
 CancelScope::CancelScope(const std::atomic<bool>* flag) : prev_(t_cancel)

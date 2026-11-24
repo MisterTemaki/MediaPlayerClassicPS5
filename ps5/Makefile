@@ -375,7 +375,8 @@ HOST_OUT := build/host
 # the app's build of ProsperoAppPlace.cpp includes it (explicit targets: a recipe-less pattern rule adds nothing)
 $(PS5_OUT)/port/coreorbis/orbis-shims/ProsperoAppPlaceApp.o $(HOST_OUT)/port/coreorbis/orbis-shims/ProsperoAppPlaceApp.o: \
 	coreorbis/orbis-shims/ProsperoAppPlace.cpp
-HOST_SAN ?= -fsanitize=address,undefined -fno-omit-frame-pointer
+# (1.7.1 review R3) float-cast-overflow too: GCC's "undefined" leaves out a double converted out of an integer's range
+HOST_SAN ?= -fsanitize=address,undefined,float-cast-overflow -fno-omit-frame-pointer
 HOST_OPT := -O1 -g -mavx2 -fno-strict-aliasing
 HOST_DEP_INCS := -isystem $(DEPS_HOST)/include
 HOST_FLAGS_TEXT = $(strip $(HOST_CXX) $(HOST_CC) $(HOST_OPT) $(HOST_SAN) $(DEFS) $(INCS) $(HOST_DEP_INCS) $(PORT_WARN))

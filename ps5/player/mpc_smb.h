@@ -42,6 +42,20 @@ private:
 	const std::atomic<bool>* prev_;
 };
 
+// (1.7.1 review R5) the calling thread's requests (and those of a file opened under it) end at this deadline: a
+// subtitle file read whole on the UI thread
+class DeadlineScope
+{
+public:
+	explicit DeadlineScope(double seconds);
+	~DeadlineScope();
+	DeadlineScope(const DeadlineScope&) = delete;
+	DeadlineScope& operator=(const DeadlineScope&) = delete;
+
+private:
+	double prev_;
+};
+
 AVIOContext* OpenAvio(const std::string& url, void** owner, std::string* error);
 void CloseAvio(AVIOContext* io, void* owner);
 // the whole file, up to max_bytes; (1.7.1) within max_seconds (0: no limit but the requests' own 15 s each)

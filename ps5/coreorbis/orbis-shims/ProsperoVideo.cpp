@@ -919,7 +919,8 @@ void Present(int x, int y, int w, int h, bool wait_vsync)
 		const ps5gpu::Rect d = (w <= 0 || h <= 0) ? ps5gpu::Rect{0, 0, kWidth, kHeight} : ps5gpu::Rect{x, y, w, h};
 #ifndef __PROSPERO__
 		// (1.7.1) host tests of the start guard: MPCPS5_HOST_GPU_DIE_AT=n ends the app in the n-th present (a driver
-		// that dies in the first frames); MPCPS5_HOST_GPU_STALL_AT=n waits 2.5 s in it (a driver slow to show them)
+		// that dies in the first frames); MPCPS5_HOST_GPU_STALL_AT=n waits in it (MPCPS5_HOST_GPU_STALL_MS, 2.5 s: a driver
+		// slow to show them)
 		{
 			static int calls = 0;
 			calls++;
@@ -932,7 +933,10 @@ void Present(int x, int y, int w, int h, bool wait_vsync)
 				}
 			if (const char* e = getenv("MPCPS5_HOST_GPU_STALL_AT"))
 				if (calls == atoi(e))
-					usleep(2500 * 1000);
+				{
+					const char* ms = getenv("MPCPS5_HOST_GPU_STALL_MS"); // (default 2.5 s)
+					usleep(useconds_t(ms ? atoi(ms) : 2500) * 1000);
+				}
 		}
 #endif
 		bool presented = ps5gpu::Present(g.surface, d, wait_vsync);
