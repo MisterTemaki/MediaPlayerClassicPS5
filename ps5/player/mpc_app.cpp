@@ -287,6 +287,8 @@ private:
 	PlayState last_state_ = PlayState::Closed;
 	std::string current_url_;
 	double last_pos_save_ = 0;
+	double last_pos_write_ = 0, last_pos_written_ = -1; // (1.7.1, audit C4) the position on the storage
+	bool save_failure_said_ = false;					 // (1.7.1, audit C6)
 	// 1.6.4: where Stop was pressed (-1: not stopped). Stop goes back to the start, as in MPC-HC, but the file's
 	// remembered position is the place it was stopped at, until it plays again or another place is sought
 	double stop_pos_ = -1;
@@ -2441,6 +2443,14 @@ void MainFrame::Command(int id)
 			{
 				player_.Pause();
 				Osd(T("Pause"));
+				// (1.7.1, audit C4) paused: the place on the storage (the app is often closed from the home screen then)
+				if (s_.remember_file_pos)
+				{
+					SavePosition();
+					s_.Save(false);
+					last_pos_written_ = s_.FilePos(current_url_);
+					last_pos_write_ = NowSeconds();
+				}
 			}
 			break;
 		case ID_PLAY_STOP:
@@ -2913,6 +2923,19 @@ void MainFrame::TickUpdate()
 	}
 }
 
+namespace
+{
+// (host tests: MPCPS5_HOST_POS_SAVE_S, the position's times shortened)
+double PositionSeconds(double normal)
+{
+#ifndef __PROSPERO__
+	if (const char* e = getenv("MPCPS5_HOST_POS_SAVE_S"))
+		return std::max(0.5, atof(e));
+#endif
+	return normal;
+}
+} // namespace
+
 void MainFrame::Tick()
 {
 	TickUpdate();
@@ -3018,10 +3041,43 @@ void MainFrame::Tick()
 			player_.Pause();
 	}
 	const double now = NowSeconds();
-	if (Loaded() && now - last_pos_save_ > 10)
+	// (1.7.1, audit C4) the position on the storage too, each minute while a film plays: closing the app from the
+	// PS5's home screen (its usual end) ends it with nothing saved, and up to 1.7.0 the film's place was lost (and the
+	// volume and the rest since the last save)
+	static const double every = PositionSeconds(10), write_every = PositionSeconds(60);
+	if (Loaded() && now - last_pos_save_ > every)
 	{
 		last_pos_save_ = now;
 		SavePosition();
+		if (s_.remember_file_pos && player_.State() == PlayState::Playing && now - last_pos_write_ >= write_every)
+		{
+			const double fp = s_.FilePos(current_url_);
+			if (std::fabs(fp - last_pos_written_) > 5)
+			{
+				last_pos_write_ = now;
+				last_pos_written_ = fp;
+				s_.Save(false); // (no automatic backup for that: the next save makes it)
+			}
+		}
+	}
+	// (1.7.1, audit C6) a save that failed: said once (up to 1.7.0 only in the log, off by default)
+	if (!save_failure_said_ && !modal)
+	{
+		const SaveFailure why = TakeSaveFailure();
+		if (why != SaveFailure::None)
+		{
+			save_failure_said_ = true;
+			const std::string text =
+				why == SaveFailure::LegacyCredentials
+					? Fmt(T("The settings can't be saved: credentials.ini (or credentials.ini.new / .tmp) in %s, a "
+							"password file of an older version, can't be read. Move it out of that folder (over FTP) "
+							"and the settings are saved again."),
+						  OrbisRoot().c_str())
+				: why == SaveFailure::Passwords ? std::string(T("The settings can't be saved: the network passwords can't be stored."))
+												: Fmt(T("The settings can't be saved in %s. Is the storage full?"), OrbisRoot().c_str());
+			OrbisLog("[ui] settings save failed (%d): said", int(why));
+			MessageBox(text, "Media Player Classic Home Cinema", MB_OK, 3);
+		}
 	}
 }
 

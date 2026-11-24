@@ -592,6 +592,30 @@ const Entry kTable[] = {
 	{"Reading the network folder...", "Leyendo la carpeta de red...", "Lendo a pasta de rede...",
 		"Lecture du dossier réseau...", "Netzwerkordner wird gelesen..."},
 	{"cancelled", "cancelado", "cancelado", "annulé", "abgebrochen"},
+	{"The settings can't be saved: credentials.ini (or credentials.ini.new / .tmp) in %s, a password file of an older "
+	 "version, can't be read. Move it out of that folder (over FTP) and the settings are saved again.",
+		"No se puede guardar la configuración: credentials.ini (o credentials.ini.new / .tmp) en %s, un archivo de "
+		"contraseñas de una versión anterior, no se puede leer. Sáquelo de esa carpeta (por FTP) y la configuración se "
+		"guardará de nuevo.",
+		"Não é possível salvar as configurações: credentials.ini (ou credentials.ini.new / .tmp) em %s, um arquivo de "
+		"senhas de uma versão anterior, não pode ser lido. Tire-o dessa pasta (por FTP) e as configurações voltam a ser "
+		"salvas.",
+		"Impossible d'enregistrer les paramètres : credentials.ini (ou credentials.ini.new / .tmp) dans %s, un fichier "
+		"de mots de passe d'une version précédente, est illisible. Retirez-le de ce dossier (par FTP) et les paramètres "
+		"seront de nouveau enregistrés.",
+		"Die Einstellungen können nicht gespeichert werden: credentials.ini (oder credentials.ini.new / .tmp) in %s, "
+		"eine Kennwortdatei einer älteren Version, ist nicht lesbar. Verschieben Sie sie aus diesem Ordner (per FTP), "
+		"dann werden die Einstellungen wieder gespeichert."},
+	{"The settings can't be saved: the network passwords can't be stored.",
+		"No se puede guardar la configuración: no se pueden guardar las contraseñas de red.",
+		"Não é possível salvar as configurações: as senhas de rede não podem ser guardadas.",
+		"Impossible d'enregistrer les paramètres : les mots de passe réseau ne peuvent pas être stockés.",
+		"Die Einstellungen können nicht gespeichert werden: Die Netzwerkkennwörter können nicht abgelegt werden."},
+	{"The settings can't be saved in %s. Is the storage full?",
+		"No se puede guardar la configuración en %s. ¿Está lleno el almacenamiento?",
+		"Não é possível salvar as configurações em %s. O armazenamento está cheio?",
+		"Impossible d'enregistrer les paramètres dans %s. Le stockage est-il plein ?",
+		"Die Einstellungen können nicht in %s gespeichert werden. Ist der Speicher voll?"},
 	{"no answer in time", "sin respuesta a tiempo", "sem resposta a tempo", "pas de réponse à temps",
 		"keine Antwort rechtzeitig"},
 	{"Drive", "Unidad", "Unidade", "Lecteur", "Laufwerk"},

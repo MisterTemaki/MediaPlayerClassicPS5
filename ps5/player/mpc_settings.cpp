@@ -11,6 +11,7 @@
 #include "OrbisPaths.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -649,7 +650,22 @@ bool Settings::ReadFile(const std::string& path, bool migrate)
 	return settings_section;
 }
 
-bool Settings::Save() const
+namespace
+{
+std::atomic<int> g_save_failure{int(SaveFailure::None)};
+bool Failed(SaveFailure why)
+{
+	g_save_failure = int(why);
+	return false;
+}
+} // namespace
+
+SaveFailure TakeSaveFailure()
+{
+	return SaveFailure(g_save_failure.exchange(int(SaveFailure::None)));
+}
+
+bool Settings::Save(bool backup) const
 {
 	if (!credentials::Get().Pending())
 	{
@@ -664,7 +680,7 @@ bool Settings::Save() const
 	if (legacy_read_failed)
 	{
 		OrbisLog("[settings] legacy credentials could not be read; all original files were kept");
-		return false;
+		return Failed(SaveFailure::LegacyCredentials);
 	}
 
 	Secrets store;
@@ -678,11 +694,15 @@ bool Settings::Save() const
 	if (!credentials::Get().Commit(error))
 	{
 		OrbisLog("[settings] %s Settings and legacy credentials were kept.", error.c_str());
-		return false;
+		return Failed(SaveFailure::Passwords);
 	}
 	const std::string path = SettingsPath(), tmp = path + ".tmp";
 	FILE* f = fopen(tmp.c_str(), "w");
-	if (!f) return false;
+	if (!f)
+	{
+		OrbisLog("[settings] %s can't be written: %s", tmp.c_str(), strerror(errno));
+		return Failed(SaveFailure::Write);
+	}
 	auto bare = [](const std::string& u) { return Escape(Bare(u, nullptr)); };
 	fprintf(f, "; Media Player Classic PS5 settings (MPC-HC's names where it has one)\n[Settings]\n");
 	fprintf(f, "DarkMode=%d\n", dark_mode ? 1 : 0);
@@ -744,10 +764,11 @@ bool Settings::Save() const
 	{
 		unlink(tmp.c_str());
 		OrbisLog("[settings] settings could not be saved; legacy credentials were kept");
-		return false;
+		return Failed(SaveFailure::Write);
 	}
 	SyncFolder(OrbisRoot());
-	backup::AfterSave(*this); // 1.6.3 (#10): the automatic backup, when a drive is chosen
+	if (backup)
+		backup::AfterSave(*this); // 1.6.3 (#10): the automatic backup, when a drive is chosen
 	std::vector<std::string> referenced = recent;
 	for (const auto& server : servers) referenced.push_back(server.url);
 	for (const auto& favorite : favorites) referenced.push_back(favorite.url);

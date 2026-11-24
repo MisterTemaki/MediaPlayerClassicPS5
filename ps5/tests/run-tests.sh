@@ -3876,5 +3876,48 @@ rc=$(run "$T" "0:0" "120:state;130:quit" "" "$T/root/media/long.mkv")
 expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ]" "a subtitle line of 8000 hours: the film plays"
 fi
 
+if want 43; then
+echo "== 43. 1.7.1 audit: the position kept when the app is killed, a save that fails said, a huge subtitle cue, menus that scroll"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+[ -f "$MEDIA/red30.mp4" ] || ffmpeg -loglevel error -y -f lavfi -i color=c=red:size=640x360:rate=25 -t 30 -c:v libx264 \
+	-preset ultrafast -pix_fmt yuv420p "$MEDIA/red30.mp4"
+# a (audit C4): a film playing, the app killed (as the home screen's Close does): its place is in mpc-hc.ini (1.7.0:
+# written only on Stop, Close, Exit...: the place at the open, or none). (the times shortened to 2 s for the test)
+T=$(newroot t43a)
+cp "$MEDIA/red30.mp4" "$T/root/media/film.mp4"
+(MPCPS5_HOST_POS_SAVE_S=2 MPCPS5_HOST_OFFLINE=1 MPCPS5_HOST_REALTIME=1 MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew \
+	MPCPS5_HOST_DUMP_DIR=$T/dump MPCPS5_HOST_DUMP= MPCPS5_HOST_PAD=0:0 ASAN_OPTIONS=detect_leaks=0 \
+	timeout -s KILL 12 "$BIN" "$T/root/media/film.mp4" >"$T/out.txt" 2>&1) 2>/dev/null
+rc=$?
+p=$(sed -n 's/^FilePos0=.*film.mp4|\([0-9.]*\)$/\1/p' "$T/root/mpc-hc.ini")
+expect "[ $rc = 137 ] && [ -n \"$p\" ] && near ${p:-0} 8 3.5" "the app killed while a film played: its place kept (${p:-none} s)"
+# b (audit C6): settings that can't be saved (an unreadable credentials.ini.tmp of an old version): said once
+T=$(newroot t43b)
+cp "$MEDIA/red.mp4" "$T/root/media/film.mp4"
+printf 'not a credentials line\n' >"$T/root/credentials.ini.tmp"
+rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "80:key enter;100:cmd stop;130:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && [ \$(grep -c 'settings save failed (1): said' $T/root/logs/boot.log) = 1 ] && grep -q \"The settings can't be saved: credentials.ini\" $T/drawn.txt" "a save that fails (an unreadable credentials.ini.tmp): said once, with the file to move"
+nosan "$T"
+# c (audit C5): a subtitle cue of 3000 lines: no more lines drawn than the screen holds (1.7.0: a picture of 3000
+# lines, about 270 000 px tall)
+T=$(newroot t43c)
+cp "$MEDIA/red.mp4" "$T/root/media/film.mp4"
+python3 -c "
+import sys
+open(sys.argv[1], 'w').write('1\r\n00:00:00,500 --> 00:00:05,000\r\n' + '\r\n'.join('line %d' % i for i in range(3000)) + '\r\n')
+" "$T/root/media/film.srt"
+rc=$(run "$T" "0:0" "120:state;130:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T '\[subs\] 3000 lines at once: the last [0-9]* shown'" "a cue of 3000 lines: the last ones that fit drawn"
+nosan "$T"
+# d (audit C7): a menu taller than the screen (60 favorites) scrolls: Up from its first item shows the last one,
+# highlighted, on the screen (1.7.0: below the screen's bottom)
+T=$(newroot t43d)
+favs=$(for i in $(seq 0 59); do echo "Favorite$i=Favorite number $i|$T/root/media/red.mp4|0.000"; done)
+ini "$T" "$favs"
+rc=$(run "$T" "0:0;30:$OPTIONS;32:0;40:$RIGHT;42:0;50:$RIGHT;52:0;60:$RIGHT;62:0;70:$RIGHT;72:0;90:$UP;92:0" "120:quit" "85,110")
+expect "[ $rc = 0 ] && log $T 'a menu of 6[0-9] items taller than the screen: it scrolls' && $REGION $T/dump/flip00110.ppm 0 700 1920 1076 145 201 247 6 3000 >/dev/null && ! $REGION $T/dump/flip00085.ppm 0 700 1920 1076 145 201 247 6 3000 >/dev/null" "60 favorites: the menu scrolls, Up from the top shows the last one highlighted"
+nosan "$T"
+fi
+
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]

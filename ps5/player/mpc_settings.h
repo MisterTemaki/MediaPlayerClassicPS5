@@ -280,7 +280,8 @@ struct Settings
 	// 1.6.3 (#10): the same reading of another file (a backup): no credential files read or migrated, any password
 	// in its addresses dropped. False when the file can't be read or has no [Settings] section.
 	bool LoadFile(const std::string& path);
-	bool Save() const;
+	// (1.7.1) backup false: the automatic backup left for the next save (the position saved while a film plays)
+	bool Save(bool backup = true) const;
 private:
 	bool ReadFile(const std::string& path, bool migrate);
 public:
@@ -288,6 +289,17 @@ public:
 	double FilePos(const std::string& url) const;
 	void SetFilePos(const std::string& url, double pos);
 };
+
+// (1.7.1, audit C6) why the last save failed, once ("" when it didn't, or when it was taken already): the app says it
+// (up to 1.7.0 only the log did, off by default: a settings file never written again, nothing said)
+enum class SaveFailure
+{
+	None,
+	LegacyCredentials, // credentials.ini (.new, .tmp) of 1.2.1-1.6.1 there but unreadable
+	Passwords,		   // the password store couldn't be written
+	Write			   // mpc-hc.ini couldn't be written (the storage full?)
+};
+SaveFailure TakeSaveFailure();
 
 Settings& AppSettings();
 std::string SettingsPath();

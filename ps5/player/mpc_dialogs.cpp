@@ -2258,6 +2258,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 		if (!AppSettings().Save())
 		{
 			// the backup would be the file as it was before
+			TakeSaveFailure(); // (said here: not again by the app)
 			MessageBox(T("The settings couldn't be saved, so they weren't backed up."), T("Backup"), MB_OK, 3);
 			return;
 		}
@@ -2326,6 +2327,7 @@ void ShowOptionsDialog(std::function<void()> applied, OptionsPage start)
 					o->applied(); // applied and saved
 				if (!st.Save())
 				{
+					TakeSaveFailure(); // (said here: not again by the app)
 					MessageBox(T("The imported settings are in use, but they couldn't be saved: they'll be lost when the "
 								 "app closes."),
 						T("Import"), MB_OK, 3);

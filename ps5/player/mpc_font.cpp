@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <set>
 #include <tuple>
 #include <unordered_map>
@@ -984,7 +985,9 @@ Font& SubtitleFontOfSize(int em, bool bold)
 	return SubFontFor(g_sub_face, em, bold);
 }
 
-int RenderSubtitleText(const SubtitleStyle& st, const std::vector<std::string>& in_lines, const std::vector<bool>& in_italic,
+namespace
+{
+int RenderSubtitleTextAll(const SubtitleStyle& st, const std::vector<std::string>& in_lines, const std::vector<bool>& in_italic,
 	int max_w, Image& img)
 {
 	bool found = true;
@@ -997,11 +1000,24 @@ int RenderSubtitleText(const SubtitleStyle& st, const std::vector<std::string>& 
 			lines.push_back(w);
 			italic.push_back(li < in_italic.size() && in_italic[li]);
 		}
+	// (1.7.1, audit C5) no more lines than the screen holds (the newest: the last), no wider than the screen: a cue of
+	// thousands of line breaks (a broken file) made a picture of gigabytes (the app ended) or stalled the screen
+	const size_t max_lines = size_t(std::max(1, 1080 / std::max(1, f.Height())));
+	if (lines.size() > max_lines)
+	{
+		static bool said = false;
+		if (!said)
+			OrbisLog("[subs] %zu lines at once: the last %zu shown (once per session)", lines.size(), max_lines);
+		said = true;
+		lines.erase(lines.begin(), lines.end() - long(max_lines));
+		italic.erase(italic.begin(), italic.end() - long(max_lines));
+	}
 	const int outline = std::max(0, st.outline), shadow = std::max(0, st.shadow);
 	std::vector<int> lw(lines.size());
 	int tw = 0;
 	for (size_t i = 0; i < lines.size(); i++)
 		tw = std::max(tw, lw[i] = f.Measure(lines[i]));
+	tw = std::min(tw, std::max(max_w, 1920)); // (a word wider than that is cut at the picture's edge)
 	const int slant = f.Height() / 5; // room for a slanted line
 	// the opaque box's border around each line (VSFilter: the outline's width)
 	const int border = st.box ? std::max(outline, std::max(2, f.Height() / 10)) : 0;
@@ -1108,6 +1124,23 @@ int RenderSubtitleText(const SubtitleStyle& st, const std::vector<std::string>& 
 			px[i] = c[0] | (c[1] << 8) | (c[2] << 16) | (a << 24);
 		}
 	return pad;
+}
+} // namespace
+
+int RenderSubtitleText(const SubtitleStyle& st, const std::vector<std::string>& in_lines, const std::vector<bool>& in_italic,
+	int max_w, Image& img)
+{
+	// (1.7.1, audit C5) on the UI thread: an allocation that fails shows no line rather than ending the app
+	try
+	{
+		return RenderSubtitleTextAll(st, in_lines, in_italic, max_w, img);
+	}
+	catch (const std::bad_alloc&)
+	{
+		OrbisLog("[subs] no memory for the subtitle's picture: not shown");
+		img = Image();
+		return 0;
+	}
 }
 
 } // namespace mpc

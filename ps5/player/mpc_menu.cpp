@@ -4,6 +4,8 @@
 
 #include "mpc_menu.h"
 
+#include "OrbisPaths.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -24,6 +26,14 @@ int Gutter()
 	return ScaleX(30);
 }
 
+// (1.7.1, audit C7) a level taller than the screen scrolls, as Windows' menus do: arrows above and below its items,
+// the highlight kept in sight (Up from the top: the last item, shown). Up to 1.7.0 it ran off the bottom (a Blu-ray's
+// 30 subtitle tracks, a long chapter list, many favorites; at 200% the context menu's Exit).
+int ArrowH()
+{
+	return ScaleY(16);
+}
+
 struct Level
 {
 	std::vector<MenuItem> items;
@@ -31,7 +41,29 @@ struct Level
 	int hot = -1;
 	int open_sub = -1; // the item whose submenu is open (the next level)
 	double hot_t = 0;
+	bool scrolls = false;
+	int scroll = 0;	   // the first item shown
+	int arrow = 0;	   // the pointer on the up (-1) or down (1) arrow
+	double scroll_t = 0; // the last step it scrolled by the pointer resting there
 };
+
+int ItemHeight(const MenuItem& it);
+int ContentTop(const Level& l)
+{
+	return l.r.top + ScaleY(3) + (l.scrolls ? ArrowH() : 0);
+}
+int ContentBottom(const Level& l)
+{
+	return l.r.bottom - ScaleY(3) - (l.scrolls ? ArrowH() : 0);
+}
+CRect UpArrow(const Level& l)
+{
+	return CRect(l.r.left + 1, l.r.top + ScaleY(3), l.r.right - 1, l.r.top + ScaleY(3) + ArrowH());
+}
+CRect DownArrow(const Level& l)
+{
+	return CRect(l.r.left + 1, l.r.bottom - ScaleY(3) - ArrowH(), l.r.right - 1, l.r.bottom - ScaleY(3));
+}
 
 class MenuTracker;
 MenuTracker* g_active = nullptr;
@@ -59,12 +91,63 @@ int Height(const std::vector<MenuItem>& items)
 	return h;
 }
 
+int ItemHeight(const MenuItem& it)
+{
+	return it.IsSeparator() ? SepH() : ItemH();
+}
+
 CRect ItemRect(const Level& l, int i)
 {
-	int y = l.r.top + ScaleY(3);
-	for (int k = 0; k < i; k++)
-		y += l.items[k].IsSeparator() ? SepH() : ItemH();
-	return CRect(l.r.left + ScaleX(2), y, l.r.right - ScaleX(2), y + (l.items[i].IsSeparator() ? SepH() : ItemH()));
+	int y = ContentTop(l);
+	for (int k = l.scroll; k < i; k++)
+		y += ItemHeight(l.items[k]);
+	for (int k = i; k < l.scroll; k++)
+		y -= ItemHeight(l.items[k]);
+	return CRect(l.r.left + ScaleX(2), y, l.r.right - ScaleX(2), y + ItemHeight(l.items[i]));
+}
+
+// the item wholly between the arrows (always, when the level doesn't scroll)
+bool Visible(const Level& l, int i)
+{
+	if (!l.scrolls)
+		return true;
+	const CRect r = ItemRect(l, i);
+	return r.top >= ContentTop(l) && r.bottom <= ContentBottom(l);
+}
+
+int MaxScroll(const Level& l)
+{
+	int h = 0, s = int(l.items.size());
+	const int room = ContentBottom(l) - ContentTop(l);
+	while (s > 0 && h + ItemHeight(l.items[s - 1]) <= room)
+		h += ItemHeight(l.items[--s]);
+	return s;
+}
+
+void ScrollBy(Level& l, int d)
+{
+	l.scroll = std::max(0, std::min(MaxScroll(l), l.scroll + d));
+}
+
+void EnsureVisible(Level& l, int i)
+{
+	if (!l.scrolls || i < 0)
+		return;
+	if (i < l.scroll)
+		l.scroll = i;
+	while (!Visible(l, i) && l.scroll < i)
+		l.scroll++;
+}
+
+void DrawArrow(CDC& dc, const CRect& r, bool up, bool enabled)
+{
+	const int cx = r.CenterPoint().x, cy = r.CenterPoint().y, s = ScaleX(4);
+	const COLORREF c = enabled ? sys::WindowText : sys::MenuDisabled;
+	for (int k = 0; k <= s; k++)
+	{
+		const int y = up ? cy - s / 2 + k : cy + s / 2 - k;
+		dc.FillSolidRect(CRect(cx - k, y, cx + k + 1, y + 1), c);
+	}
 }
 
 void DrawGlyphCheck(CDC& dc, const CRect& cell, bool radio, COLORREF c)
@@ -107,8 +190,15 @@ void DrawLevel(CDC& dc, const Level& l)
 	dc.FillSolidRect(l.r, sys::MenuPopup);
 	dc.FrameRect(l.r, sys::MenuPopupBorder);
 	const Font& f = UiFont();
+	if (l.scrolls)
+	{
+		DrawArrow(dc, UpArrow(l), true, l.scroll > 0);
+		DrawArrow(dc, DownArrow(l), false, l.scroll < MaxScroll(l));
+	}
 	for (int i = 0; i < int(l.items.size()); i++)
 	{
+		if (!Visible(l, i))
+			continue;
 		const MenuItem& it = l.items[i];
 		const CRect r = ItemRect(l, i);
 		if (it.IsSeparator())
@@ -165,8 +255,14 @@ public:
 	{
 		Level l;
 		l.items = items;
-		const int w = Width(items), h = Height(items);
+		const int w = Width(items);
+		int h = Height(items);
 		const CRect screen = WindowManager::Get().screen;
+		if (h > screen.Height())
+		{
+			l.scrolls = true;
+			h = screen.Height();
+		}
 		if (beside)
 		{
 			x = beside->right - ScaleX(3);
@@ -182,6 +278,8 @@ public:
 		if (keyboard)
 			l.hot = NextEnabled(l, -1, 1);
 		levels.push_back(l);
+		if (l.scrolls)
+			OrbisLog("[ui] a menu of %zu items taller than the screen: it scrolls", items.size());
 	}
 
 	static int NextEnabled(const Level& l, int from, int dir)
@@ -214,6 +312,22 @@ public:
 			if (!keyboard && l.hot >= 0 && l.items[l.hot].popup && l.items[l.hot].enabled && l.open_sub != l.hot &&
 				NowSeconds() - l.hot_t > 0.35)
 				OpenSub(int(levels.size()) - 1);
+		}
+		// the pointer resting on a scrolling level's arrow: an item every 80 ms (the deeper levels close)
+		for (size_t li = 0; li < levels.size(); li++)
+		{
+			Level& l = levels[li];
+			if (l.scrolls && l.arrow && NowSeconds() - l.scroll_t > 0.08)
+			{
+				l.scroll_t = NowSeconds();
+				ScrollBy(l, l.arrow);
+				if (li + 1 < levels.size())
+				{
+					levels.resize(li + 1);
+					levels.back().open_sub = -1;
+					break;
+				}
+			}
 		}
 		for (const auto& l : levels)
 			DrawLevel(dc, l);
@@ -257,13 +371,20 @@ public:
 			case InputEvent::MouseMove:
 			{
 				keyboard = false;
+				for (Level& l : levels)
+					l.arrow = 0;
 				for (int li = int(levels.size()) - 1; li >= 0; li--)
 				{
 					Level& l = levels[li];
 					if (!l.r.PtInRect(ev.x, ev.y))
 						continue;
+					if (l.scrolls && (UpArrow(l).PtInRect(ev.x, ev.y) || DownArrow(l).PtInRect(ev.x, ev.y)))
+					{
+						l.arrow = UpArrow(l).PtInRect(ev.x, ev.y) ? -1 : 1;
+						return true;
+					}
 					for (int i = 0; i < int(l.items.size()); i++)
-						if (ItemRect(l, i).PtInRect(ev.x, ev.y))
+						if (Visible(l, i) && ItemRect(l, i).PtInRect(ev.x, ev.y))
 						{
 							if (l.hot != i)
 							{
@@ -288,8 +409,15 @@ public:
 					Level& l = levels[li];
 					if (!l.r.PtInRect(ev.x, ev.y))
 						continue;
+					if (l.scrolls && (UpArrow(l).PtInRect(ev.x, ev.y) || DownArrow(l).PtInRect(ev.x, ev.y)))
+					{
+						ScrollBy(l, UpArrow(l).PtInRect(ev.x, ev.y) ? -3 : 3);
+						levels.resize(li + 1);
+						levels.back().open_sub = -1;
+						return true;
+					}
 					for (int i = 0; i < int(l.items.size()); i++)
-						if (ItemRect(l, i).PtInRect(ev.x, ev.y))
+						if (Visible(l, i) && ItemRect(l, i).PtInRect(ev.x, ev.y))
 						{
 							Activate(li, i);
 							return true;
@@ -299,6 +427,19 @@ public:
 				// outside: closes (a click on the menu bar item that opened it too)
 				Finish(0);
 				return true;
+			case InputEvent::Wheel:
+			{
+				// (the right stick) the deepest scrolling level
+				for (int li = int(levels.size()) - 1; li >= 0; li--)
+					if (levels[li].scrolls)
+					{
+						ScrollBy(levels[li], -ev.wheel * 3);
+						levels.resize(li + 1);
+						levels.back().open_sub = -1;
+						break;
+					}
+				return true;
+			}
 			case InputEvent::KeyDown:
 			{
 				keyboard = true;
@@ -307,9 +448,11 @@ public:
 				{
 					case Key::Up:
 						l.hot = NextEnabled(l, l.hot < 0 ? 0 : l.hot, -1);
+						EnsureVisible(l, l.hot);
 						return true;
 					case Key::Down:
 						l.hot = NextEnabled(l, l.hot, 1);
+						EnsureVisible(l, l.hot);
 						return true;
 					case Key::Right:
 						if (l.hot >= 0 && l.items[l.hot].popup && l.items[l.hot].enabled)
