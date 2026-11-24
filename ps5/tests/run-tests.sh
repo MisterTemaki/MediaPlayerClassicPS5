@@ -3690,10 +3690,46 @@ nosan "$T"
 # f: the GPU start slow to come back: after the watch's time, the log says so and a toast tells what to do
 T=$(newroot t41f)
 rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_INIT_DELAY_MS=2500 MPCPS5_HOST_GPU_SLOW_S=1 run "$T" "0:0" "30:quit" "")
-expect "[ $rc = 0 ] && log $T 'GPU start: still in the driver after 1 s' && log $T '\[notify\] \"Media Player Classic PS5: the video is slow to start' && log $T 'renderer: GPU'" "the GPU start slow: logged and a toast (the start goes on)"
+expect "[ $rc = 0 ] && log $T 'GPU start: no frames on the screen after 1 s' && log $T '\[notify\] \"Media Player Classic PS5: the video is slow to start' && log $T 'renderer: GPU'" "the GPU start slow: logged and a toast (the start goes on)"
 T2=$(newroot t41f2)
 rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_SLOW_S=5 run "$T2" "0:0" "30:quit" "")
-expect "[ $rc = 0 ] && ! log $T2 'still in the driver' && ! log $T2 'video is slow to start' && log $T2 'renderer: GPU'" "a GPU start in time: nothing said"
+expect "[ $rc = 0 ] && ! log $T2 'no frames on the screen' && ! log $T2 'video is slow to start' && log $T2 'renderer: GPU'" "a GPU start in time: nothing said"
+nosan "$T"
+# g (audit A1): a driver that dies in its first frames (the 3rd present: after Init's own black screen): the start guard
+# still stands, so the next start is on the CPU (1.7.0 ended the guard at the first present: the GPU was tried again
+# at every start); a stall there: the watch speaks
+T=$(newroot t41g)
+cp "$MEDIA/red30.mp4" "$T/root/media/film.mp4"
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_DIE_AT=3 run "$T" "0:0" "60:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 3 ] && log $T 'the app ends in GPU present 3' && ! log $T 'GPU start: variant [0-9] works' && [ -e $T/root/logs/gpu-starting ] && [ -e $T/root/logs/start-pending ]" "a start that dies in the GPU's 3rd present: the guard's marker and start-pending left (exit $rc)"
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "60:state;70:quit" "50" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'CPU (a previous GPU start failed' && state $T 1 | grep -q ' gpu 0 ' && $CHECK $T/dump/flip00050.ppm 960 400 red >/dev/null && log $T \"didn't reach the screen\"" "... the next start: the CPU draws, and its boot.log is written with Debug logs off"
+T2=$(newroot t41g2)
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_STALL_AT=4 MPCPS5_HOST_GPU_SLOW_S=1 run "$T2" "0:0" "60:quit" "")
+expect "[ $rc = 0 ] && log $T2 'GPU start: no frames on the screen after 1 s' && log $T2 'video is slow to start' && log $T2 'GPU start: variant [0-9] works'" "a stall in the 4th present: the watch speaks, then the start counts as working"
+T3=$(newroot t41g3)
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_STALL_AT=20 MPCPS5_HOST_GPU_SLOW_S=1 run "$T3" "0:0" "60:quit" "")
+expect "[ $rc = 0 ] && ! log $T3 'no frames on the screen' && log $T3 'GPU start: variant [0-9] works'" "... a stall after the start (the 20th present): not the start's watch"
+nosan "$T2"
+# h (audit A3): the GPU lost while running (presents fail from the 40th): the CPU takes over and the next start tries
+# the GPU again (1.7.0: attempts 4, every later start on the CPU "a previous GPU start failed")
+T=$(newroot t41h)
+cp "$MEDIA/red30.mp4" "$T/root/media/film.mp4"
+rc=$(MPCPS5_HOST_GPU_FAIL_AT=40 MPCPS5_HOST_GPU=1 run "$T" "0:0" "80:state;90:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && log $T 'three presents failed in a row' && log $T 'lost while running: the next start tries it again' && grep -q '^attempts 0' $T/root/logs/gpu-attempts && ! grep -q '^works 0' $T/root/logs/gpu-attempts && state $T 1 | grep -q ' gpu 0 '" "the GPU lost while running: gpu-attempts back to 'attempts 0' with the working variant"
+rc=$(MPCPS5_HOST_GPU=1 run "$T" "0:0" "50:state;60:quit" "" "$T/root/media/film.mp4")
+expect "[ $rc = 0 ] && ! log $T 'a previous GPU start failed' && state $T 1 | grep -q ' gpu 1 '" "... the next start draws with the GPU"
+T2=$(newroot t41h2)
+rc=$(MPCPS5_HOST_GPU_FAIL_AT=2 MPCPS5_HOST_GPU=1 run "$T2" "0:0" "60:state;70:quit" "")
+expect "[ $rc = 0 ] && log $T2 'three presents failed in a row' && ! log $T2 'lost while running' && grep -q '^attempts 4' $T2/root/logs/gpu-attempts" "lost during the start (presents 2-4): the next start on the CPU, as before"
+nosan "$T"
+# i (audit A7): the video fails to start (no scan-out memory) with Debug logs off: the toast doesn't point to a
+# boot.log that isn't written; start-pending stays, and the next start writes boot.log
+T=$(newroot t41i)
+rc=$(MPCPS5_HOST_DIRECT_MAX_MIB=1 MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "60:quit" "")
+expect "[ $rc = 1 ] && [ ! -e $T/root/logs/boot.log ] && grep -q 'video failed to start. Open the app again: the next start writes .*/logs/boot.log' $T/out.txt && [ -e $T/root/logs/start-pending ]" "video failed, logs off: the toast says the next start writes boot.log (exit $rc)"
+rc=$(MPCPS5_HOST_DIRECT_MAX_MIB=1 MPCPS5_LOGS_DEFAULT= run "$T" "0:0" "60:quit" "")
+expect "[ $rc = 1 ] && log $T \"didn't reach the screen\" && log $T 'video init failed' && log $T 'video failed to start (see .*/logs/boot.log)'" "... the next start: boot.log written, and the toast names it"
 nosan "$T"
 fi
 

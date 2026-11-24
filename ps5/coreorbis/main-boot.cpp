@@ -198,7 +198,15 @@ int Run(int argc, char** argv)
 	if (!ps5video::Init())
 	{
 		OrbisLog("[boot] video init failed");
-		ProsperoNotify("Media Player Classic PS5: video failed to start (see %s/logs/boot.log)", OrbisRoot().c_str());
+		// (1.7.1, audit A7) boot.log only when it's being written: Debug logs is off by default. logs/start-pending stays
+		// (this start didn't reach the screen), so the next start writes boot.log anyway
+		if (OrbisLogEnabled())
+			ProsperoNotify("Media Player Classic PS5: video failed to start (see %s/logs/boot.log)", OrbisRoot().c_str());
+		else if (have_data)
+			ProsperoNotify("Media Player Classic PS5: video failed to start. Open the app again: the next start writes "
+						   "%s/logs/boot.log", OrbisRoot().c_str());
+		else
+			ProsperoNotify("Media Player Classic PS5: video failed to start");
 		return 1;
 	}
 	OrbisLog("[boot] splash screen hidden: %x", unsigned(sceSystemServiceHideSplashScreen()));

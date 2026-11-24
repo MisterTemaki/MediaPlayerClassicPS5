@@ -28,6 +28,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -435,6 +436,9 @@ bool WriteGpuAttempts(int attempts, int works)
 	return false;
 }
 int g_gpu_variant = 0, g_gpu_works = 0;
+// (1.7.1, audit A1) presents before a GPU start counts as working: Init's black screen, then the window's first frames
+// (more than the swapchain's images, so one acquire needed a flip that completed)
+constexpr int kGuardPresents = 8;
 const char* GpuVariantName(int v)
 {
 	switch (v)
@@ -467,8 +471,9 @@ extern "C" void MpcHostGpuFlip(const uint8_t* bgra, int w, int h, bool wait_vsyn
 // VideoRenderer= in mpc-hc.ini (read here: the video comes up before the settings are): 0 the GPU (the default), 1 the
 // CPU. Host builds: the GPU only with MPCPS5_HOST_GPU=1 (the other tests keep the CPU path they were written for).
 // (1.7.1, issue #11) the GPU start watched: a driver that never answers leaves the console's launch splash up with
-// nothing said. After kGpuSlowSeconds a toast tells what to do (the next start skips the GPU: gpu-attempts above) and
-// boot.log gets the lines so far onto the storage. The driver's call can't be stopped; this only speaks.
+// nothing said. After 20 s a toast tells what to do (the next start skips the GPU: gpu-attempts above) and boot.log gets
+// the lines so far onto the storage. The driver's call can't be stopped; this only speaks. (1.7.1, audit A1/A2) it
+// watches the driver's set-up and the first kGuardPresents presents: a wait that never ends there is spoken of too.
 class GpuStartWatch
 {
 public:
@@ -486,7 +491,7 @@ public:
 				if (cv_.wait_for(lock, std::chrono::seconds(secs), [this] { return done_; }))
 					return;
 				lock.unlock();
-				OrbisLog("[video] GPU start: still in the driver after %d s", secs);
+				OrbisLog("[video] GPU start: no frames on the screen after %d s (still in the driver)", secs);
 				OrbisLogSync();
 				ProsperoNotify("Media Player Classic PS5: the video is slow to start. If the screen stays like this, close "
 							   "the app and open it again: the next start uses the software renderer.");
@@ -514,6 +519,14 @@ private:
 	bool done_ = false;
 	std::thread t_;
 };
+
+// (1.7.1) the watch lives from the driver's call until the start is over: GpuReachedScreen, a failed Init, the GPU lost,
+// Shutdown (EndGpuStartWatch)
+std::unique_ptr<GpuStartWatch> g_gpu_watch;
+void EndGpuStartWatch()
+{
+	g_gpu_watch.reset();
+}
 
 bool WantGpu(std::string& why)
 {
@@ -662,7 +675,13 @@ bool InitGpu()
 	setting_up = true;
 	bool ok;
 	{
-		GpuStartWatch watch; // (1.7.1)
+		try
+		{
+			g_gpu_watch.reset(new GpuStartWatch()); // (1.7.1: until the start is over)
+		}
+		catch (const std::bad_alloc&)
+		{
+		}
 #ifdef __PROSPERO__
 		ok = ps5gpu::Init(kWidth, kHeight, false, 0, 0);
 #else
@@ -678,6 +697,7 @@ bool InitGpu()
 	MPCPS5_STAGE(Boot, "video"); // (the boot stage again, not the GPU's last line)
 	if (!ok)
 	{
+		EndGpuStartWatch();
 		ps5gpu::GuardEnd();
 		g.gpu_guard = false;
 		g.renderer = "CPU (the GPU couldn't be set up: see the [gpu] lines)";
@@ -843,6 +863,7 @@ int GpuStartVariant()
 
 void Shutdown()
 {
+	EndGpuStartWatch();
 	// (test13) an orderly exit before the first frame was on the screen (the user quit at once) isn't a start that died:
 	// the marker goes, the count stays
 	if (g.gpu_guard)
@@ -896,6 +917,24 @@ void Present(int x, int y, int w, int h, bool wait_vsync)
 	if (g.gpu)
 	{
 		const ps5gpu::Rect d = (w <= 0 || h <= 0) ? ps5gpu::Rect{0, 0, kWidth, kHeight} : ps5gpu::Rect{x, y, w, h};
+#ifndef __PROSPERO__
+		// (1.7.1) host tests of the start guard: MPCPS5_HOST_GPU_DIE_AT=n ends the app in the n-th present (a driver
+		// that dies in the first frames); MPCPS5_HOST_GPU_STALL_AT=n waits 2.5 s in it (a driver slow to show them)
+		{
+			static int calls = 0;
+			calls++;
+			if (const char* e = getenv("MPCPS5_HOST_GPU_DIE_AT"))
+				if (calls == atoi(e))
+				{
+					OrbisLog("[video] host test: the app ends in GPU present %d", calls);
+					OrbisLogSync();
+					_exit(3);
+				}
+			if (const char* e = getenv("MPCPS5_HOST_GPU_STALL_AT"))
+				if (calls == atoi(e))
+					usleep(2500 * 1000);
+		}
+#endif
 		bool presented = ps5gpu::Present(g.surface, d, wait_vsync);
 #ifndef __PROSPERO__
 		// host tests: MPCPS5_HOST_GPU_FAIL_AT=n: from the n-th present on the GPU's presents fail (the GPU lost)
@@ -908,10 +947,15 @@ void Present(int x, int y, int w, int h, bool wait_vsync)
 		{
 			g.gpu_fails = 0;
 			g.gpu_presents++;
-			if (g.gpu_guard)
+			// (1.7.1, audit A1) the start is over after kGuardPresents presents, not the first: the console's Present
+			// only queues a frame (its fence is waited at the next one, the flip comes later), and the first one is
+			// Init's own black screen. Up to 1.7.0 the guard ended there, so a driver that hangs or crashes in the first
+			// frames (a wait, the swapchain's acquire, the first flip) was marked as working and tried at every launch.
+			if (g.gpu_guard && g.gpu_presents >= kGuardPresents)
 			{
-				GpuReachedScreen(); // the first frame is on screen
+				GpuReachedScreen(); // frames have reached the screen
 				g.gpu_guard = false;
+				EndGpuStartWatch();
 			}
 			return;
 		}
@@ -919,15 +963,26 @@ void Present(int x, int y, int w, int h, bool wait_vsync)
 		if (++g.gpu_fails < 3)
 			return;
 		OrbisLog("[video] GPU: three presents failed in a row: back to the CPU and the scan-out buffers");
+		// (a driver that hangs in its shutdown leaves the next start on the CPU...)
 		WriteGpuAttempts(4, 0);
+		EndGpuStartWatch();
 		if (g.gpu_lost_hook)
 			g.gpu_lost_hook(); // the player's side: pictures copied again, the decoder's imports let go
 		ps5gpu::Shutdown();
 		g.gpu = false;
+		const bool in_start = g.gpu_guard;
 		if (g.gpu_guard)
 		{
 			ps5gpu::GuardEnd();
 			g.gpu_guard = false;
+		}
+		// (1.7.1, audit A3) ...but one that came back: the start had worked, so the next start tries the GPU again (up to
+		// 1.7.0 a GPU lost while running left every later start on the CPU, as "a previous GPU start failed"); lost
+		// during the start: the next start is on the CPU, as before
+		if (!in_start)
+		{
+			WriteGpuAttempts(0, g_gpu_works);
+			OrbisLog("[video] GPU: lost while running: the next start tries it again");
 		}
 		g.renderer = "CPU (the GPU failed while running)";
 		g.ok = false;
