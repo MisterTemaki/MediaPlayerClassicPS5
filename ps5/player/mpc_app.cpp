@@ -2149,6 +2149,13 @@ void MainFrame::Command(int id)
 			player_.Open(f.url, f.pos);
 			s.AddRecent(f.url);
 			opened_ok_ = false;
+			// (1.7.1, audit C9) what Open() resets for a new file: the rate (the next Increase Rate went from the old
+			// file's), the jumps, the subtitle picture, the playlist's selection (a long list's row past the end)
+			ForgetJumps();
+			sub_cache_.key.clear();
+			rate_ = 1.0;
+			pl_sel_ = pl_cur_;
+			pl_top_ = 0;
 		}
 		return;
 	}

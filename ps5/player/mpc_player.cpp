@@ -97,7 +97,7 @@ struct PacketQueue
 	std::mutex mu;
 	std::condition_variable cv;
 	std::deque<QPacket> q;
-	size_t bytes = 0;
+	std::atomic<size_t> bytes{0}; // (1.7.1, audit B9: the demuxer reads it without the lock)
 	int64_t duration = 0; // in the stream's time base
 	// (test7 review) kept as packets come and go, for answers without a walk over the queue: where the last one queued
 	// ends, and the queued keyframes' times in order (pts, or dts without one; AV_NOPTS_VALUE without either)
@@ -1767,7 +1767,7 @@ struct Player::Impl
 			constexpr size_t limit = size_t(64) << 20;
 #endif
 			size_t cap = limit * 3 / 2;
-			const size_t queued = vq.bytes + aq.bytes;
+			const size_t queued = vq.bytes.load() + aq.bytes.load();
 			demux_peak = std::max(demux_peak, queued);
 			bool audio_short = false;
 			if (astream >= 0 && vstream >= 0 && !eof && !paused.load() && !SeekPending() && !show_after_seek.load() &&
@@ -1777,7 +1777,7 @@ struct Player::Impl
 									aq.Seconds(ic->streams[astream]->time_base);
 				audio_short = held < 1.0;
 			}
-			const bool normal_full = (vq.bytes + aq.bytes) > limit ||
+			const bool normal_full = (vq.bytes.load() + aq.bytes.load()) > limit ||
 									 ((vstream < 0 || vq.Count() > 300) && (astream < 0 || aq.Count() > 500));
 			if (audio_short && normal_full)
 			{
@@ -1904,7 +1904,7 @@ struct Player::Impl
 				if (it != sdecs.end() && PgsPasses(idx, pkt))
 					DecodeSubtitle(idx, it->second, pkt);
 			}
-			demux_peak = std::max(demux_peak, vq.bytes + aq.bytes);
+			demux_peak = std::max(demux_peak, vq.bytes.load() + aq.bytes.load());
 			av_packet_unref(pkt);
 		}
 		av_packet_free(&pkt);

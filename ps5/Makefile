@@ -513,5 +513,8 @@ bench: $(BENCH_OUT)/mpc-gpu-bench
 clean:
 	rm -rf build/ps5 build/host build/app build/dist build/bench build/gen
 
+# (1.7.1, audit D6) a step that fails (a check after it included) leaves no output for the next make to take as good
+.DELETE_ON_ERROR:
+
 .PHONY: test-mitrt ps5 host test test-audit test-theme test-credentials test-credentials-ui send app dist clean deps deps-subs deps-disc bench
 .SECONDARY:

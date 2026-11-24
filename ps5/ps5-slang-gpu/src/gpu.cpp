@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <unistd.h>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -1179,7 +1180,9 @@ void SavePipelineCache()
 	FILE* f = fopen(tmp.c_str(), "wb");
 	if (!f)
 		return;
-	const bool ok = fwrite(data.data(), 1, n, f) == n;
+	// (MPC 1.7.1, audit A11) on the storage before it takes the old one's place (a power cut: the old cache, not a
+	// partial one read at the next start)
+	const bool ok = fwrite(data.data(), 1, n, f) == n && fflush(f) == 0 && fsync(fileno(f)) == 0;
 	if (fclose(f) == 0 && ok && rename(tmp.c_str(), path.c_str()) == 0)
 	{
 		g.pcache_saved = n;

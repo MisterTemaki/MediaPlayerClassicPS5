@@ -11,6 +11,7 @@ static int driver_calls = 0, released_queues = 0, failed = 0;
 const std::string& OrbisRoot() { return root; }
 void OrbisLog(const char*, ...) {}
 void OrbisLogSync() {}
+void ProsperoNotify(const char*, ...) {} // (1.7.1: the GPU start watch's toast)
 namespace crashlog {
 bool ImportsBound(const char*, const char**) { return true; }
 void Stage(Area, const char*) {}
