@@ -2730,7 +2730,9 @@ expect "grep -q \"didn't get past its first picture read in place: this one copi
 rc=$(PS5GPU_TEST_OFFSCREEN_IN_FLIGHT=1 MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "40:state;42:quit" "35" "$T/root/media/hdr_pq.mkv")
 GL=$(grep -o 'in-place start guard cleared: present [0-9]*, the first in-place picture taken after present [0-9]*' $T/root/logs/boot.log | head -1)
 GN=$(echo "$GL" | sed -n 's/.*cleared: present \([0-9]*\),.*/\1/p'); GP=$(echo "$GL" | sed -n 's/.*after present \([0-9]*\)$/\1/p')
-expect "grep -q 'pictures handed out in place' $T/root/logs/boot.log && [ ! -e $T/root/logs/gpu-inplace-starting ] && [ -n '$GN' ] && [ ${GN:-0} -ge \$((${GP:-0} + 2)) ] && state $T 1 | grep -q 'shown picture: in place'" "... the start after it reads them in place again; the marker removed once the frame that read the first one is done ($GL)"
+# (1.7.1: the 2 s film is played to its end now (audit B3), and its last pictures, the decoder's drain, are copies: the
+# pictures read in place are counted at the close, not taken from the state line at its end)
+expect "grep -q 'pictures handed out in place' $T/root/logs/boot.log && [ ! -e $T/root/logs/gpu-inplace-starting ] && [ -n '$GN' ] && [ ${GN:-0} -ge \$((${GP:-0} + 2)) ] && grep -q 'pictures ([1-9][0-9]* in place)' $T/root/logs/boot.log" "... the start after it reads them in place again; the marker removed once the frame that read the first one is done ($GL)"
 expect "[ \$(grep -c 'KiB at .* imported' $T/root/logs/boot.log) -ge 1 ] && [ \$(grep -c 'KiB at .* imported' $T/root/logs/boot.log) = \$(grep -c 'picture buffers let go (their import released)' $T/root/logs/boot.log) ] && ! grep -q 'only forgotten' $T/root/logs/boot.log" "... at the exit, the last frame still in flight: every import of the decoder's buffers released before the GPU shuts down"
 # an orderly exit right after the first pictures: the marker never stays behind
 rc=$(MPCPS5_HOST_HWDEC=1 MPCPS5_HOST_GPU=1 run "$T" "0:0" "14:quit" "" "$T/root/media/hdr_pq.mkv")
