@@ -3684,6 +3684,7 @@ cp "$MEDIA/red30.mp4" "$T2/root/media/film.mp4"
 rc=$(run "$T2" "0:0" "40:cmd fullscreen;300:quit" "280" "$T2/root/media/film.mp4")
 expect "[ $rc = 0 ] && ! titled $T2/dump/flip00280.ppm && ! face $T2/dump/flip00280.ppm && log $T2 'full screen: on'" "a film in full screen, the pointer still: no bars (as before)"
 nosan "$T"
+nosan "$T2"
 # e: logs/start-pending left by a start that didn't reach the screen: the next start writes boot.log although Debug
 # logs is off, and says why; the marker gone after it; a start after that (logs off): no new boot.log
 T=$(newroot t41e)
@@ -3702,6 +3703,7 @@ T2=$(newroot t41f2)
 rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_SLOW_S=5 run "$T2" "0:0" "30:quit" "")
 expect "[ $rc = 0 ] && ! log $T2 'no frames on the screen' && ! log $T2 'video is slow to start' && log $T2 'renderer: GPU'" "a GPU start in time: nothing said"
 nosan "$T"
+nosan "$T2"
 # g (audit A1): a driver that dies in its first frames (the 3rd present: after Init's own black screen): the start guard
 # still stands, so the next start is on the CPU (1.7.0 ended the guard at the first present: the GPU was tried again
 # at every start); a stall there: the watch speaks
@@ -3715,9 +3717,13 @@ T2=$(newroot t41g2)
 rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_STALL_AT=4 MPCPS5_HOST_GPU_SLOW_S=1 run "$T2" "0:0" "60:quit" "")
 expect "[ $rc = 0 ] && log $T2 'GPU start: no frames on the screen after 1 s' && log $T2 'video is slow to start' && log $T2 'GPU start: variant [0-9] works'" "a stall in the 4th present: the watch speaks, then the start counts as working"
 T3=$(newroot t41g3)
-rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_STALL_AT=20 MPCPS5_HOST_GPU_SLOW_S=1 run "$T3" "0:0" "60:quit" "")
+# (review R10: a watch of 3 s and a stall of 6 s: the start and its 8 presents fit in 3 s even with the sanitizers, and
+# a watch still running at the 20th present would speak)
+rc=$(MPCPS5_HOST_GPU=1 MPCPS5_HOST_GPU_STALL_AT=20 MPCPS5_HOST_GPU_STALL_MS=6000 MPCPS5_HOST_GPU_SLOW_S=3 run "$T3" "0:0" "60:quit" "")
 expect "[ $rc = 0 ] && ! log $T3 'no frames on the screen' && log $T3 'GPU start: variant [0-9] works'" "... a stall after the start (the 20th present): not the start's watch"
+nosan "$T"
 nosan "$T2"
+nosan "$T3"
 # h (audit A3): the GPU lost while running (presents fail from the 40th): the CPU takes over and the next start tries
 # the GPU again (1.7.0: attempts 4, every later start on the CPU "a previous GPU start failed")
 T=$(newroot t41h)
@@ -3791,7 +3797,9 @@ python3 tests/smb_stall.py proxy $PP $SP "$FLAG" >/dev/null 2>&1 &
 PPID1=$!
 listening $PP
 T=$(newroot t42a)
-(sleep 4; touch "$FLAG") &
+# (review R10: the share stalls once the film is open and has played a second, not at a fixed time after the start)
+stall_after_open() { for i in $(seq 1 300); do grep -q '\[smb\] opened' "$1/root/logs/boot.log" 2>/dev/null && break; sleep 0.1; done; sleep 1; touch "$FLAG"; }
+stall_after_open "$T" &
 rc=$(run "$T" "0:0" "330:seek 15;360:cmd close;420:state;450:quit" "" "smb://guest@127.0.0.1:$PP/VIDEOS/a.mp4")
 g=$(gap $T 'frame 360: cmd close' 'frame 420: state')
 expect "[ $rc = 0 ] && log $T '\[smb\] opened smb://.*a.mp4' && lt $g 2.5" "the share stalled, then Close: back in $g s (the frames' own 1 s; 1.7.0: the read's 15 s)"
@@ -3818,7 +3826,7 @@ nosan "$T"
 # at once; on a share that answers, Next opens the next file of the folder ('%' in its name: audit D8)
 T=$(newroot t42c)
 rm -f "$FLAG"
-(sleep 4; touch "$FLAG") &
+stall_after_open "$T" &
 rc=$(run "$T" "0:0" "330:cmd next;390:state;400:quit" "" "smb://guest@127.0.0.1:$PP/VIDEOS/sub.mp4")
 g=$(gap $T 'frame 330: cmd next' 'frame 390: state')
 g2=$(gap $T 'frame 400: quit' '\[boot\] leaving')
@@ -3881,6 +3889,7 @@ open(sys.argv[2], "wb").write(d)
 PY
 rc=$(run "$T" "0:0" "120:state;130:quit" "" "$T/root/media/long.mkv")
 expect "[ $rc = 0 ] && [ \"\$(field $T 1 1)\" = 2 ]" "a subtitle line of 8000 hours: the film plays"
+nosan "$T"
 fi
 
 if want 43; then
@@ -3892,12 +3901,16 @@ log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
 # written only on Stop, Close, Exit...: the place at the open, or none). (the times shortened to 2 s for the test)
 T=$(newroot t43a)
 cp "$MEDIA/red30.mp4" "$T/root/media/film.mp4"
-(MPCPS5_HOST_POS_SAVE_S=2 MPCPS5_HOST_OFFLINE=1 MPCPS5_HOST_REALTIME=1 MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew \
+MPCPS5_HOST_POS_SAVE_S=2 MPCPS5_HOST_OFFLINE=1 MPCPS5_HOST_REALTIME=1 MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew \
 	MPCPS5_HOST_DUMP_DIR=$T/dump MPCPS5_HOST_DUMP= MPCPS5_HOST_PAD=0:0 ASAN_OPTIONS=detect_leaks=0 \
-	timeout -s KILL 12 "$BIN" "$T/root/media/film.mp4" >"$T/out.txt" 2>&1) 2>/dev/null
-rc=$?
+	"$BIN" "$T/root/media/film.mp4" >"$T/out.txt" 2>&1 &
+APP=$!
+# (review R10: killed once the position is in mpc-hc.ini, at most 40 s: not at a fixed time; 1.7.0 never writes it
+# while the film plays, so it is killed at 40 s with none)
+for i in $(seq 1 400); do grep -q '^FilePos0=.*film.mp4|' "$T/root/mpc-hc.ini" 2>/dev/null && break; sleep 0.1; done
+{ kill -9 $APP; wait $APP; } 2>/dev/null
 p=$(sed -n 's/^FilePos0=.*film.mp4|\([0-9.]*\)$/\1/p' "$T/root/mpc-hc.ini")
-expect "[ $rc = 137 ] && [ -n \"$p\" ] && near ${p:-0} 8 3.5" "the app killed while a film played: its place kept (${p:-none} s)"
+expect "[ -n \"$p\" ] && near ${p:-0} 6 1.5" "the app killed while a film played: its place kept (${p:-none} s)"
 # b (audit C6): settings that can't be saved (an unreadable credentials.ini.tmp of an old version): said once
 T=$(newroot t43b)
 cp "$MEDIA/red.mp4" "$T/root/media/film.mp4"
