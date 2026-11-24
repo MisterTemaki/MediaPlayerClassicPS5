@@ -15,6 +15,14 @@ PS5 port by [github.com/MisterTemaki](https://github.com/MisterTemaki), with the
 
 ![Media Player Classic PS5](docs/screenshots/window.png)
 
+**1.7.1: issue #11 (the logo alone on the screen) and an audit's fixes.** The app always starts in its window now:
+up to 1.7.0, full screen was saved as "Launch files in fullscreen", so after a film in full screen the next start
+showed only the logo. With the menu bar hidden, the OSD says which button opens the menu. A network share that
+stops answering no longer freezes the app (Close, the next file, the Open dialog), the end of every file is played
+to its end, the file position is kept when the app is closed from the home screen, and menus taller than the screen
+scroll. **If you had ticked "Launch files in fullscreen", tick it again.** See the
+[1.7.1 release notes](docs/RELEASE-NOTES-v1.7.1.md) and the [audit report](docs/AUDIT-v1.7.1.md).
+
 **1.7.0: video post-processing on the GPU, suggested by Cris Valente.** **View > Options > Output > Shaders** (or
 **Play > Shaders**) runs the video through compute passes before it reaches the screen: **Performance** (FSR 1
 upscaling and sharpening), **Quality** (debanding and light deblocking, then FSR 1), **Experimental** (Quality and
@@ -373,6 +381,10 @@ working app:
   payload) and run ShadowMount+ again: it registers the app from that folder.
 - If it still doesn't open, please report it with the console's error and, if there is one,
   `/data/mpcps5/logs/boot.log` and `/data/mpcps5/logs/installer.log`.
+- **The screen shows only the logo (#11):** the app is open with its menu and bars hidden. Press **OPTIONS**: the
+  menu opens in the middle; choose **View > Presets... > Normal**. **Circle** leaves full screen. 1.7.1 always
+  starts in the window and says "OPTIONS: the menu" when the menu bar is hidden. A start that doesn't reach the
+  screen at all makes the next start write `boot.log` (even with Debug logs off): please send it.
 
 ## The window
 
@@ -393,7 +405,8 @@ MPC-HC 1.7.13 maximized on Windows 10, at 150 % scale (Options > Miscellaneous c
 - **Dialogs** -- Open, Go To, Properties (Details, MediaInfo), Options (Player, Keys, Playback, Output, Fullscreen,
   Subtitles, Default Style, Audio Switcher, Miscellaneous), About, Add Favorite, Organize Favorites, and the
   Windows "Open" dialog behind every Browse... button.
-- **Full screen** (Triangle, the title bar's restore button) -- the picture alone. With Options > Fullscreen > **Hide
+- **Full screen** (Triangle, the title bar's restore button) -- the picture alone. The app always starts in its
+  window (1.7.1, as MPC-HC); Options > Fullscreen > **Launch files in fullscreen** opens each film in full screen. With Options > Fullscreen > **Hide
   controls in fullscreen** (on by default) the seek bar, toolbar and status bar show over it **when the pointer moves**
   (the default), or (1.5.3) **when the pointer is over them** -- at the bottom, where they appear: they hide a second
   after it leaves, and a pointer moving in a dialog over the picture leaves them hidden. Dragging the seek bar or the
@@ -498,7 +511,9 @@ Where:
   a name. The location stays in the navigation pane. Addresses can also be typed:
   `smb://user:password@192.168.0.10/Videos/Movie.mkv` (once a password is kept, `smb://user@192.168.0.10/...`
   uses the saved password automatically). Windows 10/11 needs the share's user and password
-  (guest access is off by default there); a NAS or Samba share may allow guest.
+  (guest access is off by default there); a NAS or Samba share may allow guest. A share is read in the background
+  (1.7.1): the Open dialog says "Reading the network folder..." and Cancel gives it up; a share that stops answering
+  doesn't hold the app.
 - **The Internet**: `http://` and `https://` (certificates checked against Mozilla's list), HLS (`.m3u8`),
   `rtmp://`, `rtsp://`, `udp://`. Type the address in File > Open File.
 - **Playlists**: `.m3u`, `.m3u8`, `.pls`. Relative paths are next to the list, with `/` or `\` between folders
@@ -506,7 +521,8 @@ Where:
 - **Discs** in the PS5's own drive or a USB drive: see [Discs](#discs).
 
 **Remember File position** is on (Options > Player): a file opens again where it was left (not near its start
-or its end). **Stop** goes back to the start, as in MPC-HC, and the place it was stopped at is the one remembered
+or its end). The position is written to `mpc-hc.ini` each minute while a film plays and on Pause (1.7.1), so closing
+the app from the home screen keeps it. **Stop** goes back to the start, as in MPC-HC, and the place it was stopped at is the one remembered
 (1.6.4), written to `mpc-hc.ini` at once: until the file plays again or another place is chosen. **After
 Playback** (Play menu): do nothing, play the next file in the folder, or exit. Navigate > Previous/Next goes by
 chapter, then by playlist item, then to the neighbouring file in the folder.
