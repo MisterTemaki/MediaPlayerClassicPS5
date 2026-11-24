@@ -3123,7 +3123,9 @@ expect "[ $rc = 0 ] && grep -q '\[ui\] theme: Light' $T/root/logs/boot.log && gr
 for renderer in 0 1; do
 	T=$(newroot t36video-$renderer)
 	cp "$MEDIA/red.mp4" "$T/root/media/movie.mp4"
-	printf '1\n00:00:00,500 --> 00:00:05,000\nTheme-independent subtitles\n' >"$T/root/media/movie.srt"
+	# (1.7.1: the line lasts past the film's end: frame 90 can be after 5 s on a slow host with the GPU renderer, the
+	# film then ended and paused on its last picture)
+	printf '1\n00:00:00,500 --> 00:00:10,000\nTheme-independent subtitles\n' >"$T/root/media/movie.srt"
 	printf '[Settings]\nDarkMode=1\n' >"$T/root/mpc-hc.ini"
 	rc=$(MPCPS5_HOST_GPU=$renderer run "$T" "0:0" "100:state;110:quit" "90" "$T/root/media/movie.mp4")
 	expect "[ $rc = 0 ] && $CHECK $T/dump/flip00090.ppm 960 400 red >/dev/null" "renderer $renderer: the video keeps its original red color"
@@ -3950,9 +3952,9 @@ fi
 if want 44; then
 echo "== 44. 1.7.1 (Sulfurico-One64, #12): the fonts folder in the backup; what Games brings, said on the page"
 log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
-D=$WORK/t44d
-rm -rf "$D" && mkdir -p "$D/u0"
-DRIVES="$D/u0"
+D=$WORK/t44drives
+rm -rf "$D" && mkdir -p "$D/u0" "$D/u1"
+DRIVES="$D/u0:$D/u1"
 BKF=$D/u0/mpcps5/backup/fonts
 TO_BACKUP=""
 for frame in 20 22 24 26 28 30 32 34 36 38; do TO_BACKUP="$TO_BACKUP;$frame:key down"; done
@@ -3964,11 +3966,27 @@ T=$(newroot t44a)
 mkdir -p "$T/root/fonts"
 cp assets/fonts/Roboto-Regular.ttf "$T/root/fonts/MyFont.ttf"
 printf 'not a font\n' >"$T/root/fonts/readme.txt"
-printf '[Settings]\nBackupDrive=%s\n' "$D/u0" >"$T/root/mpc-hc.ini"
+printf '[Settings]\nBackupDrive=%s\nSubFont=MyFont.ttf\n' "$D/u0" >"$T/root/mpc-hc.ini"
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd voldown;30:quit" "")
+VOL=$(sed -n 's/^Volume=//p' "$T/root/mpc-hc.ini")
 expect "[ $rc = 0 ] && cmp -s $T/root/fonts/MyFont.ttf $BKF/MyFont.ttf && [ ! -e $BKF/readme.txt ] && [ ! -e $BKF/MyFont.ttf.part ] && log $T 'fonts: 1 copied to $BKF'" "the fonts folder's font backed up with the settings (not its other files)"
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd voldown;30:quit" "")
 expect "[ $rc = 0 ] && log $T 'backed up to' && ! log $T 'fonts: [0-9]* copied'" "... saved again: the font, unchanged, isn't copied again"
+# (review I4) a font changed since its copy: copied again
+sleep 2.1
+printf 'x' >>"$T/root/fonts/MyFont.ttf"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd voldown;30:quit" "")
+VOL=$(sed -n 's/^Volume=//p' "$T/root/mpc-hc.ini")
+expect "[ $rc = 0 ] && log $T 'fonts: 1 copied to $BKF' && cmp -s $T/root/fonts/MyFont.ttf $BKF/MyFont.ttf" "... a font changed since: copied again"
+nosan "$T"
+# (review I3) a drive with another installation's backup: no font written there either
+T=$(newroot t44foreign)
+mkdir -p "$T/root/fonts" "$D/u1/mpcps5/backup"
+cp assets/fonts/Roboto-Regular.ttf "$T/root/fonts/Other.ttf"
+printf '[Settings]\nVolume=11\nBackupId=0123456789abcdef0123456789abcdef\n' >"$D/u1/mpcps5/backup/mpc-hc.ini"
+printf '[Settings]\nBackupDrive=%s\n' "$D/u1" >"$T/root/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "10:cmd voldown;30:quit" "")
+expect "[ $rc = 0 ] && log $T 'is another installation.s backup' && [ ! -e $D/u1/mpcps5/backup/fonts ]" "another installation's backup on the drive: no font written there"
 nosan "$T"
 # b: a fresh installation (after a factory reset): Import brings the settings and the fonts back
 T=$(newroot t44c)
@@ -3976,14 +3994,16 @@ rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
 IMPORT="10:cmd options$TO_BACKUP;44:key r1;48:key r1;52:key enter"
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;90:quit" "")
 expect "[ $rc = 0 ] && log $T '\[backup\] imported' && cmp -s $BKF/MyFont.ttf $T/root/fonts/MyFont.ttf && log $T 'fonts: 1 copied back from $BKF' && grep -q 'Fonts copied back to the fonts folder: 1.' $T/drawn.txt" "Import: the backup's font copied back to the fonts folder, and said"
-expect "grep -qx 'Volume=[0-9]*' $T/root/mpc-hc.ini && [ \"\$(sed -n 's/^Volume=//p' $T/root/mpc-hc.ini)\" = \"\$(sed -n 's/^Volume=//p' $D/u0/mpcps5/backup/mpc-hc.ini)\" ]" "... with the settings"
+expect "[ -n '$VOL' ] && grep -qx 'Volume=$VOL' $T/root/mpc-hc.ini && grep -qx 'SubFont=MyFont.ttf' $T/root/mpc-hc.ini" "... with the settings (the volume $VOL and the subtitles' font of the installation backed up)"
+expect "! awk '/\[backup\] imported/{i=1} i' $T/root/logs/boot.log | grep -q \"MyFont.ttf isn't in the fonts folder\"" "... the font copied back is the subtitles' at once (review I1)"
+expect "! log $T 'fonts: 1 copied to $BKF'" "... and isn't copied to the drive again (it kept its time: review I4)"
 nosan "$T"
 # (a fresh installation whose fonts folder has the font already: not copied again)
 T=$(newroot t44b2)
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "20:quit" "")
 mkdir -p "$T/root/fonts" && cp assets/fonts/Roboto-Regular.ttf "$T/root/fonts/MyFont.ttf"
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;90:quit" "")
-expect "[ $rc = 0 ] && log $T '\[backup\] imported' && log $T 'fonts: 0 copied back from $BKF, 1 there already'" "... a font already in the fonts folder isn't copied again"
+expect "[ $rc = 0 ] && log $T '\[backup\] imported' && log $T 'fonts: 0 copied back from $BKF, 1 there already' && cmp -s assets/fonts/Roboto-Regular.ttf $T/root/fonts/MyFont.ttf" "... a font of that name already in the fonts folder is kept as it is (review I5)"
 nosan "$T"
 # c: Options > Miscellaneous says what Games brings
 T=$(newroot t44d)
