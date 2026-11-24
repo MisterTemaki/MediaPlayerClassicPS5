@@ -552,7 +552,7 @@ struct MemReader
 bool ReadWholeFile(const std::string& path, std::vector<uint8_t>& out, size_t max_bytes)
 {
 	if (path.compare(0, 6, "smb://") == 0)
-		return smb::ReadFile(path, out, max_bytes);
+		return smb::ReadFile(path, out, max_bytes, 10); // (1.7.1, audits B12, C1: File > Load Subtitle is on the UI thread)
 	if (path.compare(0, 7, "disc://") == 0)
 		return disc::ReadFileWithin(path, out, max_bytes, 5); // (File > Load Subtitle: on the UI thread)
 	FILE* f = fopen(path.c_str(), "rb");
@@ -1244,6 +1244,7 @@ struct Player::Impl
 	void OpenThread()
 	{
 		disc::CancelScope cancel_reads(&quit); // Close: a disc being read gives up at once (mpc_disc.h)
+		smb::CancelScope cancel_smb(&quit);	   // (1.7.1) a share too: its file keeps the flag for the demuxer's reads
 		const double t0 = NowS();
 		ic = avformat_alloc_context();
 		ic->interrupt_callback.callback = Interrupt;
@@ -1583,11 +1584,34 @@ struct Player::Impl
 		// 1.5.2: .sup too; a VobSub pair through its .sub (AddSubtitleFile reads the .idx beside it)
 		static const char* const exts[] = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".sup", ".pt-BR.srt", ".pt.srt",
 			".por.srt", ".en.srt", ".eng.srt"};
+		// (1.7.1, audit B1) on a share: the folder listed once (one connection; up to 1.7.0 a connection for each of the
+		// names above, each up to 15 s when the server didn't answer), the names matched as the share does (without
+		// regard to case), and the file opened by its own name
+		std::vector<smb::Entry> listing;
+		const bool on_smb = url.compare(0, 6, "smb://") == 0;
+		if (on_smb && (slash == std::string::npos || !smb::List(url.substr(0, slash), listing, nullptr)))
+			return;
 		bool any = false;
 		for (const char* e : exts)
 		{
-			const std::string p = base + e;
-			if (AnyExists(p))
+			if (quit.load())
+				return; // (Close: the search stops)
+			std::string p = base + e;
+			bool there = false;
+			if (on_smb)
+			{
+				const std::string want = Lower(smb::FileNameOf(p));
+				for (const auto& x : listing)
+					if (!x.dir && Lower(x.name) == want)
+					{
+						p = url.substr(0, slash + 1) + smb::EscapeName(x.name);
+						there = true;
+						break;
+					}
+			}
+			else
+				there = AnyExists(p);
+			if (there)
 			{
 				std::string err;
 				if (AddSubtitleFile(p, &err))

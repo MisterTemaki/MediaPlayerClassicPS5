@@ -21,6 +21,7 @@
 #include "mpc_vdec.h"
 #include "mpc_res.h"
 #include "mpc_settings.h"
+#include "mpc_smb.h"
 #include "mpc_backup.h"
 #include "mpc_ui.h"
 #include "mpc_update.h"
@@ -32,6 +33,7 @@
 #include "ProsperoJailbreak.h"
 #include "ProsperoNotify.h"
 #include "ProsperoSce.h"
+#include "ProsperoThread.h"
 #include "ProsperoUpdate.h"
 #include "ProsperoVideo.h"
 
@@ -43,8 +45,12 @@
 #include <cstring>
 #include <strings.h>
 #include <ctime>
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -393,6 +399,23 @@ private:
 	void ApplyAudio();
 	void SkipBack();
 	void SkipForward();
+	// (1.7.1, audit C1) the media of a folder, then `then` with them; a share's folder is listed on its own thread (up to
+	// 1.7.0 here, on the app's only loop: the picture stopped while the server answered, at every R1 / L1 on a file
+	// opened from the browser, and at the end of each file with "Play next file"). `for_url`: the file it's for (the
+	// result is dropped if another one is open by then); "" for none
+	struct FolderJob
+	{
+		std::atomic<bool> cancel{false}, done{false};
+		std::string folder, for_url;
+		std::vector<std::string> files;
+		std::function<void(const std::vector<std::string>&)> then;
+		std::thread t;
+	};
+	std::unique_ptr<FolderJob> folder_job_;
+	void ListFolderThen(const std::string& folder, const std::string& for_url,
+		std::function<void(const std::vector<std::string>&)> then);
+	void TickFolderJob();
+	void DropFolderJob();
 	bool Loaded() const;
 	double SeekPos() const;
 	std::string StatusText() const;
@@ -1927,13 +1950,14 @@ void MainFrame::SkipBack()
 	else if (!current_url_.empty())
 	{
 		// the previous file in the folder
-		const std::vector<std::string> files = ListFolderMedia(ParentFolder(current_url_));
-		auto it = std::find(files.begin(), files.end(), current_url_);
-		if (it != files.end() && it != files.begin())
-			Open(*(it - 1));
-		else if (stop_pos_ < 0)
-			Seek(0); // (1.6.4 review L1: after a Stop, paused there or not, it is at the start already; a seek would
-					 // forget the stopped place)
+		ListFolderThen(ParentFolder(current_url_), current_url_, [this](const std::vector<std::string>& files) {
+			auto it = std::find(files.begin(), files.end(), current_url_);
+			if (it != files.end() && it != files.begin())
+				Open(*(it - 1));
+			else if (stop_pos_ < 0)
+				Seek(0); // (1.6.4 review L1: after a Stop, paused there or not, it is at the start already; a seek would
+						 // forget the stopped place)
+		});
 	}
 }
 
@@ -1952,13 +1976,78 @@ void MainFrame::SkipForward()
 		OpenPlaylistItem(pl_cur_ + 1);
 	else if (!current_url_.empty())
 	{
-		const std::vector<std::string> files = ListFolderMedia(ParentFolder(current_url_));
-		auto it = std::find(files.begin(), files.end(), current_url_);
-		if (it != files.end() && it + 1 != files.end())
-			Open(*(it + 1));
-		else
-			Osd(T("No more media in the current folder."));
+		ListFolderThen(ParentFolder(current_url_), current_url_, [this](const std::vector<std::string>& files) {
+			auto it = std::find(files.begin(), files.end(), current_url_);
+			if (it != files.end() && it + 1 != files.end())
+				Open(*(it + 1));
+			else
+				Osd(T("No more media in the current folder."));
+		});
 	}
+}
+
+void MainFrame::ListFolderThen(const std::string& folder, const std::string& for_url,
+	std::function<void(const std::vector<std::string>&)> then)
+{
+	if (folder.compare(0, 6, "smb://") != 0)
+	{
+		then(ListFolderMedia(folder)); // (a drive or a disc: here, as before)
+		return;
+	}
+	if (folder_job_)
+	{
+		if (folder_job_->for_url == for_url && !folder_job_->done.load())
+		{
+			Osd(T("Reading the network folder...")); // (R1 held: one listing, not one per repeat)
+			return;
+		}
+		DropFolderJob();
+	}
+	std::unique_ptr<FolderJob> j(new FolderJob);
+	j->folder = folder;
+	j->for_url = for_url;
+	j->then = std::move(then);
+	FolderJob* p = j.get();
+	try
+	{
+		j->t = ps5::StartThread("smb-folder", [p] {
+			smb::CancelScope scope(&p->cancel);
+			p->files = ListFolderMedia(p->folder);
+			p->done = true;
+		});
+	}
+	catch (const std::system_error& e)
+	{
+		OrbisLog("[ui] a new thread refused (%s): the folder read here", e.what());
+		j->then(ListFolderMedia(folder));
+		return;
+	}
+	OrbisLog("[ui] reading the folder %s", HidePassword(folder).c_str());
+	Osd(T("Reading the network folder..."));
+	folder_job_ = std::move(j);
+}
+
+void MainFrame::TickFolderJob()
+{
+	if (!folder_job_ || !folder_job_->done.load())
+		return;
+	folder_job_->t.join();
+	std::unique_ptr<FolderJob> j = std::move(folder_job_);
+	OrbisLog("[ui] the folder %s: %zu media file(s)", HidePassword(j->folder).c_str(), j->files.size());
+	if (j->for_url.empty() || j->for_url == current_url_)
+		j->then(j->files);
+	else
+		OrbisLog("[ui] (another file is open: the folder's answer dropped)");
+}
+
+void MainFrame::DropFolderJob()
+{
+	if (!folder_job_)
+		return;
+	folder_job_->cancel = true;
+	if (folder_job_->t.joinable())
+		folder_job_->t.join();
+	folder_job_.reset();
 }
 
 void MainFrame::Command(int id)
@@ -2103,16 +2192,17 @@ void MainFrame::Command(int id)
 			ShowFileBrowser(T("Open Directory"), BrowseFilter::Folder, [this](const std::string& dir) {
 				if (dir.empty())
 					return;
-				const std::vector<std::string> files = ListFolderMedia(dir);
-				if (files.empty())
-				{
-					MessageBox(T("There are no media files in this folder."), T("Open Directory"), MB_OK, 2);
-					return;
-				}
-				playlist_ = files;
-				pl_durations_.assign(files.size(), 0);
-				s_.last_dir = dir;
-				OpenPlaylistItem(0);
+				ListFolderThen(dir, "", [this, dir](const std::vector<std::string>& files) {
+					if (files.empty())
+					{
+						MessageBox(T("There are no media files in this folder."), T("Open Directory"), MB_OK, 2);
+						return;
+					}
+					playlist_ = files;
+					pl_durations_.assign(files.size(), 0);
+					s_.last_dir = dir;
+					OpenPlaylistItem(0);
+				});
 			});
 			break;
 		case ID_FILE_CLOSE_AND_RESTORE:
@@ -2826,6 +2916,7 @@ void MainFrame::TickUpdate()
 void MainFrame::Tick()
 {
 	TickUpdate();
+	TickFolderJob();
 	TickOptionsButton();
 	// a held jump let go (or its file gone, or a menu or a dialog opened over it): the exact seek; a menu or a dialog
 	// also forgets the last jump's button (its repeats after it closes start again from a press: exact); the keyframe
@@ -2909,15 +3000,17 @@ void MainFrame::Tick()
 			OpenPlaylistItem(0);
 		else if (s_.after_playback == AfterPlayback::PlayNext)
 		{
-			const std::vector<std::string> files = ListFolderMedia(ParentFolder(current_url_));
-			auto it = std::find(files.begin(), files.end(), current_url_);
-			if (it != files.end() && it + 1 != files.end())
-				Open(*(it + 1));
-			else
-			{
-				player_.Pause();
-				Osd(T("No more media in the current folder."), 3);
-			}
+			player_.Pause(); // (1.7.1: a share's folder answers later; meanwhile the end isn't handled again)
+			ListFolderThen(ParentFolder(current_url_), current_url_, [this](const std::vector<std::string>& files) {
+				auto it = std::find(files.begin(), files.end(), current_url_);
+				if (it != files.end() && it + 1 != files.end())
+					Open(*(it + 1));
+				else
+				{
+					player_.Pause();
+					Osd(T("No more media in the current folder."), 3);
+				}
+			});
 		}
 		else if (s_.after_playback == AfterPlayback::Exit)
 			quit_ = true;
@@ -3914,6 +4007,7 @@ int MainFrame::Run(const std::string& first)
 		}
 	}
 	WindowManager::Get().Clear();
+	DropFolderJob();
 	LogPacing("at the end");
 	SavePosition();
 	player_.Close();

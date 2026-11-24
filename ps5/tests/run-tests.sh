@@ -3733,5 +3733,102 @@ expect "[ $rc = 1 ] && log $T \"didn't reach the screen\" && log $T 'video init 
 nosan "$T"
 fi
 
+if want 42; then
+echo "== 42. 1.7.1 audit: a share that stops answering (Close, the file browser, Next), the subtitle search, '%' in names"
+log() { grep -q -- "$2" "$1/root/logs/boot.log"; }
+# the seconds between the first boot.log lines matching $2 and $3
+gap() { python3 - "$1/root/logs/boot.log" "$2" "$3" <<'PY'
+import re, sys
+t = {}
+for line in open(sys.argv[1], errors="replace"):
+    m = re.match(r"\[\s*([0-9.]+)\] (.*)", line)
+    if not m:
+        continue
+    for k in (2, 3):
+        if k not in t and re.search(sys.argv[k], m.group(2)):
+            t[k] = float(m.group(1))
+print("%.2f" % (t[3] - t[2]) if 2 in t and 3 in t else "999")
+PY
+}
+lt() { python3 -c "import sys; sys.exit(0 if float('$1') < float('$2') else 1)"; }
+smbserve() { # $1 port, $2 folder: impacket's server, share VIDEOS
+	python3 - "$1" "$2" >"$WORK/smb42-$1.txt" 2>&1 <<'PY' &
+import sys
+from impacket import smbserver
+s = smbserver.SimpleSMBServer(listenAddress='127.0.0.1', listenPort=int(sys.argv[1]))
+s.addShare('VIDEOS', sys.argv[2], 'test media')
+s.setSMB2Support(True)
+s.setSMBChallenge('')
+s.start()
+PY
+	echo $!
+}
+# a film of 20 s at 12 Mbit/s (30 MB: the demuxer reads it all along)
+[ -f "$MEDIA/big20.mp4" ] || ffmpeg -loglevel error -y -f lavfi -i testsrc2=size=1280x720:rate=25 -t 20 -c:v libx264 \
+	-preset ultrafast -b:v 12M -maxrate 12M -bufsize 4M -pix_fmt yuv420p "$MEDIA/big20.mp4"
+S42=$WORK/share42
+mkdir -p "$S42"
+cp "$MEDIA/big20.mp4" "$S42/a.mp4"
+cp "$MEDIA/red.mp4" "$S42/b%41.mp4"
+cp "$MEDIA/red.mp4" "$S42/sub.mp4"
+printf '1\r\n00:00:00,000 --> 00:00:09,000\r\nFound by the listing\r\n' >"$S42/SUB.SRT"
+SP=$((40000 + RANDOM % 10000))
+SPID=$(smbserve $SP "$S42")
+listening $SP
+# a (audits D1, B1): the share stops answering while a film plays (a seek then waits for it): Close comes back at once
+# (1.7.0: the UI waited for libsmb2's 15 s timeout)
+PP=$((SP + 1))
+FLAG=$WORK/stall42a
+rm -f "$FLAG"
+python3 tests/smb_stall.py proxy $PP $SP "$FLAG" >/dev/null 2>&1 &
+PPID1=$!
+listening $PP
+T=$(newroot t42a)
+(sleep 4; touch "$FLAG") &
+rc=$(run "$T" "0:0" "330:seek 15;360:cmd close;420:state;450:quit" "" "smb://guest@127.0.0.1:$PP/VIDEOS/a.mp4")
+g=$(gap $T 'frame 360: cmd close' 'frame 420: state')
+expect "[ $rc = 0 ] && log $T '\[smb\] opened smb://.*a.mp4' && lt $g 2.5" "the share stalled, then Close: back in $g s (the frames' own 1 s; 1.7.0: the read's 15 s)"
+g2=$(gap $T 'frame 450: quit' '\[boot\] leaving')
+expect "lt $g2 3" "... the app ends at once after it ($g2 s)"
+nosan "$T"
+# b (audits C1, D2): the file browser at a share that never answers (the last folder browsed): the app goes on
+# drawing (the frames go on: no wait of 15 s before the window), the list says so, and Cancel gives the listing up
+HP=$((SP + 2))
+python3 tests/smb_stall.py hole $HP >/dev/null 2>&1 &
+HPID2=$!
+listening $HP
+T=$(newroot t42b)
+ini "$T" "LastDir=smb://127.0.0.1:$HP/VIDEOS"
+rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "20:cmd quickopen;80:state;90:key escape;150:state;160:quit" "")
+g=$(gap $T 'frame 20: cmd quickopen' 'frame 80: state')
+g3=$(gap $T 'frame 90: key escape' 'frame 150: state')
+# (the browser's first frames cost about a second here with the sanitizers, a local folder as well: under 5 s, not
+# the 15 s and more of a listing waited for)
+expect "[ $rc = 0 ] && log $T 'file browser: reading smb://127.0.0.1:$HP/VIDEOS' && lt $g 5 && grep -q 'Reading the network folder' $T/drawn.txt" "the browser at a share that doesn't answer: drawn at once ($g s for 60 frames), 'Reading the network folder...'"
+expect "lt $g3 2 && ! log $T 'file browser at smb://127.0.0.1:$HP'" "... Cancel: the listing given up ($g3 s for 60 frames), its answer never shown"
+nosan "$T"
+# c (audit C1): Next on a file of a share that stalled: the app goes on while the folder is read, says so, and ends
+# at once; on a share that answers, Next opens the next file of the folder ('%' in its name: audit D8)
+T=$(newroot t42c)
+rm -f "$FLAG"
+(sleep 4; touch "$FLAG") &
+rc=$(run "$T" "0:0" "330:cmd next;390:state;400:quit" "" "smb://guest@127.0.0.1:$PP/VIDEOS/sub.mp4")
+g=$(gap $T 'frame 330: cmd next' 'frame 390: state')
+g2=$(gap $T 'frame 400: quit' '\[boot\] leaving')
+expect "[ $rc = 0 ] && log $T 'reading the folder smb://guest@127.0.0.1:$PP/VIDEOS' && log $T '\[osd\] Reading the network folder' && lt $g 2 && lt $g2 3" "Next on a share that stalled: the app goes on ($g s for 60 frames) and ends at once ($g2 s)"
+nosan "$T"
+kill $PPID1 $HPID2 2>/dev/null
+T=$(newroot t42c2)
+rc=$(run "$T" "0:0" "60:cmd next;150:state;160:quit" "" "smb://guest@127.0.0.1:$SP/VIDEOS/a.mp4")
+expect "[ $rc = 0 ] && log $T 'the folder smb://guest@127.0.0.1:$SP/VIDEOS: [34] media file' && log $T '\[smb\] opened smb://guest@127.0.0.1:$SP/VIDEOS/b%2541.mp4' && [ \"\$(field $T 1 1)\" = 2 ]" "Next on a share that answers: the next file opened, its '%' kept (b%41.mp4 as b%2541.mp4)"
+nosan "$T"
+# d (audit B1): the subtitles next to a film on a share: found by one listing, the name matched without regard to case
+T=$(newroot t42d)
+rc=$(run "$T" "0:0" "60:state;70:quit" "" "smb://guest@127.0.0.1:$SP/VIDEOS/sub.mp4")
+expect "[ $rc = 0 ] && log $T 'subtitles loaded: smb://guest@127.0.0.1:$SP/VIDEOS/SUB.SRT' && [ \"\$(grep -c '\[smb\] connect' $T/root/logs/boot.log)\" = 0 ]" "a film's subtitles on a share: SUB.SRT found by the listing"
+nosan "$T"
+kill $SPID 2>/dev/null
+fi
+
 echo "passed $PASS, failed $FAIL  (work dir $WORK)"
 [ $FAIL = 0 ]

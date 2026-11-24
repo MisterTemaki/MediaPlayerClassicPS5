@@ -14,15 +14,20 @@
 #include "mpc_ui.h"
 
 #include "OrbisPaths.h"
+#include "ProsperoThread.h"
 #include "ProsperoVideo.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <ctime>
+#include <memory>
+#include <system_error>
+#include <thread>
 
 #ifndef MPCPS5_PS5_VERSION
 #define MPCPS5_PS5_VERSION "dev"
@@ -159,7 +164,9 @@ std::string Join(const std::string& dir, const std::string& name)
 {
 	if (dir.empty())
 		return name;
-	return dir.back() == '/' ? dir + name : dir + "/" + name;
+	// (1.7.1, audit D8) a share's addresses are %XX-decoded when opened: a '%' in a name goes as %25
+	const std::string n = dir.compare(0, 6, "smb://") == 0 ? smb::EscapeName(name) : name;
+	return dir.back() == '/' ? dir + n : dir + "/" + n;
 }
 
 std::string HideSecret(const std::string& url)
@@ -480,11 +487,48 @@ public:
 	std::string error;
 	bool finished = false;
 
+	// (1.7.1, audits C1, D2) a share's listing on its own thread: up to 1.7.0 it ran here, on the app's only loop, so
+	// the picture, the menus and the pad stopped while the server answered (up to 15 s for each request when it didn't:
+	// at every Open when the last folder browsed was on a NAS asleep). Now the list says so and the app goes on; Cancel,
+	// Back or another folder give the listing up (within 0.1 s: smb::CancelScope), and Tick shows it when it comes.
+	struct NetJob
+	{
+		std::atomic<bool> cancel{false}, done{false};
+		std::string dir, error;
+		bool server_only = false;
+		std::vector<FsEntry> all;
+		std::thread t;
+	};
+	std::unique_ptr<NetJob> job;
+	static void ListNet(NetJob& j)
+	{
+		if (j.server_only)
+		{
+			std::vector<std::string> shares;
+			if (smb::Shares(j.dir, shares, &j.error))
+				for (const auto& sh : shares)
+					j.all.push_back({sh, true, 0, 0, ""});
+		}
+		else
+			ListDir(j.dir, j.all, &j.error);
+	}
+	void DropJob()
+	{
+		if (!job)
+			return;
+		job->cancel = true;
+		if (job->t.joinable())
+			job->t.join();
+		job.reset();
+	}
+	~FileBrowser() override { DropJob(); }
+
 	void Finish(const std::string& r)
 	{
 		if (finished)
 			return;
 		finished = true;
+		DropJob();
 		if (done)
 			done(r);
 		EndDialog(r.empty() ? 2 : 1);
@@ -545,6 +589,20 @@ public:
 	}
 	void Tick() override
 	{
+		if (job && job->done.load())
+		{
+			job->t.join();
+			std::unique_ptr<NetJob> j = std::move(job);
+			if (j->dir == dir && !finished)
+			{
+				list->rows.clear();
+				list->icons.clear();
+				error = j->error;
+				OrbisLog("[ui] file browser at %s: %s", HideSecret(dir).c_str(),
+					error.empty() ? Fmt("%zu entries", j->all.size()).c_str() : error.c_str());
+				Fill(std::move(j->all));
+			}
+		}
 		const std::string k = DrivesKey();
 		if (k == drives_seen)
 			return;
@@ -603,6 +661,7 @@ public:
 			return;
 		}
 
+		DropJob(); // (a share's listing still running: given up)
 		if (record && to != dir)
 		{
 			back.push_back(dir);
@@ -629,6 +688,7 @@ public:
 						: places[i].path.compare(0, 7, "disc://") == 0 ? "Disc drive" : "Drive"), ""});
 					list->icons.push_back(Icon(places[i].icon));
 				}
+			ShowRows();
 		}
 		else if (dir == "smb://")
 		{
@@ -641,21 +701,61 @@ public:
 				list->rows.push_back({s.name, "", T("Network location"), HideSecret(s.url)});
 				list->icons.push_back(Icon(Ico::Server));
 			}
+			ShowRows();
+		}
+		else if (dir.compare(0, 6, "smb://") == 0)
+		{
+			const bool server_only = dir.find('/', 6) == std::string::npos; // a server without a share: its shares
+			job.reset(new NetJob);
+			job->dir = dir;
+			job->server_only = server_only;
+			NetJob* j = job.get();
+			try
+			{
+				j->t = ps5::StartThread("smb-list", [j] {
+					smb::CancelScope scope(&j->cancel);
+					ListNet(*j);
+					j->done = true;
+				});
+				list->rows.push_back({T("Reading the network folder..."), "", "", ""});
+				list->icons.push_back(Icon(Ico::Server));
+				OrbisLog("[ui] file browser: reading %s", HideSecret(dir).c_str());
+			}
+			catch (const std::system_error& e)
+			{
+				// (no thread: read here, as up to 1.7.0)
+				OrbisLog("[ui] file browser: a new thread refused (%s): the share read here", e.what());
+				job.reset();
+				NetJob here;
+				here.dir = dir;
+				here.server_only = server_only;
+				ListNet(here);
+				error = here.error;
+				Fill(std::move(here.all));
+			}
 		}
 		else
 		{
 			std::vector<FsEntry> all;
-			// a server without a share: its shares
-			const bool server_only = dir.compare(0, 6, "smb://") == 0 && dir.find('/', 6) == std::string::npos;
-			if (server_only)
-			{
-				std::vector<std::string> shares;
-				if (smb::Shares(dir, shares, &error))
-					for (const auto& sh : shares)
-						all.push_back({sh, true, 0, 0});
-			}
-			else
-				ListDir(dir, all, &error);
+			ListDir(dir, all, &error);
+			Fill(std::move(all));
+		}
+		address->text = dir.empty() ? T("This PS5") : dir == "smb://" ? T("Network") : HideSecret(dir);
+		name->text = filter == BrowseFilter::Folder ? (dir.empty() || dir == "smb://" ? "" : FileName(dir)) : "";
+		// the navigation pane follows
+		for (size_t i = 0; i < places.size(); i++)
+			if (places[i].path == dir)
+				nav->sel = int(i);
+		bback->enabled = !back.empty();
+		bfwd->enabled = !forward.empty();
+		bup->enabled = !dir.empty();
+		AppSettings().last_dir = dir;
+	}
+
+	// a folder's entries (listed) into the list: sorted, filtered, the error last
+	void Fill(std::vector<FsEntry> all)
+	{
+		{
 			SortEntries(all);
 			// the root of a DVD-Video / Blu-ray disc: playing it comes first
 			if (dir.compare(0, 7, "disc://") == 0 && dir.find('/', 7) == std::string::npos && error.empty())
@@ -680,6 +780,12 @@ public:
 					list->icons.push_back(e.dir ? Icon(Ico::Folder) : !e.target.empty() ? Icon(Ico::Disc) : FileIcon(e.name));
 				}
 		}
+		ShowRows();
+	}
+
+	// the end of a listing: the error row, the first entry selected
+	void ShowRows()
+	{
 		if (!error.empty())
 		{
 			list->rows.push_back({error, "", "", ""});
@@ -694,16 +800,6 @@ public:
 		}
 		if (!entries.empty())
 			list->sel = 0;
-		address->text = dir.empty() ? T("This PS5") : dir == "smb://" ? T("Network") : HideSecret(dir);
-		name->text = filter == BrowseFilter::Folder ? (dir.empty() || dir == "smb://" ? "" : FileName(dir)) : "";
-		// the navigation pane follows
-		for (size_t i = 0; i < places.size(); i++)
-			if (places[i].path == dir)
-				nav->sel = int(i);
-		bback->enabled = !back.empty();
-		bfwd->enabled = !forward.empty();
-		bup->enabled = !dir.empty();
-		AppSettings().last_dir = dir;
 	}
 
 	std::string EntryPath(int i) const
