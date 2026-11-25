@@ -28,7 +28,6 @@ fullscreen", tick it again.** See the
 > **Status (1.7.1):** run on a PS5 before release by the author, using the release's binary:
 > - the GPU start;
 > - 1080p, 4K and 4K HDR10 films with the console's decoder, the Experimental preset at 1.7.0's cost;
-> - the start in the window after a session in full screen;
 > - a file played to its end;
 > - an 8K film on the CPU.
 
@@ -531,7 +530,7 @@ Where:
 
 **Remember File position** is on (Options > Player): a file opens again where it was left (not near its start
 or its end). The position is written to `mpc-hc.ini` each minute while a film plays and on Pause (1.7.1), so closing
-the app from the home screen keeps it. **Stop** goes back to the start, as in MPC-HC, and the place it was stopped at is the one remembered
+the app from the home screen keeps it (as of the last minute or the last Pause). **Stop** goes back to the start, as in MPC-HC, and the place it was stopped at is the one remembered
 (1.6.4), written to `mpc-hc.ini` at once: until the file plays again or another place is chosen. **After
 Playback** (Play menu): do nothing, play the next file in the folder, or exit. Navigate > Previous/Next goes by
 chapter, then by playlist item, then to the neighbouring file in the folder.
@@ -899,7 +898,8 @@ the ELF; `make UPDATE_REPO=owner/repo` points the app at another repository.
 /data/mpcps5/update-pending.txt  an update installed, until a start runs it (1.5: the version check after it)
 <drive>/mpcps5/backup/mpc-hc.ini  1.6.3: a copy of mpc-hc.ini on the USB drive chosen in Options > Miscellaneous >
                              Backup (BackupDrive=), written whenever the settings change; Import... reads it back
-<drive>/mpcps5/backup/fonts/  1.7.1 (#12): a copy of the fonts folder, kept with the backup; Import... copies it back
+<drive>/mpcps5/backup/fonts/  1.7.1 (#12): a copy of the fonts folder, kept with the backup; Import... copies back
+                             the fonts missing from the fonts folder
 ```
 
 Network passwords stay out of saved addresses and logs. They are encrypted in `credentials.enc`, with a

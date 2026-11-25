@@ -46,8 +46,9 @@ fonts you added to `/data/mpcps5/fonts` for subtitles (`.ttf`, `.otf`, `.ttc`, `
 `<drive>/mpcps5/backup/fonts`. After each backup of the settings (when it is this installation's), the backup thread
 copies the fonts that aren't there yet, or that changed since; each is written beside its place, then renamed, and
 keeps the font's time. The app checks its backup each time it starts (and when a file is opened or closed), so a
-font copied into the fonts folder over FTP is on the drive after the next start, even with nothing else changed and
-the app then closed from the home screen; **Back up now** copies it at once. A font removed from the fonts folder stays in the backup: delete it from
+font copied into the fonts folder over FTP is on the drive a moment after the next start (with the drive connected,
+and the backup this installation's), even with nothing else changed and the app then closed from the home screen; if
+the app is closed before that copy ends, the font is copied at the next backup. **Back up now** copies it at once. A font removed from the fonts folder stays in the backup: delete it from
 `mpcps5/backup/fonts` on the drive if you don't want it back. **Import...** copies back the fonts missing from the
 fonts folder (a font of the same name already there is kept) before the settings are applied, and says how many.
 The copies are logged (Debug logs): a font over 256 MB, or one the drive refuses, is left out.

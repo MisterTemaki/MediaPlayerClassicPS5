@@ -8,7 +8,7 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
 
 ### Fixed: the screen with the logo alone (#11)
 
-- **The app always starts in its window** (title bar, menu, toolbar), as MPC-HC does. Up to 1.7.0, full screen
+- **The app always starts in its window**, not in full screen, as MPC-HC does. Up to 1.7.0, full screen
   (Triangle, View > Full Screen) was saved as "Launch files in fullscreen": after a film watched in full screen the
   next start was in full screen too, with nothing open, so the screen showed only the logo.
 - **Launch files in fullscreen** works as in MPC-HC: a film opens in full screen; the app itself starts in its window.
@@ -45,7 +45,7 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
 - **Next / Previous (R1 / L1), Open Directory and "Play next file"** read a share's folder in the background too.
 - The subtitles next to a film on a share are found with one listing of its folder instead of 11 connections, and
   their names are matched without regard to case (`FILM.SRT` for `film.mkv`).
-- File > Load Subtitle from a share waits 10 s at most.
+- File > Load Subtitle from a share waits 10 s at most (20 s for a `.sup`).
 - A file whose name contains `%` opens.
 
 ### Fixed: playback
@@ -92,12 +92,13 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
 - Updates are checked against GitHub's SHA-256, over TLS with the certificate checked; releases still carry no
   Ed25519 signature (the code for it is there, without a key).
 - A GPU driver that never returns from a wait can't be stopped from inside the app: after 20 s at the start a
-  notification says what to do, and the next start uses the software renderer.
+  notification says what to do, and the next start uses the software renderer. A wait that hangs later, while
+  playing, still holds the app until it is closed from the home screen.
 - The full list of what the audit found, fixed or left: [audit report](https://github.com/MisterTemaki/MediaPlayerClassicPS5/blob/v1.7.1/docs/AUDIT-v1.7.1.md).
 
 ### Updating
 
-- From 1.6.3 or an older version with the updater, choose **Help > Check for updates**, install the update and
+- From 1.7.0 or an older version with the updater, choose **Help > Check for updates**, install the update and
   restart the app.
 - For manual installation, use **MediaPlayerClassicPS5-v1.7.1.elf**, the complete installer, then open the app
   from the home screen. If an older installer ELF is in your autoload, replace it with this one.
@@ -115,20 +116,22 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
   release):
   - The complete installer installed 1.7.1, and its helper served every start.
   - Every start used the GPU, and each one counted as working after its first frames.
-  - The console's decoder gave its pictures to the GPU without a copy for each film: H.264 1080p and 4K, and 4K HEVC
-    HDR10 with native HDR10 output.
+  - The GPU read the console decoder's pictures in place (H.264 1080p and 4K, and 4K HEVC HDR10 with native HDR10
+    output). The only exception was 6 of 786 pictures of the HDR10 film, which the decoder held back and which were
+    copied.
   - The Experimental preset cost what it did on 1.7.0: 5.3 ms per frame for a 4K HDR10 film, 1.5 ms for a
     1920×800 one. No picture was dropped.
-  - A session that ended in full screen was closed from the home screen; the log shows the next start in its
-    window (#11).
-  - A file played to its last second, and the sound never ran short in steady play.
-  - An 8K HEVC film, beyond the console's decoder, played on the CPU with its notices and without a crash.
-- **Full frontend suite: 1025 checks passed.** The 12 that fail (an SMB address check and 11 comparisons of the GPU's
+  - A file played to its last second.
+  - On each of two films, the sound didn't run short in a minute of steady play.
+  - An 8K HEVC film is beyond the console's decoder: it went to the CPU, dropped most of its pictures as its notices
+    said, and didn't crash.
+- **Full frontend suite on the tested code: 1025 checks passed.** The 12 that fail (an SMB address check and 11 comparisons of the GPU's
   4K HDR pictures with the CPU path's on the host's software Vulkan) fail the same way on 1.7.0. The new groups 41,
   42 and 43 (67 checks) cover issue #11, the GPU start guard, a share that stalls or never answers, the end of a file,
   the picture size change, the position kept when the app is killed, the scrolling menus and the rest; on the 1.7.0
-  build, 31 of them fail. Group 44 covers the fonts in the backup (#12), including two checks added after the PS5
-  test: a font put in over FTP with nothing else changed, and Back up now on a fresh installation.
+  build, 31 of them fail. Group 44 covers the fonts in the backup (#12). Two checks were added to it after the PS5
+  test (a font put in over FTP with nothing else changed, and Back up now on a fresh installation); groups 37 and 44
+  then passed in full (53 checks).
 - The harnesses pass (update, logs, installer, GPU start, decoder memory, HDR, theme, credentials), now with the PS5
   runtime layer's own tests. The suite runs with ASan, UBSan and float-cast-overflow, and every run is checked for
   their reports.

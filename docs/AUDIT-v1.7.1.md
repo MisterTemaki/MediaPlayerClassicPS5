@@ -6,8 +6,9 @@ left. It started from issue #11 (a screen showing only the app's logo) and cover
 - Audited code: 1.7.0, commit `493c5da` (the published release).
 - Fixed in: branch `mpc-171`, the commits listed in [Files changed](#7-files-changed).
 - Method: five independent read-only audits of the 1.7.0 tree, each with its own scope and a coverage table. Every
-  finding was then checked against the code before it was fixed. Each fix has a host test, run before and after the
-  change where that was possible, and the whole suite runs again at the end.
+  finding was then checked against the code before it was fixed. Most fixes have a host test (the Check column says
+  which; a few were checked by code review or the build only), run before and after the change where that was
+  possible, and the whole suite runs again at the end.
 - On a PS5: the second test build (`a49b4de`), the release's binary, ran on the maintainer's console. Section 8 says
   what that test covered and what it didn't.
 
@@ -237,9 +238,9 @@ The new tests (groups 41, 42, 43) were run against two other builds with the 1.7
 Source files: `coreorbis/main-boot.cpp`, `coreorbis/include-orbis/OrbisPaths.h`, `coreorbis/orbis-shims/orbis_paths.cpp`,
 `ProsperoVideo.cpp`, `ProsperoUpdate.cpp`, `ProsperoHome.cpp`; `player/mpc_app.cpp`, `mpc_dialogs.cpp`, `mpc_smb.cpp`,
 `mpc_smb.h`, `mpc_player.cpp`, `mpc_vdec.cpp`, `mpc_menu.cpp`, `mpc_font.cpp`, `mpc_settings.cpp`, `mpc_settings.h`,
-`mpc_console.cpp`, `mpc_i18n.cpp`, `mpc_gpu.cpp`; `coreorbis/orbis-shims/ProsperoVideo.h`; `ps5-slang-gpu/src/gpu.cpp` and `VENDOR.txt` (patch in
+`mpc_console.cpp`, `mpc_i18n.cpp`, `mpc_gpu.cpp`, `mpc_backup.cpp`, `mpc_backup.h` (#12); `coreorbis/orbis-shims/ProsperoVideo.h`; `ps5-slang-gpu/src/gpu.cpp` and `VENDOR.txt` (patch in
 [patches/gpu-audit-171.diff](patches/gpu-audit-171.diff)); `Makefile`, `app/sce_sys/param.json`.
-Tests: `tests/run-tests.sh` (groups 41, 42, 43, and 16, 32, 34), `tests/smb_stall.py` (new),
+Tests: `tests/run-tests.sh` (groups 41, 42, 43, 44, and 16, 32, 34, 36), `tests/smb_stall.py` (new),
 `tests/gpu_startup_test.cpp`.
 
 ## 8. Checks run
@@ -272,20 +273,27 @@ again on the second, `a49b4de`, with issue #12's change and its group 44: 1025 p
   two photos of the OSD statistics, `boot.log`, `boot.prev.log`, `installer.log` and `gpu-attempts`):
   - The installer wrote `/data/homebrew/PPSA99015`, which ShadowMount+ mounts as `/system_ex/app/PPSA99015`. Its
     helper served both starts.
-  - Both starts used the GPU, and `gpu-attempts` read `attempts 0, works 1` (A1). For each film, the in-place start
-    guard was cleared at the first picture taken without a copy.
+  - Both starts used the GPU, and `gpu-attempts` read `attempts 0, works 1` (consistent with A1; the failure path
+    wasn't exercised). In each start, the in-place start guard was cleared at the first film's first picture read in
+    place.
   - The Experimental preset: a 4K HEVC HDR10 film 1.3 + 1.4 + 2.5 + 0.1 = 5.3 ms (1.7.0: 5.2), a 1920×800 H.264 film
-    0.3 + 0.5 + 0.5 + 0.2 = 1.5 ms (1.7.0: 1.5). Every 600-picture pacing window had 0 dropped, and the HDR10 output
-    went on and off with the film.
+    0.3 + 0.5 + 0.5 + 0.2 = 1.5 ms (1.7.0: 1.5). Every 600-picture pacing window of the three films on the console's
+    decoder had 0 dropped, and the HDR10 output went on and off with the film. The HDR10 film's pictures were read in
+    place except 6 of 786 (copied).
   - Issue #11: the first start ended in full screen and was closed from the home screen; the second start logged no
-    full screen.
+    full screen. This sequence doesn't tell 1.7.0 from 1.7.1: 1.7.0 wrote `FullScreen=` only when it saved, and
+    nothing was saved while in full screen.
   - B3: a 47.8 s file was played to 47.8 s.
-  - C4 / R11: the underrun count stayed the same through more than a minute of steady play, with no picture dropped.
-  - An 8K HEVC HDR10 file at 150 Mb/s took the CPU path with the fast-decoding steps and the notices, used 1139 of
-    1474 MiB of direct memory, and didn't crash. The app then exited cleanly.
+  - C4 / R11: the underrun count stayed the same through a minute of steady play on each of two films, with no
+    picture dropped.
+  - An 8K HEVC HDR10 file at 150 Mb/s took the CPU path with the fast-decoding steps and the notices (planning about
+    1139 of the 1474 MiB of direct memory free), dropped most of its pictures, and didn't crash. The app then exited
+    cleanly.
 - **Not run:**
-  - On a PS5: the Minimal preset's hint; Launch files in fullscreen; music without a cover; SMB; a film closed from
-    the home screen and opened again; the scrolling menus; the fonts in the backup.
+  - On a PS5: issue #11's start after a save made in full screen; the Minimal preset's hint; Launch files in
+    fullscreen; music without a cover; SMB; a film closed from the home screen and opened again; the scrolling menus;
+    the fonts in the backup; the in-app update from 1.7.0 (the test used the complete installer); the 20 s GPU start
+    watch and start-pending; the Games text on Options > Miscellaneous.
   - The PS5-only DNS fallback (E4) on a console.
   - TSan.
 
@@ -308,8 +316,8 @@ and none was changed except A11 (a fsync, harmless either way).
 - **DNS (E1).** Names the system's resolver can't find go through the console's resolver, one at a time (up to 5 s,
   2 retries each). No SMB lookup runs on the UI thread now, but closing a share's listing waits for a lookup in
   progress.
-- **SMB on the UI thread, bounded.** File > Load Subtitle from a share (10 s at most) and a `.sup` / VobSub file from
-  a share (each request up to 15 s).
+- **SMB on the UI thread, bounded.** File > Load Subtitle from a share: a text subtitle 10 s at most, a `.sup` 20 s
+  at most (a VobSub pair from a share isn't read: it is to be copied to the console).
 - **Host fidelity.** The host suite runs the real code with simulated PS5 calls and software Vulkan: the console's
   driver, its decoder and its resolver are stand-ins. A6 and D15 are test gaps.
 - **Seen in the console test, left as in 1.7.0** (statistics and wording only; playback isn't affected):
@@ -319,7 +327,7 @@ and none was changed except A11 (a fsync, harmless either way).
   - The decode time's average takes in the drain at a file's end (32.2 ms shown after a 4K HDR10 clip ended; 0.8 ms
     while it played).
   - The console decoder's frame_format 0 with 1-byte (NV12) and 2-byte (10-bit) samples is still logged as "not on
-    the confirmed list", though both were shown right.
+    the confirmed list", though both pictures look right in the tester's photos.
 - Every finding marked Open above.
 
 ## 11. Instructions
