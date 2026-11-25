@@ -4005,6 +4005,32 @@ mkdir -p "$T/root/fonts" && cp assets/fonts/Roboto-Regular.ttf "$T/root/fonts/My
 rc=$(MPCPS5_HOST_DRIVES=$DRIVES run "$T" "0:0" "$IMPORT;60:key enter;70:key enter;90:quit" "")
 expect "[ $rc = 0 ] && log $T '\[backup\] imported' && log $T 'fonts: 0 copied back from $BKF, 1 there already' && cmp -s assets/fonts/Roboto-Regular.ttf $T/root/fonts/MyFont.ttf" "... a font of that name already in the fonts folder is kept as it is (review I5)"
 nosan "$T"
+# (after test2's PS5 run) the user's way: a font put in the fonts folder over FTP, nothing else changed, the app opened
+# and closed from the home screen (killed, no exit): the start's own save backs it up
+D2=$WORK/t44e-drives
+rm -rf "$D2" && mkdir -p "$D2/u0"
+BKF2=$D2/u0/mpcps5/backup/fonts
+T=$(newroot t44e)
+printf '[Settings]\nBackupDrive=%s\n' "$D2/u0" >"$T/root/mpc-hc.ini"
+rc=$(MPCPS5_HOST_DRIVES=$D2/u0 run "$T" "0:0" "20:quit" "")
+mkdir -p "$T/root/fonts" && cp assets/fonts/Selawik-Regular.ttf "$T/root/fonts/Added.ttf"
+MPCPS5_HOST_DRIVES=$D2/u0 MPCPS5_HOST_OFFLINE=1 MPCPS5_HOST_REALTIME=1 MPCPS5_PS5_ROOT=$T/root MPCPS5_PS5_HOMEBREW=$T/homebrew \
+	MPCPS5_HOST_DUMP_DIR=$T/dump MPCPS5_HOST_DUMP= MPCPS5_HOST_PAD=0:0 ASAN_OPTIONS=detect_leaks=0 "$BIN" >"$T/out.txt" 2>&1 &
+APP=$!
+# (killed once the copy is logged, at most 30 s: not at a fixed time)
+for i in $(seq 1 300); do [ -f "$BKF2/Added.ttf" ] && log "$T" 'fonts: 1 copied to' && break; sleep 0.1; done
+{ kill -9 $APP; wait $APP; } 2>/dev/null
+cat "$T/out.txt" >>"$T/out-all.txt" 2>/dev/null
+expect "[ $rc = 0 ] && cmp -s $T/root/fonts/Added.ttf $BKF2/Added.ttf && [ ! -e $BKF2/Added.ttf.part ] && log $T 'fonts: 1 copied to $BKF2'" "a font put in over FTP, nothing else changed, the app then closed from the home screen (killed): backed up at the start"
+nosan "$T"
+# Back up now, as the PS5 test does it: a fresh installation, the drive chosen on the page, Back up now: the settings
+# and the fonts folder's font on the drive, and said
+rm -rf "$D2/u0/mpcps5"
+T=$(newroot t44f)
+mkdir -p "$T/root/fonts" && cp assets/fonts/Selawik-Bold.ttf "$T/root/fonts/Chosen-Bold.ttf"
+rc=$(MPCPS5_HOST_DRIVES=$D2/u0 run "$T" "0:0" "10:cmd options$TO_BACKUP;44:key r1;48:key right;52:key r1;56:key enter;70:key enter;80:key escape;90:quit" "")
+expect "[ $rc = 0 ] && log $T '\[ui\] message: The settings are backed up in $D2/u0/mpcps5/backup/mpc-hc.ini' && cmp -s $T/root/mpc-hc.ini $D2/u0/mpcps5/backup/mpc-hc.ini && cmp -s $T/root/fonts/Chosen-Bold.ttf $BKF2/Chosen-Bold.ttf" "Back up now on a fresh installation (the drive chosen on the page): the settings and the font on the drive, and said"
+nosan "$T"
 # c: Options > Miscellaneous says what Games brings
 T=$(newroot t44d)
 rc=$(MPCPS5_HOST_DRAWN=$T/drawn.txt run "$T" "0:0" "10:cmd options$TO_MISC;60:key escape;80:quit" "50")
