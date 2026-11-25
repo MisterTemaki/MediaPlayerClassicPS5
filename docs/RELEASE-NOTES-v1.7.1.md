@@ -123,6 +123,8 @@ open far enough to reach Options, close it and change the line `debug_logs=0` to
 - **On a PS5** (firmware 13.60, a 4K TV at 59.94 Hz, ShadowMount+; the second test build, the same binary as this
   release):
   - The complete installer installed 1.7.1, and its helper served every start.
+  - Issue #11: a film in full screen (Triangle), then File > Exit (which saves the settings in full screen), then
+    the app opened again: it started in its window (1.7.0 saves full screen there and starts with the logo alone).
   - Every start used the GPU, and each one counted as working after its first frames.
   - The GPU read the console decoder's pictures in place (H.264 1080p and 4K, and 4K HEVC HDR10 with native HDR10
     output). The only exception was 6 of 786 pictures of the HDR10 film, which the decoder held back and which were

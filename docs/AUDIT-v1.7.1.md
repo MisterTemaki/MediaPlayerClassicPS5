@@ -282,7 +282,10 @@ again on the second, `a49b4de`, with issue #12's change and its group 44: 1025 p
     place except 6 of 786 (copied).
   - Issue #11: the first start ended in full screen and was closed from the home screen; the second start logged no
     full screen. This sequence doesn't tell 1.7.0 from 1.7.1: 1.7.0 wrote `FullScreen=` only when it saved, and
-    nothing was saved while in full screen.
+    nothing was saved while in full screen. So the tester ran the reporter's case afterwards: a film in full screen
+    (Triangle), then OPTIONS > File > Exit (a save in full screen), then the app opened again. It started in its
+    window (1.7.0 saves full screen there and starts with the logo alone: group 41's fail-before run, and the
+    reporter's screenshot).
   - B3: a 47.8 s file was played to 47.8 s.
   - C4 / R11: the underrun count stayed the same through a minute of steady play on each of two films, with no
     picture dropped.
@@ -290,7 +293,7 @@ again on the second, `a49b4de`, with issue #12's change and its group 44: 1025 p
     1139 of the 1474 MiB of direct memory free), dropped most of its pictures, and didn't crash. The app then exited
     cleanly.
 - **Not run:**
-  - On a PS5: issue #11's start after a save made in full screen; the Minimal preset's hint; Launch files in
+  - On a PS5: the Minimal preset's hint; Launch files in
     fullscreen; music without a cover; SMB; a film closed from the home screen and opened again; the scrolling menus;
     the fonts in the backup; the in-app update from 1.7.0 (the test used the complete installer); the 20 s GPU start
     watch and start-pending; the Games text on Options > Miscellaneous.

@@ -26,6 +26,7 @@ fullscreen", tick it again.** See the
 [1.7.1 release notes](docs/RELEASE-NOTES-v1.7.1.md) and the [audit report](docs/AUDIT-v1.7.1.md).
 
 > **Status (1.7.1):** run on a PS5 before release by the author, using the release's binary:
+> - issue #11: after full screen and File > Exit, the app started again in its window;
 > - the GPU start;
 > - 1080p, 4K and 4K HDR10 films with the console's decoder, the Experimental preset at 1.7.0's cost;
 > - a file played to its end;
