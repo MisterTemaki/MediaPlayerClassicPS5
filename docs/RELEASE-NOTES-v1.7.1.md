@@ -111,12 +111,32 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
 
 ### Validation and limits
 
-- **On a PS5:** VALIDATION-PS5
+- **On a PS5** (firmware 13.60, a 4K TV at 59.94 Hz, ShadowMount+; the second test build, the same binary as this
+  release):
+  - The complete installer installed 1.7.1, and its helper served every start.
+  - Every start used the GPU, and each one counted as working after its first frames.
+  - The console's decoder gave its pictures to the GPU without a copy for each film: H.264 1080p and 4K, and 4K HEVC
+    HDR10 with native HDR10 output.
+  - The Experimental preset cost what it did on 1.7.0: 5.3 ms per frame for a 4K HDR10 film, 1.5 ms for a
+    1920×800 one. No picture was dropped.
+  - A session that ended in full screen was closed from the home screen; the log shows the next start in its
+    window (#11).
+  - A file played to its last second, and the sound never ran short in steady play.
+  - An 8K HEVC film, beyond the console's decoder, played on the CPU with its notices and without a crash.
+- **Not run on a PS5** (host tests only):
+  - the Minimal preset's "OPTIONS: the menu";
+  - Launch files in fullscreen;
+  - music without a cover;
+  - network shares;
+  - a film closed from the home screen and opened again near its place;
+  - the scrolling menus;
+  - the fonts in the backup (#12).
 - **Full frontend suite: 1025 checks passed.** The 12 that fail (an SMB address check and 11 comparisons of the GPU's
   4K HDR pictures with the CPU path's on the host's software Vulkan) fail the same way on 1.7.0. The new groups 41,
   42 and 43 (67 checks) cover issue #11, the GPU start guard, a share that stalls or never answers, the end of a file,
   the picture size change, the position kept when the app is killed, the scrolling menus and the rest; on the 1.7.0
-  build, 31 of them fail. Group 44 covers the fonts in the backup (#12).
+  build, 31 of them fail. Group 44 covers the fonts in the backup (#12), including two checks added after the PS5
+  test: a font put in over FTP with nothing else changed, and Back up now on a fresh installation.
 - The harnesses pass (update, logs, installer, GPU start, decoder memory, HDR, theme, credentials), now with the PS5
   runtime layer's own tests. The suite runs with ASan, UBSan and float-cast-overflow, and every run is checked for
   their reports.

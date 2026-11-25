@@ -8,8 +8,8 @@ left. It started from issue #11 (a screen showing only the app's logo) and cover
 - Method: five independent read-only audits of the 1.7.0 tree, each with its own scope and a coverage table. Every
   finding was then checked against the code before it was fixed. Each fix has a host test, run before and after the
   change where that was possible, and the whole suite runs again at the end.
-- What this is not: nothing here ran on a PS5 yet. The console test of 1.7.1 comes before the release, and its
-  results go into the release notes.
+- On a PS5: the second test build (`a49b4de`), the release's binary, ran on the maintainer's console. Section 8 says
+  what that test covered and what it didn't.
 
 ## 1. Inventory and architecture
 
@@ -231,6 +231,8 @@ The new tests (groups 41, 42, 43) were run against two other builds with the 1.7
 | `b7ebffe` | The review's R1-R9 |
 | `084d6f0` | The GPU start guard hands over to the in-place guard |
 | `11177fb`, `1e76553`, `0ff04d1` | The review's R10; group 34 k; group 42 h's description |
+| `c5b507b`, `3c0ddae`, `a49b4de` | Issue #12: the fonts folder in the backup, what Games brings; its review; group 44 |
+| `fa1510f` | Group 44: the fonts' backup tested the way a user makes it (no code change) |
 
 Source files: `coreorbis/main-boot.cpp`, `coreorbis/include-orbis/OrbisPaths.h`, `coreorbis/orbis-shims/orbis_paths.cpp`,
 `ProsperoVideo.cpp`, `ProsperoUpdate.cpp`, `ProsperoHome.cpp`; `player/mpc_app.cpp`, `mpc_dialogs.cpp`, `mpc_smb.cpp`,
@@ -256,13 +258,36 @@ again on the second, `a49b4de`, with issue #12's change and its group 44: 1025 p
 - **Vendor check:** `ps5-slang-gpu` matches its VENDOR.txt (420 files).
 - **PS5 build** (`make ps5`, the native GPU build and the complete installer): the app profile (content version
   01.071.000), imports, syscalls, the runtime's link check and the RADV link (338 Vulkan entry points) pass.
-  `MediaPlayerClassicPS5.elf`: 21,485,712 bytes, SHA-256 `936525c173034f0ca83e446effc4e040db136934ec38c12e429aaa3a33b7db57`.
+  `MediaPlayerClassicPS5.elf`: 21,485,712 bytes, SHA-256 `936525c173034f0ca83e446effc4e040db136934ec38c12e429aaa3a33b7db57`
+  (`0ff04d1`); on `a49b4de`, the release's binary, SHA-256 `1763401f7d4c5adaeb1e192e21d61e55bcc53b70da6b3cd88d5731c7459503d3`
+  (the same size).
+- **Group 44 after the PS5 test** (`fa1510f`, tests only): two checks more, a font put in over FTP with nothing
+  else changed, then the app killed, and Back up now on a fresh installation. Groups 37 and 44 on the release's code:
+  53 passed, 0 failed. The two new checks fail on the 1.7.0 build.
 - **On screen** (host screenshots): the file browser at a share that doesn't answer ("Reading the network
   folder..."), the Minimal preset's "OPTIONS: the menu", the save failure message, a menu of 60 favorites scrolled to
   its last item.
 - **One independent review** of the changes (4.7).
-- **Not run:** anything on a PS5 (the console test comes before the release); the PS5-only DNS fallback (E4) on a
-  console; TSan.
+- **On a PS5** (the maintainer's console, firmware 13.60, a 4K TV at 59.94 Hz, ShadowMount+; the release's binary;
+  two photos of the OSD statistics, `boot.log`, `boot.prev.log`, `installer.log` and `gpu-attempts`):
+  - The installer wrote `/data/homebrew/PPSA99015`, which ShadowMount+ mounts as `/system_ex/app/PPSA99015`. Its
+    helper served both starts.
+  - Both starts used the GPU, and `gpu-attempts` read `attempts 0, works 1` (A1). For each film, the in-place start
+    guard was cleared at the first picture taken without a copy.
+  - The Experimental preset: a 4K HEVC HDR10 film 1.3 + 1.4 + 2.5 + 0.1 = 5.3 ms (1.7.0: 5.2), a 1920×800 H.264 film
+    0.3 + 0.5 + 0.5 + 0.2 = 1.5 ms (1.7.0: 1.5). Every 600-picture pacing window had 0 dropped, and the HDR10 output
+    went on and off with the film.
+  - Issue #11: the first start ended in full screen and was closed from the home screen; the second start logged no
+    full screen.
+  - B3: a 47.8 s file was played to 47.8 s.
+  - C4 / R11: the underrun count stayed the same through more than a minute of steady play, with no picture dropped.
+  - An 8K HEVC HDR10 file at 150 Mb/s took the CPU path with the fast-decoding steps and the notices, used 1139 of
+    1474 MiB of direct memory, and didn't crash. The app then exited cleanly.
+- **Not run:**
+  - On a PS5: the Minimal preset's hint; Launch files in fullscreen; music without a cover; SMB; a film closed from
+    the home screen and opened again; the scrolling menus; the fonts in the backup.
+  - The PS5-only DNS fallback (E4) on a console.
+  - TSan.
 
 ## 9. Findings not confirmed
 
@@ -287,6 +312,14 @@ and none was changed except A11 (a fsync, harmless either way).
   a share (each request up to 15 s).
 - **Host fidelity.** The host suite runs the real code with simulated PS5 calls and software Vulkan: the console's
   driver, its decoder and its resolver are stand-ins. A6 and D15 are test gaps.
+- **Seen in the console test, left as in 1.7.0** (statistics and wording only; playback isn't affected):
+  - The underrun count also counts the silence of a file without sound (the app's count reached 6189 after a 30 s 8K
+    clip without an audio track) and the grains before a file's first sound.
+  - "The sound plays on" is said for a video without sound.
+  - The decode time's average takes in the drain at a file's end (32.2 ms shown after a 4K HDR10 clip ended; 0.8 ms
+    while it played).
+  - The console decoder's frame_format 0 with 1-byte (NV12) and 2-byte (10-bit) samples is still logged as "not on
+    the confirmed list", though both were shown right.
 - Every finding marked Open above.
 
 ## 11. Instructions

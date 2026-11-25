@@ -25,6 +25,16 @@ under Games brings: the PS5's screenshots, video clips and play time (#12). **If
 fullscreen", tick it again.** See the
 [1.7.1 release notes](docs/RELEASE-NOTES-v1.7.1.md) and the [audit report](docs/AUDIT-v1.7.1.md).
 
+> **Status (1.7.1):** run on a PS5 before release by the author, using the release's binary:
+> - the GPU start;
+> - 1080p, 4K and 4K HDR10 films with the console's decoder, the Experimental preset at 1.7.0's cost;
+> - the start in the window after a session in full screen;
+> - a file played to its end;
+> - an 8K film on the CPU.
+>
+> The Minimal preset's hint, network shares, the position after a close from the home screen, the scrolling menus and
+> the fonts in the backup were tested on the host only.
+
 **1.7.0: video post-processing on the GPU, suggested by Cris Valente.** **View > Options > Output > Shaders** (or
 **Play > Shaders**) runs the video through compute passes before it reaches the screen: **Performance** (FSR 1
 upscaling and sharpening), **Quality** (debanding and light deblocking, then FSR 1), **Experimental** (Quality and
