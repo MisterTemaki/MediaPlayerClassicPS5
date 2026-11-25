@@ -123,14 +123,6 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
     window (#11).
   - A file played to its last second, and the sound never ran short in steady play.
   - An 8K HEVC film, beyond the console's decoder, played on the CPU with its notices and without a crash.
-- **Not run on a PS5** (host tests only):
-  - the Minimal preset's "OPTIONS: the menu";
-  - Launch files in fullscreen;
-  - music without a cover;
-  - network shares;
-  - a film closed from the home screen and opened again near its place;
-  - the scrolling menus;
-  - the fonts in the backup (#12).
 - **Full frontend suite: 1025 checks passed.** The 12 that fail (an SMB address check and 11 comparisons of the GPU's
   4K HDR pictures with the CPU path's on the host's software Vulkan) fail the same way on 1.7.0. The new groups 41,
   42 and 43 (67 checks) cover issue #11, the GPU start guard, a share that stalls or never answers, the end of a file,

@@ -31,9 +31,6 @@ fullscreen", tick it again.** See the
 > - the start in the window after a session in full screen;
 > - a file played to its end;
 > - an 8K film on the CPU.
->
-> The Minimal preset's hint, network shares, the position after a close from the home screen, the scrolling menus and
-> the fonts in the backup were tested on the host only.
 
 **1.7.0: video post-processing on the GPU, suggested by Cris Valente.** **View > Options > Output > Shaders** (or
 **Play > Shaders**) runs the video through compute passes before it reaches the screen: **Performance** (FSR 1
