@@ -104,6 +104,14 @@ version is **1.7.1**, content version is **01.071.000**, and the title ID remain
   from the home screen. If an older installer ELF is in your autoload, replace it with this one.
 - Settings and media remain in `/data/mpcps5`. Tick "Launch files in fullscreen" again if you used it.
 
+### Reporting a problem
+
+If you find a new problem, please [open an issue](https://github.com/MisterTemaki/MediaPlayerClassicPS5/issues) and
+attach the files in `/data/mpcps5/logs` (`boot.log`, `boot.prev.log`, `installer.log`). Turn on **View > Options >
+Miscellaneous > Debug logs** first, then do again what went wrong, so `boot.log` has the details. If the app doesn't
+open far enough to reach Options, close it and change the line `debug_logs=0` to `debug_logs=1` in
+`/data/mpcps5/mpc-hc.ini` over FTP.
+
 ### Files
 
 - [MediaPlayerClassicPS5-v1.7.1.elf](https://github.com/MisterTemaki/MediaPlayerClassicPS5/releases/download/v1.7.1/MediaPlayerClassicPS5-v1.7.1.elf): complete installer.
